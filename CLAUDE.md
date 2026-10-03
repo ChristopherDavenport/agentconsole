@@ -18,7 +18,11 @@ committed, and live events carry only what is not committed yet.
   - `internal/view`: the reconciler. A pure model: record `Change`s and
     `LiveEvent`s in, what a client renders out. No goroutines, no I/O,
     no terminal.
-- No TUI yet; no ACP backend yet. Both are later steps of the plan.
+  - `internal/tui`: the Bubble Tea model (conversation, turn status,
+    permissions, input) and `Attach`, which feeds the view from the
+    record and live streams and sends each `view.Model` to the program.
+  - `cmd/agentconsole`: the binary, a native agent in process.
+- No tree or record-detail view yet; no ACP backend yet. Later steps.
 
 ## Rules
 
@@ -40,6 +44,15 @@ committed, and live events carry only what is not committed yet.
 - `Change.Session` is valid until the next step of the follow. The view
   copies what it keeps, never the session.
 - The contract grows when a feature needs it, not before.
+
+## The TUI
+
+- The view is fed on goroutines under one lock (`tui.Attach`); the model
+  only ever receives `ModelMsg` values and touches no view state.
+- `Prompt` and `Answer` block: they run in tea.Cmds and end with a
+  `runDoneMsg`.
+- Tests drive `Update` and read `View()` against a real agent with a
+  scripted model; no teatest.
 
 ## Everyday commands
 
