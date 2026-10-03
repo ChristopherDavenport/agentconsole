@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
@@ -285,4 +286,131 @@ func TestContinueFromACallWithoutItsOutputIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want a refusal", err)
 	}
 	r.finish(r.prompt("still works"))
+}
+
+// The host's hooks run around a move: before while the recorder still
+// writes the branch being left, after on the new one, and a failed move
+// gives the host its state back, with the session on the old branch.
+func TestHeadMoveHooksRunAroundTheMove(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	var afterLeaf []string
+	hooks := native.WithHeadMove(
+		func(context.Context) error {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, "before")
+			return nil
+		},
+		func(_ context.Context, s *agentsession.Session) error {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, "after")
+			afterLeaf = append(afterLeaf, s.Leaf())
+			return nil
+		})
+	r := newRig(t, agentturn.Config{Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+		say(nil, nil, "r1"), say(nil, nil, "r2"),
+	}}, ModelName: "scripted"}, hooks)
+	r.finish(r.prompt("one"))
+	r.waitFor("r1", func(m view.Model) bool { return idle(m) && entryOf(m, "r1") != "" })
+	r.finish(r.prompt("two"))
+	m := r.waitFor("r2", func(m view.Model) bool { return idle(m) && entryOf(m, "r2") != "" })
+	r1 := entryOf(m, "r1")
+	r.mu.Lock()
+	r.allowDrop = true
+	r.mu.Unlock()
+	old := r.sess.Leaf()
+
+	if err := r.ctl.ContinueFrom(r.ctx, r1); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if got := strings.Join(calls, ","); got != "before,after" {
+		t.Errorf("hooks = %s, want before then after", got)
+	}
+	if afterLeaf[0] == old {
+		t.Errorf("after saw the old leaf %s, want the new branch's", old)
+	}
+	moved := afterLeaf[0]
+	calls, afterLeaf = nil, nil
+	mu.Unlock()
+
+	// A failure after the move undoes it: the host is told to end its
+	// state at the new branch and to rebuild it on the old.
+	r.be.FailAfterRebase(func() error { return errors.New("injected") })
+	if err := r.ctl.ContinueFrom(r.ctx, old); err == nil {
+		t.Fatal("the move did not fail")
+	}
+	r.be.FailAfterRebase(nil)
+	mu.Lock()
+	defer mu.Unlock()
+	if got := strings.Join(calls, ","); got != "before,before,after" {
+		t.Errorf("hooks around a failed move = %s, want before, then the undo's before and after", got)
+	}
+	if len(afterLeaf) != 1 || afterLeaf[0] != moved {
+		t.Errorf("the undo's after saw the leaf %v, want the head the move started from, %s", afterLeaf, moved)
+	}
+}
+
+// A failing before hook refuses the move and nothing changes.
+func TestHeadMoveBeforeHookRefuses(t *testing.T) {
+	var after int
+	hooks := native.WithHeadMove(
+		func(context.Context) error { return errors.New("no") },
+		func(context.Context, *agentsession.Session) error { after++; return nil })
+	r := newRig(t, agentturn.Config{Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+		say(nil, nil, "r1"), say(nil, nil, "r2"),
+	}}, ModelName: "scripted"}, hooks)
+	r.finish(r.prompt("one"))
+	m := r.waitFor("r1", func(m view.Model) bool { return idle(m) && entryOf(m, "r1") != "" })
+	r.finish(r.prompt("two"))
+	r.waitFor("r2", func(m view.Model) bool { return idle(m) && entryOf(m, "r2") != "" })
+	before := r.sess.Leaf()
+	err := r.ctl.ContinueFrom(r.ctx, entryOf(m, "r1"))
+	if err == nil || !strings.Contains(err.Error(), "no") {
+		t.Fatalf("err = %v", err)
+	}
+	if after != 0 || r.sess.Leaf() != before {
+		t.Errorf("a refused move changed something: after hook %d times, leaf %s, want %s", after, r.sess.Leaf(), before)
+	}
+}
+
+type ctxKey struct{}
+
+// WithRunContext reaches the tool of a run, and WithRelease sees how the
+// last run ended and may change the answers.
+func TestRunContextAndReleaseReachTheRun(t *testing.T) {
+	var seen atomic.Value
+	tool := agenttool.New("act", "acts", func(ctx context.Context, _ struct{}) (string, error) {
+		seen.Store(ctx.Value(ctxKey{}))
+		return "acted", nil
+	})
+	var released *agentturn.RunEnd
+	opts := []native.Option{
+		native.WithRunContext(func(ctx context.Context) context.Context { return context.WithValue(ctx, ctxKey{}, "marked") }),
+		native.WithRelease(func(_ context.Context, end *agentturn.RunEnd, answers []agentturn.Answer) ([]agentturn.Answer, error) {
+			released = end
+			return answers, nil
+		}),
+	}
+	r := newRig(t, agentturn.Config{
+		Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+			callTool("c1", "act", `{}`), say(nil, nil, "done"),
+		}},
+		ModelName: "scripted",
+		Tools:     []agenttool.Tool{tool},
+		BeforeToolCall: func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+			return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "ok?"}, nil
+		},
+	}, opts...)
+	r.finish(r.prompt("go"))
+	r.waitFor("the permission", func(m view.Model) bool { return len(m.Permissions) == 1 })
+	r.finish(r.start(func() error { return r.ctl.Answer(r.ctx, agentturn.Approve("c1")) }))
+	if released == nil || len(released.Pending) != 1 || released.Pending[0].Call.CallID != "c1" {
+		t.Fatalf("release saw the end %+v, want the run's, pending c1", released)
+	}
+	if got := seen.Load(); got != "marked" {
+		t.Errorf("the tool's context carried %v, want the run context's mark", got)
+	}
 }
