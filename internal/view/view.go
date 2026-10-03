@@ -50,6 +50,7 @@ package view
 
 import (
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
@@ -114,6 +115,9 @@ const (
 	CallBlocked
 	// CallDeferred: the call waits for an answer.
 	CallDeferred
+	// CallCutOff: an abort or a failure ended the run with the call
+	// unanswered. It is not a question; the next prompt answers it.
+	CallCutOff
 )
 
 // String names the state.
@@ -129,6 +133,8 @@ func (s CallState) String() string {
 		return "blocked"
 	case CallDeferred:
 		return "deferred"
+	case CallCutOff:
+		return "cut_off"
 	}
 	return "unknown"
 }
@@ -198,6 +204,9 @@ type Model struct {
 	Rows        []Row
 	Turn        Turn
 	Permissions []Permission
+	// CutOff lists the calls the last run left unanswered without asking
+	// anyone: it was aborted or failed. They are shown as cut off.
+	CutOff []Permission
 }
 
 type ovItem struct {
@@ -251,6 +260,7 @@ type View struct {
 	items []*ovItem
 	calls []*ovCall
 	perms []Permission
+	cut   []Permission
 	// liveEnded are the runs whose live end was seen and whose overlay
 	// waits for the record; endSeen the end entries the record has
 	// delivered, capped, since a run the live stream never mentions
@@ -473,6 +483,13 @@ func (v *View) dropCall(callID string) {
 		}
 	}
 	v.perms = perms
+	cut := v.cut[:0]
+	for _, p := range v.cut {
+		if p.CallID != callID {
+			cut = append(cut, p)
+		}
+	}
+	v.cut = cut
 	if len(v.perms) == 0 && v.turn.State == RequiresAction {
 		v.turn.State = Idle
 	}
@@ -513,7 +530,7 @@ func (v *View) Live(ev client.LiveEvent) {
 	case *client.RunStarted:
 		// A run that starts has answered every call that waited, since
 		// the agent refuses it otherwise.
-		v.perms = nil
+		v.perms, v.cut = nil, nil
 		kept := v.calls[:0]
 		for _, c := range v.calls {
 			if c.state != CallDeferred {
@@ -663,15 +680,19 @@ func (v *View) runEnded(e *client.RunEnded) {
 	// what the deferred calls reported one by one, keeping their
 	// questions.
 	old := v.perms
-	v.perms = nil
+	v.perms, v.cut = nil, nil
 	for _, p := range e.Pending {
 		next := Permission{CallID: p.CallID, Name: p.Name, Args: p.Args, Reason: string(p.Reason)}
-		for _, o := range old {
-			if o.CallID == p.CallID {
-				next.Question = o.Question
+		if e.Reason == agentturn.ReasonInputRequired && p.Reason == agentturn.PendingDeferred {
+			for _, o := range old {
+				if o.CallID == p.CallID {
+					next.Question = o.Question
+				}
 			}
+			v.perms = append(v.perms, next)
+		} else {
+			v.cut = append(v.cut, next)
 		}
-		v.perms = append(v.perms, next)
 	}
 	v.turn.RunID, v.turn.Number, v.turn.Attempt = e.RunID, 0, 0
 	v.turn.State = Idle
@@ -726,6 +747,7 @@ func (v *View) Model() Model {
 		m.Rows = append(m.Rows, row)
 	}
 	m.Permissions = append([]Permission(nil), v.perms...)
+	m.CutOff = append([]Permission(nil), v.cut...)
 	return m
 }
 
@@ -760,6 +782,11 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 		case o.parent == fc.CallID:
 			c.Children = append(c.Children, Call{CallID: o.callID, Name: o.name, Args: o.args,
 				State: o.state, Partial: o.partial, Output: o.output})
+		}
+	}
+	for _, p := range v.cut {
+		if p.CallID == fc.CallID && c.State != CallEnded {
+			c.State = CallCutOff
 		}
 	}
 	return c

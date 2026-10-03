@@ -529,3 +529,42 @@ func TestBookmarkLabelDoesNotHideTheTip(t *testing.T) {
 		t.Errorf("the leaf %s is not among the leaves %v", m.Leaf, m.Leaves)
 	}
 }
+
+// Only a deferred call of a run that ended input_required is a question.
+// A call an abort or a failure cut off is shown as cut off.
+func TestCutOffCallsAreNotPermissions(t *testing.T) {
+	l := newLog(t)
+	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.append(itemEntry(call, "resp1"))
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonAborted,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingAborted}}})
+	m := l.v.Model()
+	if m.Turn.State != Idle || len(m.Permissions) != 0 {
+		t.Fatalf("turn %v with permissions %+v, want idle and none", m.Turn.State, m.Permissions)
+	}
+	if len(m.CutOff) != 1 || m.CutOff[0].CallID != "c1" || m.CutOff[0].Reason != string(agentturn.PendingAborted) {
+		t.Fatalf("cut off = %+v", m.CutOff)
+	}
+	if m.Rows[0].Call.State != CallCutOff {
+		t.Errorf("call state = %v, want cut off", m.Rows[0].Call.State)
+	}
+	// The next run answers or abandons them: nothing is cut off then.
+	l.v.Live(&client.RunStarted{RunID: "run2"})
+	if m := l.v.Model(); len(m.CutOff) != 0 || m.Rows[0].Call.State == CallCutOff {
+		t.Errorf("cut off after the next run started: %+v", m.CutOff)
+	}
+}
+
+func TestOnlyDeferredCallsOfAnInputRequiredRunAreQuestions(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []client.Pending{
+		{CallID: "c1", Name: "rm", Reason: agentturn.PendingDeferred},
+		{CallID: "c2", Name: "ls", Reason: agentturn.PendingAborted},
+	}})
+	m := l.v.Model()
+	if len(m.Permissions) != 1 || m.Permissions[0].CallID != "c1" || len(m.CutOff) != 1 || m.CutOff[0].CallID != "c2" || m.Turn.State != RequiresAction {
+		t.Fatalf("permissions %+v, cut off %+v, turn %v", m.Permissions, m.CutOff, m.Turn.State)
+	}
+}
