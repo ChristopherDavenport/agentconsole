@@ -29,6 +29,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/client"
+	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
 	"github.com/ChristopherDavenport/agentconsole/internal/view"
 )
 
@@ -73,6 +74,27 @@ type Model struct {
 	decided map[string]agentturn.Answer
 	// refusing is set while the reason for a refusal is typed.
 	refusing bool
+
+	rec  client.Record
+	insp *inspect.Inspector
+
+	// screen is the conversation or the tree; pane the detail under the
+	// conversation; frozen a read-only look at another line, nil when the
+	// live view is shown (see nav.go).
+	screen screen
+	pane   pane
+	frozen *frozen
+	// curEntry is the row the cursor rests on, by its entry; reveal asks
+	// the next layout to scroll it into view.
+	curEntry string
+	reveal   bool
+	panes    paneState
+	treeCur  int
+	// drawn is the screen the viewport's content was last laid out for.
+	drawn screen
+	// note is the last thing a client action did, shown on the status line
+	// until the next one.
+	note string
 }
 
 var _ tea.Model = (*Model)(nil)
@@ -88,6 +110,8 @@ func New(ctx context.Context, be client.Backend) *Model {
 		ctx:      ctx,
 		ctl:      be.Control(),
 		verified: be.Record().Verified(),
+		rec:      be.Record(),
+		insp:     inspect.New(be.Record()),
 		vp:       viewport.New(0, 0),
 		in:       in,
 		decided:  map[string]agentturn.Answer{},
@@ -102,7 +126,7 @@ func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Runn
 // pending is the permission being asked about: the first of the ones out
 // that has no answer yet.
 func (m *Model) pending() (view.Permission, int, bool) {
-	if m.running() {
+	if m.running() || m.frozen != nil || m.screen != screenConversation {
 		return view.Permission{}, 0, false
 	}
 	for i, p := range m.view.Permissions {
@@ -124,8 +148,41 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ModelMsg:
 		m.view = msg.Model
 		m.syncPermissions()
+		m.keepCursor()
 		m.relayout()
+		return m, m.wantPane()
+	case paneMsg:
+		if msg.seq == m.panes.seq && msg.key == m.panes.want {
+			m.panes.have, m.panes.lines, m.panes.err = msg.key, msg.lines, ""
+			if msg.err != nil {
+				m.panes.err = msg.err.Error()
+			}
+			m.relayout()
+		}
 		return m, nil
+	case openMsg:
+		if msg.err != nil {
+			m.err = msg.err.Error()
+		} else {
+			m.frozen, m.err, m.curEntry = msg.frozen, "", msg.frozen.selected
+			m.panes = paneState{}
+			m.reveal = m.curEntry != ""
+		}
+		m.relayout()
+		return m, m.wantPane()
+	case continueMsg:
+		m.busy = false
+		m.err = ""
+		if msg.err != nil {
+			m.err = "continue from here: " + msg.err.Error()
+		} else {
+			m.frozen, m.curEntry, m.note = nil, "", ""
+			m.noteHead(msg.entry)
+			m.screen = screenConversation
+		}
+		m.in.Focus()
+		m.relayout()
+		return m, m.wantPane()
 	case FeedErrMsg:
 		m.feedErr = msg.Stream + " stream: " + msg.Err.Error()
 		m.relayout()
@@ -216,6 +273,19 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m.interrupt()
+	case "ctrl+t":
+		if m.screen == screenTree {
+			m.screen = screenConversation
+		} else {
+			m.screen, m.treeCur = screenTree, 0
+			for i, it := range m.treeItems() {
+				if it.branch && it.leaf == m.view.Leaf {
+					m.treeCur = i
+				}
+			}
+		}
+		m.relayout()
+		return m, nil
 	case "pgup":
 		m.vp.PageUp()
 		return m, nil
@@ -240,6 +310,38 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+o":
 		m.o.output = !m.o.output
+		m.relayout()
+		return m, nil
+	}
+	if m.screen == screenTree {
+		return m.treeKey(msg)
+	}
+	switch msg.String() {
+	case "tab":
+		return m, m.cyclePane()
+	case "ctrl+p":
+		return m, m.moveCursor(-1)
+	case "ctrl+n":
+		return m, m.moveCursor(1)
+	case "ctrl+b":
+		return m, m.continueFrom(m.curEntry)
+	}
+	if m.frozen != nil {
+		switch msg.String() {
+		case "esc":
+			m.frozen, m.curEntry, m.panes = nil, "", paneState{}
+			m.relayout()
+			return m, m.wantPane()
+		case "c":
+			if m.curEntry != "" {
+				return m, m.continueFrom(m.curEntry)
+			}
+			return m, m.continueFrom(m.frozen.model.Leaf)
+		}
+		return m, nil // read only: the input is off
+	}
+	if msg.String() == "esc" && (m.curEntry != "" || m.pane != paneNone) {
+		m.curEntry, m.pane, m.panes = "", paneNone, paneState{}
 		m.relayout()
 		return m, nil
 	}
@@ -350,25 +452,54 @@ func (m *Model) relayout() {
 	if !m.ready {
 		return
 	}
-	atBottom := m.vp.AtBottom()
+	atBottom := m.vp.AtBottom() || m.drawn != m.screen
 	panel := m.panel()
+	pane := m.paneLines()
 	used := 2 // status line and input
 	if panel != "" {
 		used += lipgloss.Height(panel)
+	}
+	if m.screen == screenConversation {
+		used += len(pane)
 	}
 	if m.err != "" {
 		used++
 	}
 	m.vp.Width = m.width
 	m.vp.Height = max(m.height-used, 1)
-	m.vp.SetContent(renderRows(m.view, m.o, m.width))
-	if atBottom {
+	if m.screen == screenTree {
+		content, line := m.renderTree()
+		m.vp.SetContent(content)
+		m.reveal = false
+		m.showLine(line, 1)
+		m.drawn = m.screen
+		return
+	}
+	content, line, height := renderRows(m.shown(), m.o, m.width, m.curEntry)
+	m.vp.SetContent(content)
+	switch {
+	case m.reveal && m.curEntry != "":
+		m.showLine(line, height)
+	case atBottom:
 		m.vp.GotoBottom()
 	}
+	m.reveal = false
+	m.drawn = m.screen
 	if _, _, ok := m.pending(); ok && !m.refusing {
 		m.in.Blur()
 	} else {
 		m.in.Focus()
+	}
+}
+
+// showLine scrolls the viewport so lines line..line+height-1 are visible,
+// as far as the viewport is tall enough to show them.
+func (m *Model) showLine(line, height int) {
+	switch {
+	case line < m.vp.YOffset:
+		m.vp.SetYOffset(line)
+	case line+height > m.vp.YOffset+m.vp.Height:
+		m.vp.SetYOffset(min(line, line+height-m.vp.Height))
 	}
 }
 
@@ -409,9 +540,16 @@ func (m *Model) View() string {
 	if !m.ready {
 		return "starting..."
 	}
-	parts := []string{
-		statusStyle.Render(padTo(feedNote(m.feedErr)+statusText(m.view, m.busy, m.aborting, m.verified), m.width)),
-		m.vp.View(),
+	status := feedNote(m.feedErr) + statusText(m.view, m.busy, m.aborting, m.verified)
+	if m.note != "" {
+		status += " | " + m.note
+	}
+	if b := m.frozenBanner(); b != "" {
+		status = b + " | " + status
+	}
+	parts := []string{statusStyle.Render(padTo(status, m.width)), m.vp.View()}
+	if m.screen == screenConversation {
+		parts = append(parts, m.paneLines()...)
 	}
 	if p := m.panel(); p != "" {
 		parts = append(parts, p)
@@ -419,7 +557,14 @@ func (m *Model) View() string {
 	if m.err != "" {
 		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
 	}
-	parts = append(parts, m.in.View())
+	switch {
+	case m.screen == screenTree:
+		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))
+	case m.frozen != nil:
+		parts = append(parts, dimStyle.Render(truncate("read only: esc back to the live session, c continue from here, tab detail", m.width)))
+	default:
+		parts = append(parts, m.in.View())
+	}
 	return strings.Join(parts, "\n")
 }
 

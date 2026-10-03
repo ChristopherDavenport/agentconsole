@@ -82,7 +82,7 @@ func (s pScript) String() string {
 	out := fmt.Sprintf("  lateCfg=%v\n", s.LateCfg)
 	for i, e := range s.Elems {
 		switch e.Kind {
-		case "rewind", "headrec", "bookmark":
+		case "rewind", "headrec", "bookmark", "link", "compact":
 			out += fmt.Sprintf("  %d: %s %d\n", i, e.Kind, e.To)
 			continue
 		}
@@ -128,6 +128,7 @@ type sim struct {
 	ws       *agentsession.Session
 	err      error
 	n        int // uid counter
+	folds    int
 	model    string
 	pendCfg  string
 	recModel string
@@ -271,6 +272,10 @@ func (tl *timeline) play(script pScript) error {
 			s.rewind(el.To, true)
 		case "bookmark":
 			s.bookmark(el.To)
+		case "link":
+			s.link(el.To)
+		case "compact":
+			s.compact(el.To)
 		default:
 			runs++
 			s.run(el, runs)
@@ -317,6 +322,32 @@ func (s *sim) bookmark(to int) {
 		return
 	}
 	s.write(agentsession.NewLabelEntry(path[to%len(path)].Base().ID, "bookmark"))
+}
+
+// link records a subsession at the leaf.
+func (s *sim) link(to int) {
+	s.write(agentsession.NewSubsessionLink(fmt.Sprintf("child_%d", to), fmt.Sprintf("call_link_%d", to)))
+}
+
+// compact folds the line before one of its items into a summary.
+func (s *sim) compact(to int) {
+	var items []string
+	for _, e := range s.ws.Path(s.ws.Leaf()) {
+		if it, ok := e.(*agentsession.ItemEntry); ok && it.IsVisible() {
+			items = append(items, it.ID)
+		}
+	}
+	if len(items) == 0 {
+		return
+	}
+	s.folds++
+	summary := openresponses.UserText(fmt.Sprintf("fold_%d the summary", s.folds))
+	summary.Role = openresponses.RoleAssistant
+	c := &agentsession.CompactionEntry{FirstKept: items[to%len(items)], Summary: summary}
+	if to%3 == 0 {
+		c.Pinned = openresponses.Items{openresponses.UserText(fmt.Sprintf("pin_%d", s.folds))}
+	}
+	s.write(c)
 }
 
 func (s *sim) run(el pElem, n int) {

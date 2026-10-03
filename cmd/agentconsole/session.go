@@ -48,6 +48,24 @@ func defaultStoreRoot() string {
 	return filepath.Join(".agentconsole", "sessions")
 }
 
+// harnessName and harnessVersion name this client in the header of a
+// session it starts.
+const (
+	harnessName    = "agentconsole"
+	harnessVersion = "dev"
+)
+
+// newHeader is the header of a session the client starts: the writer and
+// where it runs. session.WithHarness alone names the writer only in the
+// headers of child sessions, so the root's has to say it here.
+func newHeader() agentsession.Header {
+	h := agentsession.Header{Harness: &agentsession.Harness{Name: harnessName, Version: harnessVersion}}
+	if wd, err := os.Getwd(); err == nil {
+		h.CWD = wd
+	}
+	return h
+}
+
 // refPrefix marks a session given by the name of a ref.
 const refPrefix = "ref:"
 
@@ -80,13 +98,13 @@ func openSession(ctx context.Context, st agentsession.Store, resume, conversatio
 	case resume != "":
 		id = resume
 	case conversation != "":
-		s, err := agentsession.SessionFor(ctx, st, conversation, agentsession.Header{})
+		s, err := agentsession.SessionFor(ctx, st, conversation, newHeader())
 		if err != nil {
 			return nil, nil, fmt.Errorf("conversation %s: %w", conversation, err)
 		}
 		id = s.ID()
 	default:
-		rec, _, err := session.Start(ctx, st, agentsession.Header{}, opts...)
+		rec, _, err := session.Start(ctx, st, newHeader(), opts...)
 		return rec, nil, err
 	}
 	rec, _, err := session.Resume(ctx, st, id, opts...)

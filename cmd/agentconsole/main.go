@@ -64,7 +64,7 @@ func run() error {
 	}
 	defer closeStore()
 
-	rec, seed, err := openSession(ctx, st, *resume, *conversation, session.WithHarness("agentconsole", "dev"))
+	rec, seed, err := openSession(ctx, st, *resume, *conversation, session.WithHarness(harnessName, harnessVersion))
 	if err != nil {
 		return err
 	}

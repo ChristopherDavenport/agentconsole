@@ -365,6 +365,126 @@ headless) changed the sketch in these places.
   - `Model.Rows` is the whole path on each step and the TUI renders all of
     it on each step; a long conversation will want a per-row cache.
 
+## Decided in implementation, step 3 (the tree and record detail)
+
+- **Viewing is local; continuing moves the head.** Opening a branch in the
+  tree reads the session and renders the line ending at its tip
+  (`view.At`), as a frozen read-only view beside the live one. The agent's
+  head does not move, the feed keeps running and Esc returns to the live
+  view. The head moves on an explicit action, "continue from here" (`c` on a
+  branch in the tree or in a frozen view, `ctrl+b` on the selected row),
+  which is the contract's new `Control.ContinueFrom(entry)`. The next
+  prompt continues from that entry and the live view follows the head,
+  since the follower reports it.
+- **How the native backend moves the head.** `Recorder.Rebase` onto the
+  entry (it reseeds the recorder and reserves call IDs, and closes a run
+  the entry sits inside as interrupted), then the agent is given the
+  branch's transcript, pending calls and reasoning attribution
+  (`SetTranscript`, `SetPending`, `ContextWithReasoningModels`), and a leaf
+  label is appended. agentsession v0.0.21 has no head move on its `Store`
+  interface (the cas store keeps a head, nothing on `Store` sets it, and
+  `Rebase` moves the writer's session leaf without recording anything), so
+  the leaf label is the only durable form, and it is what a follower and a
+  reopened session read. It is refused while a run goes. Another session
+  (an origin, a subsession) can be read in the client and not continued:
+  that is `--session`.
+- **The contract grew by three methods.** `Control.ContinueFrom`,
+  `Record.Read(ctx, id)` (a session whole, as the caller's own: the panes
+  and the read-only views are computed from snapshots, never from the
+  follower's session) and `Record.Refs(ctx, id)` (the refs that point at a
+  session; `ErrNoRefs` when the store keeps none).
+- **What the view added.** `Model.Branches` (each tip labelled by its
+  newest message, its run and its time; newest first), `Links` (the
+  session's link entries: subsessions, the successor), `Origin` (the
+  header's parent session, base and spawning call), `Tail` (the end of the
+  viewed line, which the panes read the path to) and `Entries`;
+  compaction entries are rows (`Row.Fold`); `view.At` renders any line of a
+  session read-only. `Leaves` keeps its meaning. `Branches` does not use
+  it, since a tree needs fewer tips: a tip that is an ancestor of another
+  is not a branch (after a head moved back and extended, the old line's
+  response and run end still end on the entry, childless, as does the
+  leaf label that marks the move), and the viewed line is always one.
+- **Branches, forks and links in the tree.** The tree lists the branches,
+  then the origin (`parent_session`, with the `base` entry, from the
+  header, and the session's own link entries for subsessions and
+  `continued_in` successors). Opening the origin shows it read-only at its
+  own head with the cursor on the fork point, or at the fork point when
+  the origin has gone on elsewhere. Forks *made from* this session are not
+  listed: nothing on the session says so (its link entries are only for
+  subsessions and successors), and finding them is a store `List`.
+- **Detail is computed on demand, off the feed.** `internal/inspect` reads
+  a snapshot (`Record.Read`), reused while the session holds no more
+  entries, and computes one entry's detail or the session summary in a
+  `tea.Cmd` only when a pane is open and what it shows changed: another
+  row, or a call still moving. A response's `Verify` is cached for good
+  (its entry and the path behind it never change), so the session
+  summary's check over the path costs one `Verify` per new response. While
+  a run goes the session pane keeps what it shows and refreshes when the
+  run ends, so it is not recomputed per entry. Two panes asked for at once
+  read the session once.
+- **What the detail says.** For a row: the entry's ID and time; for a call
+  its decision entries (verdict, `by`, reason, replaced arguments), the
+  policy verdict records written for it (`agentpolicy:verdict`: action,
+  rule, source, note), the questions put to the user
+  (`agentturn:elicitation`), its dispatch, its output and the skill grants
+  in force when it was made, and whether one was revoked later; for the
+  response behind an item its model, status, usage, latency, attempts and
+  `Verify`: verified, **unhashed** with the cause the record names (the
+  nearest `agentturn:unhashed` entry behind it), or a mismatch; for a
+  compaction what it folded (the entry kept from, how many items before it
+  stay on the record, the summary's length and start, the pinned items, the
+  tokens before, the fold's own model call). The session pane: id, name,
+  cwd, harness, format, origin, the tally of `Verify` over the viewed line
+  with the responses that did not verify, the config in force (model,
+  instruction parts, tools), the refs that point at it and the memory
+  manifest in force.
+- **Other products' records are decoded here, from their JSON.** The
+  client depends on none of agentpolicy, agentkit or agentmemory. It reads
+  `agentpolicy:verdict` (the shape in agentpolicy's `record.go`), takes a
+  skill grant to be an allow verdict whose reason starts "granted " from a
+  source named `agentskill:...` and its revocation to be the verdict whose
+  reason starts "revoked the rules granted by " (agentkit v0.0.7), and
+  folds `agentmemory:render` records, whole or delta, as agentmemory's
+  `ManifestFold` does (the bases among the last eight manifests in force).
+  The reasons are text conventions of those products and not a format; a
+  change there silently empties the grants line. A record that does not
+  decode is left out of the pane.
+- **The root session's header names the client.** `session.WithHarness`
+  names the writer only in the headers of child sessions; the binary now
+  puts the harness and the working directory in the header of a session it
+  starts (the summary pane showed neither).
+- **Keys.** `ctrl+t` switches between the conversation and the tree (in
+  the tree: up/down or k/j, `enter` views the branch or opens the origin,
+  `c` continues from the branch, `esc` goes back). In the conversation
+  `ctrl+p` and `ctrl+n` move a row cursor (a marker in the gutter; `esc`
+  clears it), `tab` cycles the pane under the conversation: the selected
+  row's detail, the session summary, none; `ctrl+b` continues from the
+  selected row; in a read-only view `esc` returns to the live session, `c`
+  continues from the cursor row or the viewed branch's tip, and the input
+  is off.
+- **ContinueFrom validates, refuses and undoes.** It refuses a leaf label
+  and an entry on a fork's prefix above the base before anything moves
+  (agentsession's `mayRestOn` is unexported, so the rule is repeated), and
+  an entry that leaves function calls without an output: the agent would
+  hold pending calls nothing in the client can answer. A failure after
+  `Rebase` puts the leaf, transcript, pending calls and reasoning
+  attribution back and appends a leaf label. `Rebase` into a run still
+  appends that run's interrupted end. The run check and the move are not
+  atomic (agentturn has no lock to hold across them); the TUI is busy for
+  the whole move, and `Rebase`/`SetTranscript` refuse once a run has
+  started.
+- **Revocations and manifests follow their writers' checks.** A
+  `revoked the rules granted under <scope>` (or `without a scope`) verdict
+  ends every grant, as agentkit reads its own scope (a grant's verdict has
+  no scope of its own). A manifest delta is refused, and shown as refused
+  with why, unless its result hashes to the hash it states and its
+  elements are well formed. Grants in force for a call are measured at its
+  last decision, not its item.
+- **Not done.** Per-row collapse is still global. A forks-of-this-session
+  list needs the store's `List`. A call's dispatches on a fork's origin
+  (`agentsession.OriginDispatches`) are not followed in the detail. The
+  pane is clipped to half the screen and does not scroll.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
