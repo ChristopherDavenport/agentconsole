@@ -49,6 +49,7 @@
 package view
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/ChristopherDavenport/agentsession"
@@ -203,6 +204,18 @@ type Model struct {
 	// branch tip the session has.
 	Leaf   string
 	Leaves []string
+	// Tail is the last entry of the viewed line: the leaf and the
+	// bookkeeping behind it. The line is Session.Path(Tail).
+	Tail string
+	// Entries is how many entries the session held at this step.
+	Entries int
+	// Branches describes each of Leaves, newest first.
+	Branches []Branch
+	// Links are the session's link entries: its subsessions, its
+	// successor.
+	Links []Link
+	// Origin is where the session came from, by its header.
+	Origin Origin
 	// Config is the model in force at the leaf, by the record.
 	Config string
 	// Rows is the path's visible items, then the live rows.
@@ -292,6 +305,12 @@ type View struct {
 	leaf    string
 	leaves  []string
 	path    []agentsession.Entry
+	// branches, entries and origin are read from the session at each
+	// step, links from the entries that land.
+	branches []Branch
+	entries  int
+	origin   Origin
+	links    []Link
 	// parent maps the entries the view has seen to their parents, to tell
 	// whether two entries are on one line.
 	parent map[string]string
@@ -457,6 +476,7 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.landedOuts = map[string]bool{}
 	v.endSeen, v.endOrder = map[string]bool{}, nil
 	v.parent = map[string]string{}
+	v.links = nil
 	v.runTip, v.tipOwner, v.runOrder = map[string]string{}, map[string]string{}, nil
 	v.setSession(s, "")
 	v.replaying = true
@@ -482,6 +502,10 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 		v.parent[e.Base().ID] = e.Base().Parent
 	}
 	v.leaves = tips(s)
+	v.branches = branchesOf(s, v.leaves, v.leaf)
+	v.entries = s.Len()
+	h := s.Header()
+	v.origin = Origin{ParentSession: h.ParentSession, Base: h.Base, SpawnedBy: h.SpawnedBy}
 }
 
 // resting reads an entry as the item its branch rests on. A run end, a
@@ -556,6 +580,10 @@ func tips(s *agentsession.Session) []string {
 func (v *View) land(e agentsession.Entry) {
 	v.trackRun(e)
 	switch x := e.(type) {
+	case *agentsession.LinkEntry:
+		if !slices.ContainsFunc(v.links, func(l Link) bool { return l.Entry == x.ID }) {
+			v.links = append(v.links, Link{Rel: x.Rel, Session: x.Session, CallID: x.CallID, Entry: x.ID})
+		}
 	case *agentsession.ItemEntry:
 		v.landItem(x.Item, x.ResponseID)
 	case *agentsession.CustomEntry:
@@ -949,7 +977,12 @@ func (v *View) Model() Model {
 		Leaf:    v.leaf,
 		Leaves:  append([]string(nil), v.leaves...),
 		Turn:    v.turn,
+		Tail:    v.tail(),
+		Entries: v.entries,
+		Origin:  v.origin,
+		Links:   append([]Link(nil), v.links...),
 	}
+	m.Branches = append([]Branch(nil), v.branches...)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c
