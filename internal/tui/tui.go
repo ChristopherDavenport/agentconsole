@@ -55,7 +55,13 @@ type Model struct {
 	// returns, which the view's own state lags at both ends.
 	busy     bool
 	aborting bool
-	err      string
+	// err is the last run's error, cleared by the next action. feedErr is
+	// a stream of the backend that stopped: the view is frozen from then
+	// on and nothing the user does revives it, so it is never cleared.
+	// It is not restarted: a new feed would start from a new view and a
+	// fresh Live subscription that misses what the run emitted meanwhile.
+	err     string
+	feedErr string
 
 	// decided are the answers given so far to the permissions out, by call.
 	decided map[string]agentturn.Answer
@@ -115,7 +121,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	case FeedErrMsg:
-		m.err = msg.Stream + " stream: " + msg.Err.Error()
+		m.feedErr = msg.Stream + " stream: " + msg.Err.Error()
 		m.relayout()
 		return m, nil
 	case runDoneMsg:
@@ -339,6 +345,14 @@ func (m *Model) panel() string {
 	return wrap(b.String(), max(m.width, 10))
 }
 
+// feedNote prefixes the status line when a stream stopped.
+func feedNote(feedErr string) string {
+	if feedErr == "" {
+		return ""
+	}
+	return "FEED STOPPED (" + feedErr + "), quit and resume the session | "
+}
+
 func itoa(n int) string { return strconv.Itoa(n) }
 
 // View implements tea.Model.
@@ -347,7 +361,7 @@ func (m *Model) View() string {
 		return "starting..."
 	}
 	parts := []string{
-		statusStyle.Render(padTo(statusText(m.view, m.busy, m.aborting, m.verified), m.width)),
+		statusStyle.Render(padTo(feedNote(m.feedErr)+statusText(m.view, m.busy, m.aborting, m.verified), m.width)),
 		m.vp.View(),
 	}
 	if p := m.panel(); p != "" {

@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ChristopherDavenport/agenttool"
+
+	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
 
 const cursor = "▍"
@@ -212,4 +215,18 @@ func TestUnverifiedAndScroll(t *testing.T) {
 	a.waitFor("the top", has("you"))
 	a.key(tea.KeyEnd)
 	a.waitFor("the bottom", lacks("you"))
+}
+
+func TestFeedFailureStaysOnTheStatusLine(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "ok")))
+	a.send(tui.FeedErrMsg{Stream: "record", Err: errors.New("boom")})
+	a.waitFor("the feed banner", has("FEED STOPPED", "record stream: boom", "resume the session"))
+	// Neither a run's end nor sending nor a fresh model clears it.
+	a.submit("hi")
+	a.waitFor("the run done", has("ok"))
+	a.send(tui.ModelMsg{})
+	s := a.screen()
+	if !strings.Contains(s, "FEED STOPPED") {
+		t.Errorf("the feed failure was cleared:\n%s", s)
+	}
 }
