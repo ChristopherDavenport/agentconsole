@@ -245,6 +245,10 @@ type View struct {
 	landedItems map[string][]string // item ID to the response IDs it landed under
 	landedCalls map[string]bool     // function call items, by call ID
 	landedOuts  map[string]bool     // function call outputs, by call ID
+	// settled are the responses known to be over: the live stream ended
+	// them, or the record held their response entry when it was read. An
+	// item with no response ID yet cannot belong to one.
+	settled map[string]bool
 
 	items []*ovItem
 	calls []*ovCall
@@ -259,6 +263,7 @@ func New() *View {
 		landedItems: map[string][]string{},
 		landedCalls: map[string]bool{},
 		landedOuts:  map[string]bool{},
+		settled:     map[string]bool{},
 		runs:        map[string]*runState{},
 	}
 }
@@ -290,6 +295,9 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.setSession(s, "")
 	for _, e := range s.Entries() {
 		v.land(e)
+		if r, ok := e.(*agentsession.ResponseEntry); ok {
+			v.settled[r.ResponseID] = true
+		}
 	}
 }
 
@@ -373,20 +381,33 @@ func (v *View) landItem(item openresponses.Item, responseID string) {
 			return
 		}
 		v.landedItems[id] = append(v.landedItems[id], responseID)
-		v.dropItems(func(o *ovItem) bool { return !o.key.call && o.key.id == id && compatible(o.responseID, responseID) })
+		v.dropItems(func(o *ovItem) bool { return !o.key.call && o.key.id == id && v.same(o.responseID, responseID) })
 	}
 }
 
-// compatible reports whether two response IDs can name one response: an
-// item the stream has not placed yet has none.
-func compatible(a, b string) bool { return a == "" || b == "" || a == b }
+// same reports whether an overlay item of response overlay is the item an
+// entry of response entry holds. Response IDs are compared strictly. The
+// one case that is not an equality is an overlay row whose stream has not
+// named its response yet: it is the entry's if that response is still
+// open, since a response that is over cannot be the one the row is in.
+func (v *View) same(overlay, entry string) bool {
+	if overlay == entry {
+		return true
+	}
+	return overlay == "" && entry != "" && !v.settled[entry]
+}
+
+// sameTurn reports whether two rows of one run and turn can be one item:
+// their response IDs agree, or one of them is not known yet. The run and
+// turn identify a row until the stream names its response.
+func sameTurn(a, b string) bool { return a == b || a == "" || b == "" }
 
 func (v *View) landed(k key, responseID string) bool {
 	if k.call {
 		return v.landedCalls[k.id]
 	}
 	for _, r := range v.landedItems[k.id] {
-		if compatible(r, responseID) {
+		if v.same(responseID, r) {
 			return true
 		}
 	}
@@ -502,10 +523,27 @@ func (v *View) Live(ev client.LiveEvent) {
 	case *client.ItemCompleted:
 		v.item(e.RunID, e.ResponseID, e.Item, true)
 	case *client.ResponseCompleted:
-		for _, o := range v.items {
-			if o.run == e.RunID && o.responseID == "" && o.done {
-				o.responseID = e.ResponseID
+		// The response names the items that completed before the stream
+		// did, and is over: an item with no response yet is not its.
+		if e.ResponseID != "" {
+			v.settled[e.ResponseID] = true
+			for _, o := range v.items {
+				if o.run == e.RunID && o.turn == v.turn.Number && o.responseID == "" {
+					o.responseID = e.ResponseID
+				}
 			}
+			// One whose entry landed first is the entry's.
+			v.dropItems(func(o *ovItem) bool {
+				if o.key.call || o.responseID != e.ResponseID {
+					return false
+				}
+				for _, r := range v.landedItems[o.key.id] {
+					if r == e.ResponseID {
+						return true
+					}
+				}
+				return false
+			})
 		}
 	case *client.ToolOpened:
 		if v.landedOuts[e.CallID] {
@@ -549,7 +587,7 @@ func (v *View) item(runID, responseID string, item openresponses.Item, done bool
 		return
 	}
 	for _, o := range v.items {
-		if o.key == k && o.run == runID && compatible(o.responseID, responseID) {
+		if o.key == k && o.run == runID && o.turn == v.turn.Number && sameTurn(o.responseID, responseID) {
 			o.item = item
 			if responseID != "" {
 				o.responseID = responseID

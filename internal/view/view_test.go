@@ -385,3 +385,68 @@ func TestItemKeptFromTheModelIsARow(t *testing.T) {
 		t.Errorf("response = %q", m.Rows[0].ResponseID)
 	}
 }
+
+// A later response that reuses an item ID is another item. Until its
+// stream names the response the row has no response ID, and that must not
+// make it match what an earlier response landed.
+func TestReusedItemIDIsNotLandedBeforeTheStreamNamesItsResponse(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.stream("run1", "resp1", msg("msg_0", "assistant", "first"), true)
+	l.append(itemEntry(msg("msg_0", "assistant", "first"), "resp1"))
+	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.stream("run1", "", msg("msg_0", "assistant", "second"), false)
+	m := l.v.Model()
+	if len(m.Rows) != 2 || !m.Rows[1].Live || text(m.Rows[1].Item) != "second" {
+		t.Fatalf("the reused ID was hidden: %+v", m.Rows)
+	}
+	// The stream names its response, then the entry lands: one row each.
+	l.stream("run1", "resp2", msg("msg_0", "assistant", "second"), true)
+	if m := l.v.Model(); len(m.Rows) != 2 {
+		t.Fatalf("naming the response duplicated the row: %+v", m.Rows)
+	}
+	l.append(itemEntry(msg("msg_0", "assistant", "second"), "resp2"))
+	if m := l.v.Model(); len(m.Rows) != 2 || liveRows(m) != 0 {
+		t.Fatalf("after the second entry: %+v", m.Rows)
+	}
+}
+
+// An entry drops the overlay of its own response, not of another's.
+func TestEntryDoesNotDropAnotherResponsesOverlay(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.stream("run1", "resp2", msg("msg_0", "assistant", "second"), false)
+	l.append(itemEntry(msg("msg_0", "assistant", "first"), "resp1"))
+	m := l.v.Model()
+	if len(m.Rows) != 2 || !m.Rows[1].Live {
+		t.Fatalf("resp1's entry dropped resp2's overlay: %+v", m.Rows)
+	}
+}
+
+// The other order: the entry of an unnamed item lands before the live
+// stream has said anything. Its response is still open, so the entry is
+// the item's, and the late live events leave no second row.
+func TestUnnamedItemWhoseEntryLandedFirst(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.append(itemEntry(msg("msg_0", "assistant", "hi"), "resp1"))
+	l.stream("run1", "", msg("msg_0", "assistant", "hi"), true)
+	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
+		t.Fatalf("ghost: %+v", m.Rows)
+	}
+	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	if m := l.v.Model(); len(m.Rows) != 1 {
+		t.Fatalf("after response end: %+v", m.Rows)
+	}
+}
+
+func text(item openresponses.Item) string {
+	if m, ok := item.(*openresponses.Message); ok {
+		return m.Text()
+	}
+	return ""
+}
