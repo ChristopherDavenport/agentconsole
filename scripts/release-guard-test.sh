@@ -46,5 +46,19 @@ case_ accept "$M/v2" v2.0.0
 case_ refuse "$M/v2" v1.0.0
 case_ refuse "$M/v2" v3.0.0 v2.0.0
 
+# The floor is the plain vX.Y.Z tags: a prerelease or a stray v* tag
+# neither raises it nor blocks the release of that version.
+case_ accept "$M" v0.0.7 v0.0.6 v0.0.7-rc1
+case_ accept "$M" v0.0.7 v0.0.6 vnext
+case_ refuse "$M" v0.0.5 v0.0.6 vnext
+case_ refuse "$M" v0.0.6 v0.0.6
+case_ accept "$M" v0.0.10 v0.0.9
+
+# A prerelease or a malformed version is refused.
+case_ refuse "$M" v0.1.0-rc1 v0.0.6
+case_ refuse "$M" v0.1.0-rc1
+case_ refuse "$M" v0.1 v0.0.6
+case_ refuse "$M" 0.1.0
+
 [ "$fails" = 0 ] && echo "release-guard tests passed"
 exit "$fails"
