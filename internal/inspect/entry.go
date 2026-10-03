@@ -215,9 +215,17 @@ func callOf(s *agentsession.Session, path []agentsession.Entry, c *agentsession.
 			out.Output = o.Output.String()
 		}
 	}
+	// The grants in force are those at the call's last decision: in a
+	// batch from one response every call's item is written before any skill
+	// read lands its grant, and a call decided after it runs under it.
+	// Without a decision entry, the call's item stands in.
 	at := -1
+	last := c.Entry.ID
+	if n := len(c.Decisions); n > 0 {
+		last = c.Decisions[n-1].ID
+	}
 	for i, e := range path {
-		if e.Base().ID == c.Entry.ID {
+		if e.Base().ID == last {
 			at = i
 		}
 		if v, ok := verdictOf(e); ok && v.CallID == c.ID() {

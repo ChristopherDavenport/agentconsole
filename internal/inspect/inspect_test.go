@@ -593,3 +593,27 @@ func TestRefusedManifestDeltasAreShownAsRefused(t *testing.T) {
 		t.Errorf("a refused delta shows as memory:\n%s", text)
 	}
 }
+
+// A call is decided after the grant its sibling's skill read made, though
+// its item was written before it: the grants in force are measured at the
+// decision, not at the item.
+func TestGrantsAreMeasuredAtTheDecision(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "m", Tools: []agenttool.Tool{upper()},
+		Model: &script{responses: []step{callTool("call_1", "upper", `{"text":"a"}`), say("done")}},
+		BeforeToolCall: func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+			return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "ok?"}, nil
+		}}
+	r := newRig(t, cfg)
+	r.prompt("go")
+	// The call's item and its hold are on the record; now a grant lands,
+	// and then the call is approved.
+	r.annotate(inspect.VerdictNS, map[string]any{"action": "allow", "rule": "upper", "source": "agentskill:shout", "reason": "granted upper by agentskill:shout", "by": "policy"})
+	if err := r.be.Control().Answer(r.ctx, agentturn.Approve("call_1").WithBy("human")); err != nil {
+		t.Fatal(err)
+	}
+	m := r.model()
+	c := r.entry(rowWith(t, m, isCall), m).Call
+	if len(c.Grants) != 1 || c.Grants[0].Skill != "shout" {
+		t.Errorf("grants in force at the call's decision = %+v, want shout", c.Grants)
+	}
+}
