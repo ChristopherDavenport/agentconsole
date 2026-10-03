@@ -47,12 +47,11 @@ committed, and live events carry only what is not committed yet.
 make check      # fmt, tidy-check, vet, staticcheck, govulncheck, race tests
 ```
 
-While `go.mod` requires an `agentsession` older than the release that
-ships `Follow`, build and test through a workspace file that uses the
-agentsession tree: `GOWORK=/path/to/agentconsole.work make check`.
-Without it the module does not compile. Never commit a `go.work` or a
-`replace`. The client needs `GOFLAGS=-mod=readonly` where the Go
-environment sets `-mod=mod`.
+Every sibling is required at a released version. To try an unreleased
+sibling, use a workspace file kept outside the repository
+(`GOWORK=/path/to/agentconsole.work make check`); never commit a
+`go.work` or a `replace`. Run make targets with `GOFLAGS=-mod=readonly`
+where the Go environment sets `-mod=mod`.
 
 ## Tests
 

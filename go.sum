@@ -1,5 +1,5 @@
-github.com/ChristopherDavenport/agentsession v0.0.20 h1:XYEE3EEX0wXskj2AxaxNbJEmk/T8bK6H3DO/tK19Px4=
-github.com/ChristopherDavenport/agentsession v0.0.20/go.mod h1:lZf8gypPbx95D867i491HRT0OXyX6B8S5wM8zS4YzOA=
+github.com/ChristopherDavenport/agentsession v0.0.21 h1:T3FVxhlNpu9s0QHIz9dtg6LlscX5u5rcXXm8UNOkir4=
+github.com/ChristopherDavenport/agentsession v0.0.21/go.mod h1:lZf8gypPbx95D867i491HRT0OXyX6B8S5wM8zS4YzOA=
 github.com/ChristopherDavenport/agenttool v0.0.15 h1:Lb+Q2j4KDb78qVbzeVgb21Ft0yDllA+kOkoau7SD5Y0=
 github.com/ChristopherDavenport/agenttool v0.0.15/go.mod h1:G9b+XRWx2+fQJGhGLXzcoRLNb5EVLTRJY71++GzTia0=
 github.com/ChristopherDavenport/agentturn v0.0.16 h1:ax+8vmRz+yBhBG/Ub5EZrmvWg8fAUBfqK7caA37tZPM=

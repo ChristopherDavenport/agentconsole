@@ -31,8 +31,5 @@ lint:
 vuln:
 	$(GOVULNCHECK) ./...
 
-# Everything CI runs. While go.mod requires an agentsession older than
-# the one that ships Follow, run it with GOWORK set to a workspace file
-# that uses the agentsession tree: without it the module does not
-# compile.
+# Everything CI runs.
 check: fmt tidy-check vet lint vuln test
