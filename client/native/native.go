@@ -50,7 +50,9 @@ type Option func(*Backend)
 
 // WithRunContext decorates the context of every run the backend starts
 // (Prompt, Answer) and of the head move, after the backend put its own on
-// it. It is how a host puts what its hooks read on the context: a
+// it. fn is called under the backend's lock, so it must not call back
+// into Control (Prompt, Answer, ContinueFrom), which would deadlock. It is
+// how a host puts what its hooks read on the context: a
 // recorder, a session ID, a grant scope.
 func WithRunContext(fn func(context.Context) context.Context) Option {
 	return func(b *Backend) { b.runCtx = fn }
