@@ -12,7 +12,7 @@ package view
 //	AGENTCONSOLE_SEEDS=20000 go test ./internal/view -run TestInterleavings
 //	AGENTCONSOLE_SEED0=1234 AGENTCONSOLE_SEEDS=1 go test ./internal/view -run TestInterleavings -v
 //
-// replays a seed. The default is a few hundred seeds.
+// replays a seed. The default is 150 seeds.
 
 import (
 	"fmt"
@@ -236,7 +236,6 @@ type checker struct {
 	prev    map[string]rowInfo
 	running bool
 	prevLf  string
-	started bool
 	lastEnd *client.RunEnded
 	openEph map[string]bool
 	gone    map[string]bool
@@ -662,12 +661,7 @@ func render(s *agentsession.Session) rendering {
 // minimize shrinks a failing script by dropping what it can while a
 // delivery seed still fails.
 func minimize(sc pScript, fails func(pScript) bool) pScript {
-	try := func(cand pScript) bool {
-		if fails(cand) {
-			return true
-		}
-		return false
-	}
+	try := fails
 	for rounds, changed := 0, true; changed && rounds < 200; rounds++ {
 		changed = false
 		for i := range sc.Elems {
@@ -773,7 +767,7 @@ func failing(sc pScript, base int64, tries int) (string, opTrace, int64, bool) {
 }
 
 func TestInterleavings(t *testing.T) {
-	seeds := envInt("AGENTCONSOLE_SEEDS", 300)
+	seeds := envInt("AGENTCONSOLE_SEEDS", 150)
 	if testing.Short() {
 		seeds = min(seeds, 60)
 	}

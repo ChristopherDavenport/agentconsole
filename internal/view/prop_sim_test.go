@@ -405,9 +405,8 @@ func (s *sim) flushHeld(resp string) {
 }
 
 type callRec struct {
-	id    string
-	spec  pCall
-	entry string
+	id   string
+	spec pCall
 }
 
 func (s *sim) turn(runID string, n int, t pTurn) endKind {
@@ -447,8 +446,8 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 	for _, c := range t.Calls {
 		callID := s.uid("call")
 		fc := &openresponses.FunctionCall{ID: "fc_" + callID, CallID: callID, Name: "tool", Arguments: "{}"}
-		id := s.stream(runID, fc, true)
-		calls = append(calls, callRec{id: id, spec: c})
+		s.stream(runID, fc, true)
+		calls = append(calls, callRec{spec: c})
 		if c.Defer {
 			s.tl.deferred[callID] = true
 		}
