@@ -1061,3 +1061,39 @@ func TestLabelAppendedBeforeItsHeadDropsTheOtherBranchsPermission(t *testing.T) 
 		t.Fatalf("the permission outlived the move: %+v", m.Permissions)
 	}
 }
+
+// Live rows belong to the line the live run is extending. When the viewed
+// path is another branch they are not shown under it, and they come back
+// when the view does.
+func TestLiveRowsAreOnlyShownUnderTheirOwnLine(t *testing.T) {
+	l := newLog(t)
+	l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	u1 := l.append(itemEntry(msg("u1", "user", "one"), ""))
+	l.append(itemEntry(msg("a1", "assistant", "answer"), "resp1"))
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
+	u2 := l.append(itemEntry(msg("u2", "user", "two"), ""))
+	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&client.TurnStarted{RunID: "run2", Turn: 1})
+	l.stream("run2", "resp2", msg("a2", "assistant", "streaming now"), false)
+	if m := l.v.Model(); len(m.Rows) != 4 || !m.Rows[3].Live {
+		t.Fatalf("setup: %+v", m.Rows)
+	}
+	// The head moves back to the first user message.
+	if err := l.s.Branch(u1); err != nil {
+		t.Fatal(err)
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Head, Session: l.s, Leaf: u1})
+	m := l.v.Model()
+	if len(m.Rows) != 1 || liveRows(m) != 0 {
+		t.Fatalf("the live row of another line is shown under this one: %+v", m.Rows)
+	}
+	// And back on the line the run extends.
+	if err := l.s.Branch(u2); err != nil {
+		t.Fatal(err)
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Head, Session: l.s, Leaf: u2})
+	if m := l.v.Model(); len(m.Rows) != 4 || !m.Rows[3].Live || text(m.Rows[3].Item) != "streaming now" {
+		t.Fatalf("the live row did not come back: %+v", m.Rows)
+	}
+}

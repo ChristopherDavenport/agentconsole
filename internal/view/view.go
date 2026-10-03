@@ -265,6 +265,9 @@ func (b *boundedSet) add(s string) {
 
 func (b *boundedSet) has(s string) bool { return b.m[s] }
 
+// maxRuns caps the runs whose line the view follows.
+const maxRuns = 256
+
 // maxEndSeen caps the run end entries remembered ahead of their live ends.
 // An end entry is kept until the live RunEnded for its run settles it, so
 // the cap only bites if the record runs more than maxEndSeen runs ahead of
@@ -289,6 +292,14 @@ type View struct {
 	leaf    string
 	leaves  []string
 	path    []agentsession.Entry
+	// parent maps the entries the view has seen to their parents, to tell
+	// whether two entries are on one line.
+	parent map[string]string
+	// runTip is the newest entry seen on each run's own line, tipOwner its
+	// inverse, runOrder the runs in the order they began, capped.
+	runTip   map[string]string
+	tipOwner map[string]string
+	runOrder []string
 
 	// What the record holds, by key: every entry that has landed on any
 	// branch.
@@ -324,6 +335,9 @@ type View struct {
 func New() *View {
 	return &View{
 		landedItems: map[string][]landedItem{},
+		parent:      map[string]string{},
+		runTip:      map[string]string{},
+		tipOwner:    map[string]string{},
 		landedCalls: map[string]bool{},
 		landedOuts:  map[string]bool{},
 		closed:      newBoundedSet(maxSettled),
@@ -450,6 +464,8 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.landedCalls = map[string]bool{}
 	v.landedOuts = map[string]bool{}
 	v.endSeen, v.endOrder = map[string]bool{}, nil
+	v.parent = map[string]string{}
+	v.runTip, v.tipOwner, v.runOrder = map[string]string{}, map[string]string{}, nil
 	v.setSession(s, "")
 	v.replaying = true
 	for _, e := range s.Entries() {
@@ -470,6 +486,9 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	// The session is the follower's own and valid until the next step,
 	// so the path and the leaves are copied out.
 	v.path = append([]agentsession.Entry(nil), s.Path(lineEnd(s, leaf))...)
+	for _, e := range v.path {
+		v.parent[e.Base().ID] = e.Base().Parent
+	}
 	v.leaves = tips(s)
 }
 
@@ -543,6 +562,7 @@ func tips(s *agentsession.Session) []string {
 
 // land records an entry that has landed and drops what it replaces.
 func (v *View) land(e agentsession.Entry) {
+	v.trackRun(e)
 	switch x := e.(type) {
 	case *agentsession.ItemEntry:
 		v.landItem(x.Item, x.ResponseID)
@@ -958,6 +978,9 @@ func (v *View) Model() Model {
 	}
 	m.Config = settings.Model
 	for _, o := range v.items {
+		if !v.onLine(o.run) {
+			continue
+		}
 		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item)}
 		if fc, ok := o.item.(*openresponses.FunctionCall); ok {
 			row.Call = v.callView(fc, nil)
@@ -1013,4 +1036,67 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 		}
 	}
 	return c
+}
+
+// tail is the end of the viewed line.
+func (v *View) tail() string {
+	if len(v.path) == 0 {
+		return ""
+	}
+	return v.path[len(v.path)-1].Base().ID
+}
+
+// onLine reports whether the rows of a live run belong under the viewed
+// line: the line extends the newest entry of the run's own that the view
+// has seen. A line that stops short of it has been moved back, by a head,
+// and the run is not extending it; the rows are shown again when the view
+// returns. A run whose entries have not landed yet extends whatever is
+// viewed, and so does one a reset took out of the log.
+func (v *View) onLine(runID string) bool {
+	tip, ok := v.runTip[runID]
+	if !ok {
+		return true
+	}
+	return v.extends(v.tail(), tip)
+}
+
+// trackRun follows each run's own line through the entries that land: its
+// start entry, then each entry written under the last. A label is
+// bookkeeping off the line and does not move it.
+func (v *View) trackRun(e agentsession.Entry) {
+	b := e.Base()
+	if r, ok := e.(*agentsession.RunEntry); ok && r.IsStart() {
+		if _, seen := v.runTip[r.RunID]; !seen {
+			v.runOrder = append(v.runOrder, r.RunID)
+			for len(v.runOrder) > maxRuns {
+				if tip, ok := v.runTip[v.runOrder[0]]; ok {
+					delete(v.tipOwner, tip)
+				}
+				delete(v.runTip, v.runOrder[0])
+				v.runOrder = v.runOrder[1:]
+			}
+		}
+		v.runTip[r.RunID] = b.ID
+		v.tipOwner[b.ID] = r.RunID
+		return
+	}
+	if _, isLabel := e.(*agentsession.LabelEntry); isLabel {
+		return
+	}
+	if run, ok := v.tipOwner[b.Parent]; ok {
+		delete(v.tipOwner, b.Parent)
+		v.runTip[run] = b.ID
+		v.tipOwner[b.ID] = run
+	}
+}
+
+// extends reports whether descendant is below ancestor in the entries seen.
+func (v *View) extends(descendant, ancestor string) bool {
+	for hops := 0; descendant != "" && hops <= len(v.parent); hops++ {
+		if descendant == ancestor {
+			return true
+		}
+		descendant = v.parent[descendant]
+	}
+	return false
 }
