@@ -212,9 +212,9 @@ func TestUnverifiedAndScroll(t *testing.T) {
 	if s := a.screen(); strings.Contains(s, "you") {
 		t.Errorf("a long answer should have scrolled the prompt off:\n%s", s)
 	}
-	a.key(tea.KeyHome)
+	a.send(tea.KeyMsg{Type: tea.KeyCtrlHome})
 	a.waitFor("the top", has("you"))
-	a.key(tea.KeyEnd)
+	a.send(tea.KeyMsg{Type: tea.KeyCtrlEnd})
 	a.waitFor("the bottom", lacks("you"))
 }
 
@@ -288,4 +288,19 @@ func TestInterruptFromOutsideActsLikeCtrlC(t *testing.T) {
 	}
 	a.send(tui.InterruptMsg{})
 	a.waitQuit()
+}
+
+func TestHomeEndAndArrowsMoveTheInputCursor(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "ok")))
+	a.typeText("abc")
+	a.key(tea.KeyHome)
+	a.typeText("X")
+	a.waitFor("X at the start", has("> Xabc"))
+	a.key(tea.KeyEnd)
+	a.typeText("Y")
+	a.waitFor("Y at the end", has("> XabcY"))
+	a.key(tea.KeyLeft)
+	a.key(tea.KeyLeft)
+	a.typeText("Z")
+	a.waitFor("Z two from the end", has("> XabZcY"))
 }

@@ -335,6 +335,16 @@ headless) changed the sketch in these places.
   is pending. A refusal is `agentturn.Refuse`, so it ends the run without
   calling the model, and its output says the user refused and why. Answers
   are recorded `By` "human".
+- **Keys.** The conversation scrolls on PgUp, PgDn, Ctrl-Up, Ctrl-Down,
+  Ctrl-Home, Ctrl-End and the wheel; the arrows, Home and End edit the
+  input line. SIGINT and SIGTERM from outside are an `InterruptMsg`, the
+  same as Ctrl-C (the program's own handling is off).
+- **A feed that stops is not restarted.** The status line says so and
+  says to resume the session; a new feed would start from a new view and
+  a Live subscription that misses what the run emitted meanwhile.
+- **Quitting waits for the run's write.** After the program ends, main
+  aborts and waits up to three seconds for the in-flight Prompt or Answer
+  (`Model.Drain`) before cancelling and closing the store.
 - **Collapsing is global.** Ctrl-R shows or hides all reasoning, Ctrl-O
   shows tool arguments and output in full (three lines and 120 columns
   otherwise). No per-row cursor yet.

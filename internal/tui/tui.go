@@ -222,16 +222,16 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.vp.PageDown()
 		return m, nil
-	case "up":
+	case "ctrl+up":
 		m.vp.ScrollUp(1)
 		return m, nil
-	case "down":
+	case "ctrl+down":
 		m.vp.ScrollDown(1)
 		return m, nil
-	case "home":
+	case "ctrl+home":
 		m.vp.GotoTop()
 		return m, nil
-	case "end":
+	case "ctrl+end":
 		m.vp.GotoBottom()
 		return m, nil
 	case "ctrl+r":
