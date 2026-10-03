@@ -462,6 +462,24 @@ headless) changed the sketch in these places.
   selected row; in a read-only view `esc` returns to the live session, `c`
   continues from the cursor row or the viewed branch's tip, and the input
   is off.
+- **ContinueFrom validates, refuses and undoes.** It refuses a leaf label
+  and an entry on a fork's prefix above the base before anything moves
+  (agentsession's `mayRestOn` is unexported, so the rule is repeated), and
+  an entry that leaves function calls without an output: the agent would
+  hold pending calls nothing in the client can answer. A failure after
+  `Rebase` puts the leaf, transcript, pending calls and reasoning
+  attribution back and appends a leaf label. `Rebase` into a run still
+  appends that run's interrupted end. The run check and the move are not
+  atomic (agentturn has no lock to hold across them); the TUI is busy for
+  the whole move, and `Rebase`/`SetTranscript` refuse once a run has
+  started.
+- **Revocations and manifests follow their writers' checks.** A
+  `revoked the rules granted under <scope>` (or `without a scope`) verdict
+  ends every grant, as agentkit reads its own scope (a grant's verdict has
+  no scope of its own). A manifest delta is refused, and shown as refused
+  with why, unless its result hashes to the hash it states and its
+  elements are well formed. Grants in force for a call are measured at its
+  last decision, not its item.
 - **Not done.** Per-row collapse is still global. A forks-of-this-session
   list needs the store's `List`. A call's dispatches on a fork's origin
   (`agentsession.OriginDispatches`) are not followed in the detail. The
