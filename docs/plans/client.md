@@ -72,7 +72,7 @@ grants, memory manifests and folds are all entries.
 
 ## The contract
 
-An internal package, `internal/client`, written against the stack's own
+A package, `client`, written against the stack's own
 types:
 
 ```go
@@ -162,7 +162,8 @@ views only, labelled as unverified.
 4. **The ACP client backend,** tested against `front/acp` over a pipe,
    so both sides of ACP are exercised by stack code.
 5. **Extract the contract** once the wire backend or a second client
-   needs it.
+   needs it. Done for the first embedder, dex: see "Decided in
+   implementation, step 5 (the library)".
 
 ## Decided in implementation
 
@@ -274,7 +275,7 @@ headless) changed the sketch in these places.
 - **A run's start entry settles an earlier run only if the stream saw it
   begin later** (`runSeq`), not any start entry: a reset replays older
   starts.
-- **The interleaving test** (`internal/view/prop_test.go`) plays scripted
+- **The interleaving test** (`view/prop_test.go`) plays scripted
   runs as the agent and recorder would, delivers the record's changes and
   the live events in random interleavings with resets and head moves, and
   checks the view after each step. `AGENTCONSOLE_SEEDS` and
@@ -484,6 +485,104 @@ headless) changed the sketch in these places.
   list needs the store's `List`. A call's dispatches on a fork's origin
   (`agentsession.OriginDispatches`) are not followed in the detail. The
   pane is clipped to half the screen and does not scroll.
+
+## Decided in implementation, step 5 (the library)
+
+dex, a coding agent in its own repository, is the second consumer: it
+imports agentconsole and runs the client over its own agentkit kit.
+
+- **The public surface.** `client`, `client/native`,
+  `client/kitbackend`, `view` and `console`. `internal/tui` and
+  `internal/inspect` stay internal: nothing an embedder does needs a
+  Bubble Tea model or a record pane, and `console.Run` is the one entry.
+  `view` is public because it is the contract's other half (a different
+  client, a web one, renders `view.Model`), not because `console` needs
+  it. The packages moved by `git mv`, so their history follows, and
+  every import path changed once, before there was a release.
+- **`console.Run(ctx, backend, ...Option) error`** is the body of the
+  binary's `run`, moved: build the model, start the program with the
+  alt screen and the mouse, turn SIGINT and SIGTERM into
+  `tui.InterruptMsg`, `tui.Attach` before `p.Run`, and after it ends
+  `Abort`, `Drain`, cancel, `Drain`, wait. An embedder gets the same
+  behaviour, including that Run returns only once the run it was driving
+  has written its end, so closing the store behind it is safe. It does not
+  print the session ID (the binary does): `Backend` has no session ID, and
+  an embedder knows its own. Options are the ones a test or an embedder
+  needed and nothing more: `WithInput`, `WithOutput`, `WithWindowSize`
+  (a pipe reports no size, and the program draws nothing until it knows
+  one), `WithDrainTimeout`, `WithWarn` (the one warning Run has), and
+  `WithoutSignalHandler` (an embedder that owns signals). The alt screen
+  and the mouse are not options: they are the client.
+- **The window size is sent from a goroutine.** `Program.Send` blocks until
+  the program runs, so sending it inline before `p.Run` deadlocks.
+- **Why `client/kitbackend` and not `native.FromKit`.** agentkit imports
+  every library of the stack, an MCP client and a policy engine among
+  them. `native` needs the agent and the recorder, which agentconsole
+  already required, so an embedder that builds its agent by hand pays
+  nothing for a backend over a kit. agentconsole depends on agentkit as a
+  module, which is cheap; what a package pulls into a build is the cost
+  worth keeping out. The kit backend embeds `*native.Backend`, so the
+  contract, `Agent()` and `SessionID()` are one implementation, and adds
+  what the kit expects of a front.
+- **`native.New` takes options, `WithRunContext`, `WithRelease` and
+  `WithHeadMove`,** instead of the kit backend reimplementing `control`.
+  They are the three places a host's state meets Control:
+  - the run context: every `Prompt`, `Answer` and head move runs under
+    `agentkit.ContextWithRecorder(rec)`, `session.ContextWithSessionID`
+    and `agentmemory.WithSession`. With the recorder on the context the
+    kit's grant scope is the session's ID (`Kit.GrantScope`), the verdicts
+    and a tool's questions land in the session the client follows, and a
+    skill read is granted to this conversation. A conversation is one
+    session, so the scope never changes under a `ContinueFrom`: a branch
+    is not another conversation.
+  - `Answer`: the backend keeps the `RunEnd` of the last run that
+    returned one, and `Answer` passes it with the answers to the kit
+    engine's `Release`. That releases the calls the engine only held for
+    another call's ask (the TUI answers the calls it shows, and the
+    engine holds the rest), and turns a call nobody answered into
+    `ErrUnanswered`, which names it, instead of the loop's own error. The
+    end is used only if an answer is about one of its calls: pending calls
+    restored from a record after a restart belong to no run of this process
+    and are released with `end == nil`, which returns the answers as given.
+    A run that fails before it begins leaves the earlier end in place; a
+    head move clears it.
+  - `ContinueFrom`: a skill's grants follow the path, so the move ends them
+    before the recorder leaves the branch (`Kit.RevokeSkillGrants`, which
+    records its revocation on the branch being left) and grants again what
+    the new branch's reads granted after the transcript and the pending
+    calls are set (`Kit.RegrantSkills` on the session at the new leaf). The
+    order matters: a revocation written after the move would sit on the new
+    path and the replay would read it as ending the grants it is about to
+    make. The undo of a failed move runs the same pair the other way, with
+    the revocation at the new head before the rebase back, so it is on a
+    side branch, and the regrant at the old one. A failing before hook
+    refuses the move.
+- **The elicitor is the embedder's.** `agentkit.WithToolElicitor(by, fn)`
+  takes the function that answers a tool's question; the kit files the
+  question and answer under the call, in the recorder of the run's context,
+  which the backend puts there, and the detail pane shows them. The
+  terminal client has no screen for a question yet, so `fn` answers (dex
+  already supplies one). A contract extension for a question, a live
+  event and an answer control, waits for a client that shows one.
+- **Resume is the kit's.** An embedder passes a kit built with
+  `WithResumedSession`; `kit.AgentOptions()` seeds the agent with the
+  transcript and the calls pending at the leaf, and `New` already granted
+  again the skill grants the session's reads made. The backend adds
+  nothing: a pending call is in `Control.State().Pending`, so the client
+  asks about it as it does a live one, and the answer, with no `RunEnd` of
+  this process, resumes it.
+- **`inspect` reads a product's own skill source names.** dex names its
+  grant sources `skill:NAME`, not agentkit's default `agentskill:NAME`, and
+  the pane showed no grants. A source is now a skill's when it has the
+  default prefix, or when its last segment is the name of a skill the path
+  holds an `agentskill:read` record of.
+- **Not done.** `kitbackend.New` needs a session; a kit with none has no
+  record to show. Under `agentkit.WithRecorder` the owner of the recorder
+  attaches it (the kit does not), to `Backend.Agent()`, before the first
+  run. The binary still builds its agent by hand over `native`; moving it
+  onto a kit would add flags for every kit option and no behaviour.
+  Releases are cut with `make release`; the guard accepts any `vX.Y.Z` as
+  the first release.
 
 ## Open questions
 

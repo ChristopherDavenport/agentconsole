@@ -18,7 +18,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client/native"
+	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
 

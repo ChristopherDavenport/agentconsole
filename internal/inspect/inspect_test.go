@@ -15,10 +15,10 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
-	"github.com/ChristopherDavenport/agentconsole/internal/client/native"
+	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 type step = func(ctx context.Context, em *openresponses.Emitter) error
@@ -546,6 +546,30 @@ func TestScopeRevocationEndsEveryGrant(t *testing.T) {
 				t.Errorf("the pane does not show the revocation:\n%s", joined(s.Lines()))
 			}
 		})
+	}
+}
+
+// A product names its skill sources itself (dex: "skill:NAME"). The
+// source is a skill's when the path holds a read of that skill, and a
+// settings file's source of another name is not.
+func TestAProductsOwnSkillSourceNamesAreGrants(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "m", Tools: []agenttool.Tool{upper()},
+		Model: &script{responses: []step{callTool("call_1", "upper", `{"text":"a"}`), say("one")}}}
+	r := newRig(t, cfg)
+	allow := func(src string) {
+		r.annotate(inspect.VerdictNS, map[string]any{"action": "allow", "rule": "upper", "source": src, "reason": "granted upper by " + src, "by": "policy"})
+	}
+	allow("skill:shout")
+	allow("team:settings")
+	r.annotate("agentskill:read", map[string]any{"name": "shout"})
+	r.prompt("go")
+	m := r.model()
+	s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Grants) != 1 || s.Grants[0].Skill != "shout" || s.Grants[0].Source != "skill:shout" {
+		t.Fatalf("grants = %+v, want shout's only", s.Grants)
 	}
 }
 

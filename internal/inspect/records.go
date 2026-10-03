@@ -23,6 +23,42 @@ const VerdictNS = "agentpolicy:verdict"
 // (agentkit names its sources "agentskill:" and the skill's listed name).
 const SkillSourcePrefix = "agentskill:"
 
+// skillReadNS is where agentskill records a read of a skill, whose name
+// member is the skill's listed name.
+const skillReadNS = "agentskill:read"
+
+// skillReads is the set of skills the path holds a read record of.
+func skillReads(path []agentsession.Entry) map[string]bool {
+	reads := map[string]bool{}
+	for _, e := range path {
+		c, ok := e.(*agentsession.CustomEntry)
+		if !ok || c.NS != skillReadNS {
+			continue
+		}
+		var r struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(c.Data, &r) == nil && r.Name != "" {
+			reads[r.Name] = true
+		}
+	}
+	return reads
+}
+
+// skillOf names the skill a rule source stands for: agentkit's default
+// "agentskill:NAME", or a product's own naming ("skill:NAME" in dex) when
+// the path holds a read of the skill NAME, which is how a source the
+// product named is told from a settings file's.
+func skillOf(source string, reads map[string]bool) (string, bool) {
+	if name, ok := strings.CutPrefix(source, SkillSourcePrefix); ok {
+		return name, true
+	}
+	if i := strings.LastIndex(source, ":"); i >= 0 && reads[source[i+1:]] {
+		return source[i+1:], true
+	}
+	return "", false
+}
+
 // revokedPrefix opens the reason of the verdict that ends a source's
 // grants (agentkit v0.0.7, grants.go).
 const revokedPrefix = "revoked the rules granted by "
@@ -91,6 +127,7 @@ type Grant struct {
 // path it began and ended at (-1 for none).
 func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
 	live := map[string][]int{} // source -> indexes into all
+	reads := skillReads(path)
 	for i, e := range path {
 		v, ok := verdictOf(e)
 		if !ok {
@@ -110,8 +147,12 @@ func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
 				all[g].Ended, ended[g] = v.Entry, i
 			}
 			delete(live, src)
-		case v.Action == "allow" && v.Rule != "" && strings.HasPrefix(v.Reason, "granted ") && strings.HasPrefix(v.Source, SkillSourcePrefix):
-			all = append(all, Grant{Skill: strings.TrimPrefix(v.Source, SkillSourcePrefix), Source: v.Source, Rule: v.Rule, Since: v.Entry})
+		case v.Action == "allow" && v.Rule != "" && strings.HasPrefix(v.Reason, "granted "):
+			skill, ok := skillOf(v.Source, reads)
+			if !ok {
+				continue
+			}
+			all = append(all, Grant{Skill: skill, Source: v.Source, Rule: v.Rule, Since: v.Entry})
 			began, ended = append(began, i), append(ended, -1)
 			live[v.Source] = append(live[v.Source], len(all)-1)
 		}

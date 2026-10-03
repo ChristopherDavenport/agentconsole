@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"sync"
 
 	"github.com/ChristopherDavenport/agentsession"
@@ -20,7 +21,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 // Backend drives one agent and follows the session its recorder writes.
@@ -29,8 +30,14 @@ type Backend struct {
 	rec   *session.Recorder
 	store agentsession.Follower
 
-	mu     sync.Mutex
-	models agentturn.ReasoningModels // of the branch the head was moved to
+	runCtx     func(context.Context) context.Context
+	release    func(context.Context, *agentturn.RunEnd, []agentturn.Answer) ([]agentturn.Answer, error)
+	beforeMove func(context.Context) error
+	afterMove  func(context.Context, *agentsession.Session) error
+
+	mu      sync.Mutex
+	models  agentturn.ReasoningModels // of the branch the head was moved to
+	lastEnd *agentturn.RunEnd         // how the last run ended, for release
 
 	// afterRebase is a test seam: it runs after the recorder moved.
 	afterRebase func() error
@@ -38,17 +45,57 @@ type Backend struct {
 
 var _ client.Backend = (*Backend)(nil)
 
+// Option configures [New].
+type Option func(*Backend)
+
+// WithRunContext decorates the context of every run the backend starts
+// (Prompt, Answer) and of the head move, after the backend put its own on
+// it. fn is called under the backend's lock, so it must not call back
+// into Control (Prompt, Answer, ContinueFrom), which would deadlock. It is
+// how a host puts what its hooks read on the context: a
+// recorder, a session ID, a grant scope.
+func WithRunContext(fn func(context.Context) context.Context) Option {
+	return func(b *Backend) { b.runCtx = fn }
+}
+
+// WithRelease sets what Answer does with the answers it was given before
+// it resumes the run: fn gets the RunEnd the last run left pending calls
+// with (nil when the pending calls were restored from a record, so no run
+// of this process produced them) and returns the answers to resume with.
+// agentpolicy's Engine.Release is the use: it answers the calls it only
+// held, and fails when one is left unanswered.
+func WithRelease(fn func(ctx context.Context, end *agentturn.RunEnd, answers []agentturn.Answer) ([]agentturn.Answer, error)) Option {
+	return func(b *Backend) { b.release = fn }
+}
+
+// WithHeadMove sets two hooks around a [client.Control.ContinueFrom].
+// before runs before anything moves, while the recorder still writes the
+// branch being left; after runs once the recorder, the agent and the
+// pending calls are on the new branch, with the session as it stands
+// there, and again, with the session back on the old branch, when the move
+// fails and is undone. A host whose state follows the path (skill grants)
+// ends it in before and rebuilds it from the path in after. An error from
+// before refuses the move; an error from after fails it, or, in the undo,
+// is joined to the move's error.
+func WithHeadMove(before func(context.Context) error, after func(context.Context, *agentsession.Session) error) Option {
+	return func(b *Backend) { b.beforeMove, b.afterMove = before, after }
+}
+
 // New returns the backend for agent, whose events rec records. The caller
 // attaches rec to agent, with rec.Attach, before the first run: the
 // recorder has to be subscribed ahead of this backend, so that an event's
 // entry is in the store before the client sees the event. The recorder's
 // store must be able to follow: every store of agentsession is.
-func New(agent *agentturn.Agent, rec *session.Recorder) (*Backend, error) {
+func New(agent *agentturn.Agent, rec *session.Recorder, opts ...Option) (*Backend, error) {
 	f, ok := rec.Store().(agentsession.Follower)
 	if !ok {
 		return nil, fmt.Errorf("native: store %T cannot follow a session", rec.Store())
 	}
-	return &Backend{agent: agent, rec: rec, store: f}, nil
+	b := &Backend{agent: agent, rec: rec, store: f}
+	for _, o := range opts {
+		o(b)
+	}
+	return b, nil
 }
 
 // Agent returns the agent, for what the contract does not carry yet: the
@@ -75,11 +122,27 @@ func (c control) run(ctx context.Context) context.Context {
 	if c.b.models != nil {
 		ctx = agentturn.ContextWithReasoningModels(ctx, c.b.models)
 	}
+	if c.b.runCtx != nil {
+		ctx = c.b.runCtx(ctx)
+	}
 	return ctx
 }
 
+// ended keeps how a run ended. A run that returned no end (it failed
+// before it began) leaves the one before it, whose pending calls are
+// still waiting.
+func (c control) ended(end *agentturn.RunEnd) {
+	if end == nil {
+		return
+	}
+	c.b.mu.Lock()
+	c.b.lastEnd = end
+	c.b.mu.Unlock()
+}
+
 func (c control) Prompt(ctx context.Context, items ...openresponses.Item) error {
-	_, err := c.b.agent.Prompt(c.run(ctx), items...)
+	end, err := c.b.agent.Prompt(c.run(ctx), items...)
+	c.ended(end)
 	return err
 }
 
@@ -88,8 +151,65 @@ func (c control) Steer(items ...openresponses.Item) { c.b.agent.Steer(items...) 
 func (c control) Abort() { c.b.agent.Abort() }
 
 func (c control) Answer(ctx context.Context, answers ...agentturn.Answer) error {
-	_, err := c.b.agent.Resume(c.run(ctx), answers...)
+	ctx = c.run(ctx)
+	if c.b.release == nil {
+		end, err := c.b.agent.Resume(ctx, answers...)
+		c.ended(end)
+		return err
+	}
+	// Release forgets the calls it answers and records that it released
+	// them, before Resume starts, so what Resume would refuse is refused
+	// here, ahead of it: an answer for a call that is not pending, and
+	// two answers for one call. (A pending call left unanswered is the
+	// release's own check, which changes nothing when it fails.)
+	if err := checkAnswers(c.b.agent.State().Pending, answers); err != nil {
+		return err
+	}
+	c.b.mu.Lock()
+	end := c.b.lastEnd
+	c.b.mu.Unlock()
+	// An end that none of the answers is about is another run's.
+	if end != nil && !slices.ContainsFunc(answers, func(a agentturn.Answer) bool { return pendingIn(end, a.CallID) }) {
+		end = nil
+	}
+	answers, err := c.b.release(ctx, end, answers)
+	if err != nil {
+		return err
+	}
+	ran, err := c.b.agent.Resume(ctx, answers...)
+	if ran == nil && err != nil && end != nil {
+		// The run did not start, and the release already forgot the calls
+		// it held and recorded them released. The end cannot be used again:
+		// drop it, and the pending calls are answered as after a restart,
+		// each by an answer of the client's own.
+		c.b.mu.Lock()
+		c.b.lastEnd = nil
+		c.b.mu.Unlock()
+		return fmt.Errorf("native: the run did not start after the calls were released (answer every pending call again): %w", err)
+	}
+	c.ended(ran)
 	return err
+}
+
+// checkAnswers refuses answers Resume would refuse, before anything is
+// done on their account: one for a call that is not pending, and two for
+// the same call.
+func checkAnswers(pending []agentturn.PendingCall, answers []agentturn.Answer) error {
+	seen := map[string]bool{}
+	for _, a := range answers {
+		if seen[a.CallID] {
+			return fmt.Errorf("native: two answers for call %s", a.CallID)
+		}
+		seen[a.CallID] = true
+		if !slices.ContainsFunc(pending, func(p agentturn.PendingCall) bool { return p.Call != nil && p.Call.CallID == a.CallID }) {
+			return fmt.Errorf("native: answer for call %s, which is not pending", a.CallID)
+		}
+	}
+	return nil
+}
+
+func pendingIn(end *agentturn.RunEnd, callID string) bool {
+	return slices.ContainsFunc(end.Pending, func(p agentturn.PendingCall) bool { return p.Call != nil && p.Call.CallID == callID })
 }
 
 func (c control) State() agentturn.State { return c.b.agent.State() }
@@ -142,17 +262,35 @@ func (c control) ContinueFrom(ctx context.Context, entryID string) (err error) {
 
 	prevLeaf, prev := s.Leaf(), b.agent.State()
 	b.mu.Lock()
-	prevModels := b.models
+	prevModels, prevEnd := b.models, b.lastEnd
 	b.mu.Unlock()
+	ctx = c.run(ctx)
+	if b.beforeMove != nil {
+		if err := b.beforeMove(ctx); err != nil {
+			return fail(err)
+		}
+	}
 	moved := false
+	// The before hook may have written to the branch, which moved the
+	// leaf past where it was, so a failure from here on, even before the
+	// recorder moved, puts the head back and tells the host.
+	hooked := b.beforeMove != nil
 	defer func() {
-		if err == nil || !moved {
+		if err == nil || !(moved || hooked) {
 			return
 		}
 		// Put back what the move changed. A Rebase into a run appends the
 		// run's interrupted end, which stays on the record; the label that
 		// follows says the head is back.
 		var errs []error
+		if moved && b.beforeMove != nil {
+			// The host's state is now the new branch's: end it while the
+			// recorder still writes there, so the verdict it records is
+			// off the path the head goes back to.
+			if rerr := b.beforeMove(ctx); rerr != nil {
+				errs = append(errs, rerr)
+			}
+		}
 		if rerr := b.rec.Rebase(s, prevLeaf); rerr != nil {
 			errs = append(errs, rerr)
 		} else if mark, rerr := s.MarkLeaf(); rerr != nil {
@@ -168,8 +306,13 @@ func (c control) ContinueFrom(ctx context.Context, entryID string) (err error) {
 		if rerr := b.agent.SetPending(prev.Pending); rerr != nil {
 			errs = append(errs, rerr)
 		}
+		if b.afterMove != nil {
+			if rerr := b.afterMove(ctx, s); rerr != nil {
+				errs = append(errs, rerr)
+			}
+		}
 		b.mu.Lock()
-		b.models = prevModels
+		b.models, b.lastEnd = prevModels, prevEnd
 		b.mu.Unlock()
 		if len(errs) > 0 {
 			err = fmt.Errorf("%w (and putting the head back failed: %w)", err, errors.Join(errs...))
@@ -199,8 +342,13 @@ func (c control) ContinueFrom(ctx context.Context, entryID string) (err error) {
 	if err := b.agent.SetPending(pending); err != nil {
 		return fail(err)
 	}
+	if b.afterMove != nil {
+		if err := b.afterMove(ctx, s); err != nil {
+			return fail(err)
+		}
+	}
 	b.mu.Lock()
-	b.models = models
+	b.models, b.lastEnd = models, nil
 	b.mu.Unlock()
 	mark, err := s.MarkLeaf()
 	if err != nil {
