@@ -164,6 +164,147 @@ views only, labelled as unverified.
 5. **Extract the contract** once the wire backend or a second client
    needs it.
 
+## Decided in implementation
+
+Step 2 (the contract, the native backend and the reconciler, tested
+headless) changed the sketch in these places.
+
+- **Prompt and Answer block.** They return when the run ends, as
+  `Agent.Prompt` and `Agent.Resume` do, with the error that kept the run
+  from starting or ended it. A TUI calls them from a goroutine and reads
+  the outcome from the live `RunEnded`. `Steer` and `Abort` return at
+  once.
+- **Live subscribes when called.** A lazy iterator would subscribe when
+  first ranged over, and a client that starts a run right after calling
+  `Live` could miss its first events. Events queue without bound for the
+  one reader: the agent delivers as a barrier, and a slow terminal must
+  not stall the run or the recorder.
+- **LiveEvent is a set of concrete types** (`RunStarted`, `ItemOpened`,
+  `ItemUpdated`, `ItemCompleted`, `ResponseCompleted`, `ToolOpened`,
+  `ToolDispatched`, `ToolProgress`, `ToolFinished`, `RunEnded`, and two
+  for turns), each a copy. `item_end` stays a live event even though the
+  recorder writes it: the entry lags the event (the two lags), so the
+  overlay needs the completed item until the entry lands. The agent's
+  item is its accumulator and keeps changing, so the copy is taken in the
+  subscriber, which the barrier makes safe.
+- **A permission request is not an event of its own.** It is a
+  `ToolFinished` with `Deferred` (carrying the question), settled by the
+  `Pending` list on `RunEnded`, which is authoritative.
+- **tool_end does not write the output.** The output is an item entry
+  written at its own `item_end`, after the batch, in the call order. The
+  call's overlay therefore lives from `tool_start` until the output
+  entry lands, and carries the result in between.
+- **Run end flushes on both halves.** The live `run_end` can beat the
+  followed entries, so the overlay is flushed when the record's run end
+  entry has landed as well, never on the event alone. A run that never
+  writes its end entry is flushed by the next run's start.
+- **Order independence.** An entry is written before the live event that
+  follows it is queued, so the follower can deliver the entry first. The
+  view remembers what has landed (items by ID, calls and outputs by call
+  ID) and ignores a late live event for it.
+- **Items with no ID are not overlaid.** Only the loop appends them (a
+  prompt, a steered message), and the recorder writes them in the barrier
+  of their `item_end`. A function call output is not overlaid either: its
+  call row carries the result.
+- **The two models.** The record's model in force and the turn's model
+  are reported apart (`Model.Config`, `Turn.Model`), since a config entry
+  is written by the next entry-writing event.
+- **Branch tips are not `Session.Leaves`.** That list holds a branch's
+  last run end, and a leaf label, as childless entries. The view reads
+  each as the item the branch rests on, and counts a branch once.
+- **Tests use a jsonl store.** The memory store shares its entries with
+  its followers, and the recorder sets a config entry's ID after
+  appending it, which the race detector reports (see the findings in the
+  build report).
+- **Pending calls come from the record, live events refine them.** The
+  run end entry lists the calls left pending, and
+  `Session.PendingCalls` (agentsession v0.0.21) reads the ones without
+  an output with no tools. A view takes them on a snapshot, a reset, a
+  head move and each run end entry: a deferred call (its latest decision
+  is a hold) of an input_required run is a permission, with the hold's
+  reason as the question; any other is cut off. A view attached to a
+  session already at input_required therefore shows the permission with
+  no live event. The record's last run speaks only when the live stream
+  has said nothing of a later one and no run is going. (An earlier note
+  here said nothing exposed this; `PendingCalls` does.)
+- **Cut-off calls are not questions.** A call an abort or a failure
+  left unanswered is `CutOff`, with its own call state.
+- **Response IDs are compared strictly.** A row whose stream has not
+  named its response is identified by run and turn, and matches an entry
+  only while that entry's response is open. A response ends when its
+  live end arrives or its response entry was in the snapshot.
+- **A row still streaming when its response ends is dropped.** Only
+  `item_end` commits, so a message a guard withheld, or one a failed
+  response cut off, has no entry coming.
+- **Items kept from the model are rows.** The recorder writes an item
+  its filter hides from the model as a custom entry. It is on the
+  record, so it is rendered, flagged `KeptFromModel`.
+- **Branch tips and the leaf rest on items.** A label, a run end and a
+  response stand for their parent. The path is read to the end of the
+  bookkeeping behind the leaf, so run ends and decisions after the last
+  item still inform the calls and the turn.
+
+- **The run-end memory is capped at 64.** The view remembers the run end
+  entries the record delivered ahead of the live stream's `RunEnded`, to
+  settle a run when the second half arrives. The set holds 64. What is
+  lost past it: a run whose end entry was evicted before its live end
+  arrived is not settled by that entry, so its leftover overlay rows stay
+  until the start entry of a later run lands. That needs the record to be
+  more than 64 runs ahead of the live stream, which the native backend
+  cannot be (the entry is written before its event is queued, and both
+  are consumed in order). The cap exists for sessions another process
+  writes, where no live end ever comes and the set would otherwise grow
+  for ever.
+
+- **Response identity changed after the interleaving test.** Marking a
+  response over by its response entry was wrong: the record can be a whole
+  run ahead of the live stream, with the entry and the response entry in
+  before the stream's first event for the item. The view now settles a
+  response only on the live stream's end of it (`closed`), and matches a
+  live item that has no response yet to an entry by ID and text: what the
+  stream has is the start of what the entry holds, and an entry in a
+  response the stream ended is not the item's. A reused ID with other text
+  is another item; the same ID and the same text in a response the stream
+  never saw is taken for landed until the stream names the response.
+- **What waits is decided from the viewed path, always.** The record's
+  last run on the viewed line decides, and a live run end stands in for it
+  only until the record delivers its end entry (`reconcilePending`, run on
+  every record change and every live run end). A live end for a run the
+  viewed path has moved off says nothing about the viewed line.
+- **A run's start entry settles an earlier run only if the stream saw it
+  begin later** (`runSeq`), not any start entry: a reset replays older
+  starts.
+- **The interleaving test** (`internal/view/prop_test.go`) plays scripted
+  runs as the agent and recorder would, delivers the record's changes and
+  the live events in random interleavings with resets and head moves, and
+  checks the view after each step. `AGENTCONSOLE_SEEDS` and
+  `AGENTCONSOLE_SEED0` run more seeds or replay one.
+
+- **Known limit: a reused ID, an unnamed stream and a snapshot attach.** A
+  live item with no response yet is matched to an entry by ID and text. A
+  view attached from a snapshot that holds an earlier response the stream
+  never saw, with a new item that reuses its ID on an unnamed stream whose
+  text starts like the old one, shows nothing until the text diverges, and
+  drops a completed row equal to the old text until its own entry lands.
+  All four conditions are needed, and it ends when the response is named or
+  its entry lands. It is cosmetic and transient, and the fix would be a
+  turn number on the record's response entries, which the format does not
+  carry.
+- **Live rows belong to their run's line.** The view follows each run's
+  own line through the entries that land and shows the run's overlay rows
+  only while the viewed line extends the run's newest entry, so a head
+  moved back does not show another branch's streaming row under the path,
+  and the row returns with the view.
+- **The property test sees liveness and call state.** Every item the
+  stream opened whose entry has not landed must be shown, on the line it
+  belongs to and no other; call rows are checked for state, output,
+  progress and children; the turn's number, model and attempt are checked.
+  The generator plays what the recorder does: reasoning ended when the
+  loop commits, a stream that names its response part-way, a cut stream
+  whose response has no ID, a failed response, marked and hidden items,
+  bookmarks, head records without an entry, progress, child calls and
+  steered input, and a recorder that settles the config late.
+
 ## Open questions
 
 - **The terminal toolkit.** The likely choice is Bubble Tea. It needs
