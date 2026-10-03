@@ -150,22 +150,60 @@ func (c control) Abort() { c.b.agent.Abort() }
 
 func (c control) Answer(ctx context.Context, answers ...agentturn.Answer) error {
 	ctx = c.run(ctx)
-	if c.b.release != nil {
+	if c.b.release == nil {
+		end, err := c.b.agent.Resume(ctx, answers...)
+		c.ended(end)
+		return err
+	}
+	// Release forgets the calls it answers and records that it released
+	// them, before Resume starts, so what Resume would refuse is refused
+	// here, ahead of it: an answer for a call that is not pending, and
+	// two answers for one call. (A pending call left unanswered is the
+	// release's own check, which changes nothing when it fails.)
+	if err := checkAnswers(c.b.agent.State().Pending, answers); err != nil {
+		return err
+	}
+	c.b.mu.Lock()
+	end := c.b.lastEnd
+	c.b.mu.Unlock()
+	// An end that none of the answers is about is another run's.
+	if end != nil && !slices.ContainsFunc(answers, func(a agentturn.Answer) bool { return pendingIn(end, a.CallID) }) {
+		end = nil
+	}
+	answers, err := c.b.release(ctx, end, answers)
+	if err != nil {
+		return err
+	}
+	ran, err := c.b.agent.Resume(ctx, answers...)
+	if ran == nil && err != nil && end != nil {
+		// The run did not start, and the release already forgot the calls
+		// it held and recorded them released. The end cannot be used again:
+		// drop it, and the pending calls are answered as after a restart,
+		// each by an answer of the client's own.
 		c.b.mu.Lock()
-		end := c.b.lastEnd
+		c.b.lastEnd = nil
 		c.b.mu.Unlock()
-		// An end that none of the answers is about is another run's.
-		if end != nil && !slices.ContainsFunc(answers, func(a agentturn.Answer) bool { return pendingIn(end, a.CallID) }) {
-			end = nil
+		return fmt.Errorf("native: the run did not start after the calls were released (answer every pending call again): %w", err)
+	}
+	c.ended(ran)
+	return err
+}
+
+// checkAnswers refuses answers Resume would refuse, before anything is
+// done on their account: one for a call that is not pending, and two for
+// the same call.
+func checkAnswers(pending []agentturn.PendingCall, answers []agentturn.Answer) error {
+	seen := map[string]bool{}
+	for _, a := range answers {
+		if seen[a.CallID] {
+			return fmt.Errorf("native: two answers for call %s", a.CallID)
 		}
-		var err error
-		if answers, err = c.b.release(ctx, end, answers); err != nil {
-			return err
+		seen[a.CallID] = true
+		if !slices.ContainsFunc(pending, func(p agentturn.PendingCall) bool { return p.Call != nil && p.Call.CallID == a.CallID }) {
+			return fmt.Errorf("native: answer for call %s, which is not pending", a.CallID)
 		}
 	}
-	end, err := c.b.agent.Resume(ctx, answers...)
-	c.ended(end)
-	return err
+	return nil
 }
 
 func pendingIn(end *agentturn.RunEnd, callID string) bool {

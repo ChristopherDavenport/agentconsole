@@ -414,3 +414,77 @@ func TestRunContextAndReleaseReachTheRun(t *testing.T) {
 		t.Errorf("the tool's context carried %v, want the run context's mark", got)
 	}
 }
+
+// If Resume does not start after the release ran, the release's end is
+// dropped: the next Answer is released with no end, as after a restart,
+// and the error says the calls must be answered again.
+func TestAResumeThatDoesNotStartDropsTheEnd(t *testing.T) {
+	var mu sync.Mutex
+	var ends []*agentturn.RunEnd
+	failOnce := true
+	opts := []native.Option{native.WithRelease(func(_ context.Context, end *agentturn.RunEnd, answers []agentturn.Answer) ([]agentturn.Answer, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		ends = append(ends, end)
+		if failOnce {
+			failOnce = false
+			// What a release that went on to a Resume that cannot start
+			// looks like from here: an answer Resume refuses.
+			answers = append(answers[:len(answers):len(answers)], agentturn.Approve("not-pending"))
+		}
+		return answers, nil
+	})}
+	r := newRig(t, agentturn.Config{
+		Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+			callTool("c1", "act", `{}`), say(nil, nil, "done"),
+		}},
+		ModelName: "scripted",
+		Tools:     []agenttool.Tool{agenttool.New("act", "acts", func(context.Context, struct{}) (string, error) { return "acted", nil })},
+		BeforeToolCall: func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+			return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "ok?"}, nil
+		},
+	}, opts...)
+	r.finish(r.prompt("go"))
+	r.waitFor("the permission", func(m view.Model) bool { return len(m.Permissions) == 1 })
+
+	err := r.ctl.Answer(r.ctx, agentturn.Approve("c1"))
+	if err == nil || !strings.Contains(err.Error(), "did not start") {
+		t.Fatalf("err = %v, want the run did not start", err)
+	}
+	r.finish(r.start(func() error { return r.ctl.Answer(r.ctx, agentturn.Approve("c1")) }))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ends) != 2 || ends[0] == nil || ends[1] != nil {
+		t.Fatalf("release saw ends %v, want the run's first and none after the failed start", ends)
+	}
+}
+
+// Answers Resume would refuse are refused before the release.
+func TestAnswersAreCheckedBeforeTheRelease(t *testing.T) {
+	var released int
+	opts := []native.Option{native.WithRelease(func(_ context.Context, _ *agentturn.RunEnd, a []agentturn.Answer) ([]agentturn.Answer, error) {
+		released++
+		return a, nil
+	})}
+	r := newRig(t, agentturn.Config{
+		Model:     &script{responses: []func(context.Context, *openresponses.Emitter) error{callTool("c1", "act", `{}`)}},
+		ModelName: "scripted",
+		Tools:     []agenttool.Tool{agenttool.New("act", "acts", func(context.Context, struct{}) (string, error) { return "acted", nil })},
+		BeforeToolCall: func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+			return &agentturn.ToolDecision{Action: agentturn.Defer}, nil
+		},
+	}, opts...)
+	r.finish(r.prompt("go"))
+	r.waitFor("the permission", func(m view.Model) bool { return len(m.Permissions) == 1 })
+	for _, answers := range [][]agentturn.Answer{
+		{agentturn.Approve("c1"), agentturn.Approve("zzz")},
+		{agentturn.Approve("c1"), agentturn.Approve("c1")},
+	} {
+		if err := r.ctl.Answer(r.ctx, answers...); err == nil {
+			t.Fatal("accepted")
+		}
+	}
+	if released != 0 {
+		t.Errorf("release ran %d times for refused answers", released)
+	}
+}

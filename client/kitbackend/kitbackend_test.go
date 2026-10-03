@@ -25,6 +25,7 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/console"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
 	"github.com/ChristopherDavenport/agentconsole/internal/scripted"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 type noArgs struct{}
@@ -275,6 +276,35 @@ func TestAnswerReleasesTheCallsTheEngineHeld(t *testing.T) {
 	}
 	if !released {
 		t.Errorf("the record holds no released-hold verdict for safe: %+v", s.Verdicts)
+	}
+}
+
+// permissions is what the client offers the user to answer, computed from
+// the record as the TUI's feed does.
+func permissions(t *testing.T, be client.Backend) []view.Permission {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	v := view.New()
+	for ch, err := range be.Record().Follow(ctx, "") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.Record(ch)
+		break // the snapshot
+	}
+	return v.Model().Permissions
+}
+
+func TestTheClientOffersTheCallTheEngineHeld(t *testing.T) {
+	var ranDanger, ranSafe atomic.Int32
+	safe := agenttool.New("safe", "harmless", func(context.Context, noArgs) (string, error) { ranSafe.Add(1); return "fine", nil })
+	m := scripted.New(both("danger", "safe"), scripted.Say("both done"))
+	e := newEnv(t)
+	be := backend(t, e.kit("", agentkit.WithModel(m, "scripted"), agentkit.WithTools(danger(&ranDanger), safe), askDanger(t)))
+	prompt(t, be.Control(), "go")
+	if got := len(permissions(t, be)); got != 2 {
+		t.Fatalf("the client offers %d permissions, want the asked and the held call", got)
 	}
 }
 
@@ -565,5 +595,62 @@ func TestNewNeedsASession(t *testing.T) {
 	}
 	if _, err := kitbackend.New(nil); err == nil {
 		t.Fatal("a nil kit made a backend")
+	}
+}
+
+// TestARejectedAnswerLeavesTheHeldCallHeld: c1 is asked and c2 held. An
+// answer set that is refused (it names a call that is not pending) must
+// not release c2: the retry runs both, and the record says c2 was
+// released once, by the run that ran it.
+func TestARejectedAnswerLeavesTheHeldCallHeld(t *testing.T) {
+	var ranDanger, ranSafe atomic.Int32
+	safe := agenttool.New("safe", "harmless", func(context.Context, noArgs) (string, error) { ranSafe.Add(1); return "fine", nil })
+	m := scripted.New(both("danger", "safe"), scripted.Say("both done"))
+	e := newEnv(t)
+	be := backend(t, e.kit("", agentkit.WithModel(m, "scripted"), agentkit.WithTools(danger(&ranDanger), safe), askDanger(t)))
+	ctl := be.Control()
+	ctx := context.Background()
+	prompt(t, ctl, "go")
+
+	approve := agentturn.Approve("c1").WithBy(agentpolicy.ByHuman)
+	for name, answers := range map[string][]agentturn.Answer{
+		"unknown call": {approve, agentturn.Approve("bogus")},
+		"duplicate":    {approve, approve},
+	} {
+		if err := ctl.Answer(ctx, answers...); err == nil {
+			t.Fatalf("%s: the answers were accepted", name)
+		}
+	}
+	if got := pendingIDs(ctl); len(got) != 2 {
+		t.Fatalf("pending after the rejected answers = %v, want both", got)
+	}
+	if ranDanger.Load()+ranSafe.Load() != 0 {
+		t.Fatal("a tool ran on a rejected answer")
+	}
+	if d := callDetail(t, be, "safe"); len(d.Verdicts) != 0 && func() bool {
+		for _, v := range d.Verdicts {
+			if v.Held && v.Action == "allow" {
+				return true
+			}
+		}
+		return false
+	}() {
+		t.Fatalf("the record says safe was released although nothing ran: %+v", d.Verdicts)
+	}
+
+	if err := ctl.Answer(ctx, approve); err != nil {
+		t.Fatalf("the retry: %v", err)
+	}
+	if ranDanger.Load() != 1 || ranSafe.Load() != 1 {
+		t.Fatalf("danger ran %d, safe ran %d; want both once", ranDanger.Load(), ranSafe.Load())
+	}
+	releases := 0
+	for _, v := range callDetail(t, be, "safe").Verdicts {
+		if v.Held && v.Action == "allow" && strings.HasPrefix(v.Reason, "released") {
+			releases++
+		}
+	}
+	if releases != 1 {
+		t.Errorf("the record holds %d releases of safe, want 1", releases)
 	}
 }
