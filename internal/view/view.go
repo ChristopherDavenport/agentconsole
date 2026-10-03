@@ -259,6 +259,14 @@ type View struct {
 	// them, or the record held their response entry when it was read. An
 	// item with no response ID yet cannot belong to one.
 	settled map[string]bool
+	// recorded are responses whose entry landed while the live stream
+	// was still inside the turn that made them: the stream may not have
+	// delivered their items yet, so they are not over for it until it
+	// moves on. responded says this turn's response ended live.
+	recorded  map[string]bool
+	responded bool
+	// replaying is set while a snapshot or reset is read in.
+	replaying bool
 
 	items []*ovItem
 	calls []*ovCall
@@ -281,6 +289,7 @@ func New() *View {
 		landedCalls: map[string]bool{},
 		landedOuts:  map[string]bool{},
 		settled:     map[string]bool{},
+		recorded:    map[string]bool{},
 		liveEnded:   map[string]bool{},
 		endSeen:     map[string]bool{},
 	}
@@ -388,12 +397,11 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.landedOuts = map[string]bool{}
 	v.endSeen, v.endOrder = map[string]bool{}, nil
 	v.setSession(s, "")
+	v.replaying = true
 	for _, e := range s.Entries() {
 		v.land(e)
-		if r, ok := e.(*agentsession.ResponseEntry); ok {
-			v.settled[r.ResponseID] = true
-		}
 	}
+	v.replaying = false
 }
 
 func (v *View) setSession(s *agentsession.Session, leaf string) {
@@ -489,6 +497,12 @@ func (v *View) land(e agentsession.Entry) {
 		// entry, which is still the item landing.
 		if item, resp, ok := session.MarkedItem(x); ok {
 			v.landItem(item, resp)
+		}
+	case *agentsession.ResponseEntry:
+		if v.replaying || v.turn.State != Running || v.responded {
+			v.settled[x.ResponseID] = true
+		} else {
+			v.recorded[x.ResponseID] = true
 		}
 	case *agentsession.RunEntry:
 		if x.IsEnd() {
@@ -644,6 +658,8 @@ func (v *View) Live(ev client.LiveEvent) {
 	case *client.RunStarted:
 		// A run that starts has answered every call that waited, since
 		// the agent refuses it otherwise.
+		v.settleRecorded()
+		v.responded = false
 		v.perms, v.cut = nil, nil
 		kept := v.calls[:0]
 		for _, c := range v.calls {
@@ -655,6 +671,8 @@ func (v *View) Live(ev client.LiveEvent) {
 		v.calls = kept
 		v.turn = Turn{State: Running, RunID: e.RunID}
 	case *client.TurnStarted:
+		v.settleRecorded()
+		v.responded = false
 		v.turn.Number, v.turn.Attempt = e.Turn, 0
 		v.turn.Model = e.Model
 	case *client.ModelRetrying:
@@ -670,6 +688,8 @@ func (v *View) Live(ev client.LiveEvent) {
 	case *client.ResponseCompleted:
 		// The response names the items that completed before the stream
 		// did, and is over: an item with no response yet is not its.
+		v.settleRecorded()
+		v.responded = true
 		if e.ResponseID != "" {
 			v.settled[e.ResponseID] = true
 			for _, o := range v.items {
@@ -793,7 +813,15 @@ func (v *View) permit(p Permission) {
 	v.perms = append(v.perms, p)
 }
 
+func (v *View) settleRecorded() {
+	for r := range v.recorded {
+		v.settled[r] = true
+	}
+	clear(v.recorded)
+}
+
 func (v *View) runEnded(e *client.RunEnded) {
+	v.settleRecorded()
 	// The run's own list of what waits is authoritative: it replaces
 	// what the deferred calls reported one by one, keeping their
 	// questions.

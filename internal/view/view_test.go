@@ -759,3 +759,42 @@ func TestLiveRunEndIsKeptWhileTheRecordIsBehind(t *testing.T) {
 		t.Fatalf("the lagging record wiped the live permission: %+v, %v", m.Permissions, m.Turn.State)
 	}
 }
+
+// A response whose entry landed without a live end (the live stream was
+// attached mid-run) is over once the stream moves to the next turn, and a
+// later item reusing an ID is another item.
+func TestResponseEntrySettlesItsResponse(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.append(itemEntry(msg("msg_0", "assistant", "first"), "resp1"))
+	l.append(&agentsession.ResponseEntry{ResponseID: "resp1", Status: openresponses.ResponseStatusCompleted})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.stream("run1", "", msg("msg_0", "assistant", "second"), false)
+	if m := l.v.Model(); len(m.Rows) != 2 || !m.Rows[1].Live {
+		t.Fatalf("the reused ID was hidden: %+v", m.Rows)
+	}
+}
+
+// The follower can be ahead of the live stream: the item entry and the
+// response entry are in before the live events of the item are read. The
+// response is not over for the stream yet, so the late events are the
+// entry's and leave no second row.
+func TestResponseEntryAheadOfTheLiveStreamLeavesNoGhost(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.append(itemEntry(msg("msg_0", "assistant", "hi"), "resp1"))
+	l.append(&agentsession.ResponseEntry{ResponseID: "resp1", Status: openresponses.ResponseStatusCompleted})
+	l.stream("run1", "", msg("msg_0", "assistant", "hi"), false)
+	l.stream("run1", "", msg("msg_0", "assistant", "hi"), true)
+	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
+		t.Fatalf("ghost: %+v", m.Rows)
+	}
+	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.stream("run1", "", msg("msg_0", "assistant", "again"), false)
+	if m := l.v.Model(); len(m.Rows) != 2 {
+		t.Fatalf("after the stream moved on: %+v", m.Rows)
+	}
+}
