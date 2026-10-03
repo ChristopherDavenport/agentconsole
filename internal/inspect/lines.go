@@ -285,8 +285,12 @@ func (s Session) Lines() []string {
 	} else {
 		add("memory:   no manifest on the line")
 	}
-	if s.ManifestSkipped > 0 {
-		add("          %d manifest records did not fold", s.ManifestSkipped)
+	for i, r := range s.ManifestRefused {
+		if i == maxListed {
+			add("          ... %d more refused", len(s.ManifestRefused)-maxListed)
+			break
+		}
+		add("          REFUSED manifest record %s: %s", short(r.Entry), clip(r.Why, 120))
 	}
 	if len(s.Grants) == 0 {
 		add("grants:   no skill grants on the line")

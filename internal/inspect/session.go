@@ -34,9 +34,10 @@ type Session struct {
 	Refs    []agentsession.Ref
 	RefsErr string
 	// Manifest is the memory manifest in force, nil when the line holds
-	// none; ManifestSkipped counts records that did not fold.
+	// none; ManifestRefused lists the records the fold refused, which
+	// leave the manifest in force as it was.
 	Manifest        *Manifest
-	ManifestSkipped int
+	ManifestRefused []Refusal
 	// Grants are the skill grants in force at the end of the line, and
 	// those a revocation ended.
 	Grants []Grant
@@ -150,12 +151,11 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 	} else {
 		out.Refs = refs
 	}
-	if m, skipped, ok := manifestIn(path); ok {
+	m, refused, ok := manifestIn(path)
+	if ok {
 		out.Manifest = &m
-		out.ManifestSkipped = skipped
-	} else {
-		out.ManifestSkipped = skipped
 	}
+	out.ManifestRefused = refused
 	all, _, _ := grants(path)
 	out.Grants = all
 	return out, nil
