@@ -187,3 +187,33 @@ func TestLeafLabelWhereTheHeadWasMovedIsNotABranch(t *testing.T) {
 	}
 	_ = root
 }
+
+func TestACompactionIsARowThatSaysWhatItFolded(t *testing.T) {
+	l := newLog(t)
+	first := l.append(itemEntry(msg("a", "user", "one"), ""))
+	l.append(itemEntry(msg("b", "assistant", "r1"), "r1"))
+	kept := l.append(itemEntry(msg("c", "user", "two"), ""))
+	_ = first
+	c, err := l.s.Compact(kept, msg("", "assistant", "we spoke of one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.TokensBefore = 1234
+	c.Pinned = append(c.Pinned, msg("p", "user", "pinned"))
+	id := l.append(c)
+
+	m := l.v.Model()
+	var fold *Row
+	for i := range m.Rows {
+		if m.Rows[i].Fold != nil {
+			fold = &m.Rows[i]
+		}
+	}
+	if fold == nil {
+		t.Fatalf("no compaction row in %d rows", len(m.Rows))
+	}
+	f := fold.Fold
+	if fold.EntryID != id || f.FirstKept != kept || f.SummaryLen != len("we spoke of one") || f.Pinned != 1 || f.TokensBefore != 1234 {
+		t.Errorf("row = %+v fold = %+v, want entry %s first kept %s", fold, f, id, kept)
+	}
+}

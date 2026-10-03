@@ -183,6 +183,24 @@ type Row struct {
 	Item          openresponses.Item
 	// Call is set on the row of a function call.
 	Call *Call
+	// Fold is set on the row of a compaction entry: the point where the
+	// record folds what came before into a summary, which Item carries.
+	Fold *Fold
+}
+
+// Fold is what a compaction entry says it folded.
+type Fold struct {
+	// FirstKept is the entry the context keeps from: everything before it
+	// on the path is replaced by the summary in the model's request, and
+	// stays on the record.
+	FirstKept string
+	// SummaryLen is the summary's text length in runes.
+	SummaryLen int
+	// Pinned is how many items the compaction carries over whole.
+	Pinned int
+	// TokensBefore is the estimate that triggered the fold, 0 if not
+	// recorded.
+	TokensBefore int
 }
 
 // Permission is a call that waits for the caller.
@@ -1043,6 +1061,10 @@ func (v *View) Model() Model {
 				row.Call = v.callView(fc, committed[x.ID])
 			}
 			m.Rows = append(m.Rows, row)
+		case *agentsession.CompactionEntry:
+			summary, _ := textOf(x.Summary)
+			m.Rows = append(m.Rows, Row{EntryID: x.ID, Item: x.Summary, Fold: &Fold{
+				FirstKept: x.FirstKept, SummaryLen: len([]rune(summary)), Pinned: len(x.Pinned), TokensBefore: x.TokensBefore}})
 		case *agentsession.CustomEntry:
 			// An item the filter keeps from the model is on the record
 			// as a custom entry. It is a row all the same: the record
