@@ -312,6 +312,7 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	if leaf == "" {
 		leaf = s.Leaf()
 	}
+	leaf = resting(s, leaf)
 	v.leaf = leaf
 	// The session is the follower's own and valid until the next step,
 	// so the path and the leaves are copied out.
@@ -319,30 +320,33 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	v.leaves = tips(s)
 }
 
-// tips are the branch tips of the session, one per branch. The childless
-// entries Leaves lists include entries no one rests on: the run end and
-// the response that follow a branch's last item, and a leaf label, which
-// hangs off the entry it marks. Each is read as the item the branch
-// rests on, as the session's own leaf is, and branches that end on one
-// item are one.
+// resting reads an entry as the item its branch rests on. A run end, a
+// response and a label are bookkeeping that follows the content: each
+// stands for its parent, so a bookmark appended last does not hide the
+// tip it was appended behind.
+func resting(s *agentsession.Session, id string) string {
+	for hops := 0; hops <= s.Len(); hops++ {
+		e, ok := s.Entry(id)
+		if !ok {
+			break
+		}
+		if _, isItem := e.(*agentsession.ItemEntry); isItem || e.Base().Parent == "" {
+			break
+		}
+		id = e.Base().Parent
+	}
+	return id
+}
+
+// tips are the branch tips of the session, one per branch: the childless
+// entries Leaves lists, each read as the item it rests on, and branches
+// that end on one item counted once. Session.Branches upstream would
+// replace this (agentsession#197).
 func tips(s *agentsession.Session) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range s.Leaves() {
-		for hops := 0; hops <= s.Len(); hops++ {
-			e, ok := s.Entry(id)
-			if !ok {
-				break
-			}
-			if l, isLabel := e.(*agentsession.LabelEntry); isLabel {
-				id = l.Target
-				continue
-			}
-			if _, isItem := e.(*agentsession.ItemEntry); isItem || e.Base().Parent == "" {
-				break
-			}
-			id = e.Base().Parent
-		}
+		id = resting(s, id)
 		if !seen[id] {
 			seen[id] = true
 			out = append(out, id)

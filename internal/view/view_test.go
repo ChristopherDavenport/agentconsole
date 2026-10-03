@@ -505,3 +505,27 @@ func text(item openresponses.Item) string {
 	}
 	return ""
 }
+
+// A bookmark label appended last is bookkeeping. The branch it sits on
+// still ends at the newest item, and the leaf is never the label.
+func TestBookmarkLabelDoesNotHideTheTip(t *testing.T) {
+	l := newLog(t)
+	a := l.append(itemEntry(msg("a", "user", "a"), ""))
+	l.append(itemEntry(msg("b", "assistant", "b"), "r"))
+	c := l.append(itemEntry(msg("c", "user", "c"), ""))
+	l.append(agentsession.NewLabelEntry(a, "bookmark"))
+	m := l.v.Model()
+	if len(m.Leaves) != 1 || m.Leaves[0] != c {
+		t.Errorf("leaves = %v, want [%s]", m.Leaves, c)
+	}
+	if m.Leaf != c || len(m.Rows) != 3 {
+		t.Errorf("leaf = %s with %d rows, want %s with 3", m.Leaf, len(m.Rows), c)
+	}
+	found := false
+	for _, id := range m.Leaves {
+		found = found || id == m.Leaf
+	}
+	if !found {
+		t.Errorf("the leaf %s is not among the leaves %v", m.Leaf, m.Leaves)
+	}
+}
