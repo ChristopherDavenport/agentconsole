@@ -225,7 +225,7 @@ func FromEvent(ev agentturn.Event) (LiveEvent, bool) {
 	return nil, false
 }
 
-func resultText(r agenttool.Result) string { return r.Output.Text }
+func resultText(r agenttool.Result) string { return r.Output.String() }
 
 // CloneItem returns a copy of item that shares nothing with it.
 func CloneItem(item openresponses.Item) openresponses.Item {

@@ -1,6 +1,6 @@
 module github.com/ChristopherDavenport/agentconsole
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/ChristopherDavenport/agentsession v0.0.20 // TODO: v0.0.21 (Follow)

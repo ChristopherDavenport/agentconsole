@@ -164,6 +164,64 @@ views only, labelled as unverified.
 5. **Extract the contract** once the wire backend or a second client
    needs it.
 
+## Decided in implementation
+
+Step 2 (the contract, the native backend and the reconciler, tested
+headless) changed the sketch in these places.
+
+- **Prompt and Answer block.** They return when the run ends, as
+  `Agent.Prompt` and `Agent.Resume` do, with the error that kept the run
+  from starting or ended it. A TUI calls them from a goroutine and reads
+  the outcome from the live `RunEnded`. `Steer` and `Abort` return at
+  once.
+- **Live subscribes when called.** A lazy iterator would subscribe when
+  first ranged over, and a client that starts a run right after calling
+  `Live` could miss its first events. Events queue without bound for the
+  one reader: the agent delivers as a barrier, and a slow terminal must
+  not stall the run or the recorder.
+- **LiveEvent is a set of concrete types** (`RunStarted`, `ItemOpened`,
+  `ItemUpdated`, `ItemCompleted`, `ResponseCompleted`, `ToolOpened`,
+  `ToolDispatched`, `ToolProgress`, `ToolFinished`, `RunEnded`, and two
+  for turns), each a copy. `item_end` stays a live event even though the
+  recorder writes it: the entry lags the event (the two lags), so the
+  overlay needs the completed item until the entry lands. The agent's
+  item is its accumulator and keeps changing, so the copy is taken in the
+  subscriber, which the barrier makes safe.
+- **A permission request is not an event of its own.** It is a
+  `ToolFinished` with `Deferred` (carrying the question), settled by the
+  `Pending` list on `RunEnded`, which is authoritative.
+- **tool_end does not write the output.** The output is an item entry
+  written at its own `item_end`, after the batch, in the call order. The
+  call's overlay therefore lives from `tool_start` until the output
+  entry lands, and carries the result in between.
+- **Run end flushes on both halves.** The live `run_end` can beat the
+  followed entries, so the overlay is flushed when the record's run end
+  entry has landed as well, never on the event alone. A run that never
+  writes its end entry is flushed by the next run's start.
+- **Order independence.** An entry is written before the live event that
+  follows it is queued, so the follower can deliver the entry first. The
+  view remembers what has landed (items by ID, calls and outputs by call
+  ID) and ignores a late live event for it.
+- **Items with no ID are not overlaid.** Only the loop appends them (a
+  prompt, a steered message), and the recorder writes them in the barrier
+  of their `item_end`. A function call output is not overlaid either: its
+  call row carries the result.
+- **The two models.** The record's model in force and the turn's model
+  are reported apart (`Model.Config`, `Turn.Model`), since a config entry
+  is written by the next entry-writing event.
+- **Branch tips are not `Session.Leaves`.** That list holds a branch's
+  last run end, and a leaf label, as childless entries. The view reads
+  each as the item the branch rests on, and counts a branch once.
+- **Tests use a jsonl store.** The memory store shares its entries with
+  its followers, and the recorder sets a config entry's ID after
+  appending it, which the race detector reports (see the findings in the
+  build report).
+- **The turn state is from live events.** A view started on a session
+  whose last run ended input_required shows `Idle` and no permissions
+  until a live event says otherwise. The record has the run end with its
+  pending call IDs, so the view can read it from there; that is for the
+  TUI's resume path.
+
 ## Open questions
 
 - **The terminal toolkit.** The likely choice is Bubble Tea. It needs
