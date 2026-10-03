@@ -25,6 +25,17 @@ const SkillSourcePrefix = "agentskill:"
 // grants (agentkit v0.0.7, grants.go).
 const revokedPrefix = "revoked the rules granted by "
 
+// Engine.RevokeScope journals "revoked the rules granted under <scope>",
+// or the unscoped form (agentpolicy v0.0.11, grant.go). A grant's verdict
+// carries no scope, so a reader cannot tell which grants the scope held:
+// agentkit reads the revocation of its own scope as ending every grant of
+// the conversation, and so does this, for either form. A session written
+// by several scopes at once would show too many grants ended.
+const (
+	revokedScopePrefix = "revoked the rules granted under "
+	revokedUnscoped    = "revoked the rules granted without a scope"
+)
+
 // Verdict is a policy verdict as the session holds it.
 type Verdict struct {
 	Entry      string `json:"-"`
@@ -84,6 +95,13 @@ func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
 			continue
 		}
 		switch {
+		case strings.HasPrefix(v.Reason, revokedScopePrefix) || v.Reason == revokedUnscoped:
+			for src, gs := range live {
+				for _, g := range gs {
+					all[g].Ended, ended[g] = v.Entry, i
+				}
+				delete(live, src)
+			}
 		case strings.HasPrefix(v.Reason, revokedPrefix):
 			src := strings.TrimPrefix(v.Reason, revokedPrefix)
 			for _, g := range live[src] {

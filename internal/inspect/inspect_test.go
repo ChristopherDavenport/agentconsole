@@ -512,3 +512,39 @@ func TestPanesAskedTogetherReadTheSessionOnce(t *testing.T) {
 		t.Errorf("%d reads, want 1", got)
 	}
 }
+
+// Engine.RevokeScope ends every grant of a conversation, and journals it
+// as "revoked the rules granted under <scope>" (or without a scope), not as
+// a revocation by source.
+func TestScopeRevocationEndsEveryGrant(t *testing.T) {
+	for _, reason := range []string{"revoked the rules granted under conv-1", "revoked the rules granted without a scope"} {
+		t.Run(reason, func(t *testing.T) {
+			cfg := agentturn.Config{ModelName: "m", Tools: []agenttool.Tool{upper()},
+				Model: &script{responses: []step{callTool("call_1", "upper", `{"text":"a"}`), say("one")}}}
+			r := newRig(t, cfg)
+			grant := func(src string) {
+				r.annotate(inspect.VerdictNS, map[string]any{"action": "allow", "rule": "upper", "source": src, "reason": "granted upper by " + src, "by": "policy"})
+			}
+			grant("agentskill:one")
+			grant("agentskill:two")
+			r.prompt("go")
+			r.annotate(inspect.VerdictNS, map[string]any{"action": "block", "reason": reason, "by": "policy"})
+			m := r.model()
+			s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(s.Grants) != 2 {
+				t.Fatalf("grants = %+v", s.Grants)
+			}
+			for _, g := range s.Grants {
+				if g.Ended == "" {
+					t.Errorf("grant %+v still in force after %q", g, reason)
+				}
+			}
+			if !strings.Contains(joined(s.Lines()), "revoked at") {
+				t.Errorf("the pane does not show the revocation:\n%s", joined(s.Lines()))
+			}
+		})
+	}
+}
