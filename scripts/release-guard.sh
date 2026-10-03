@@ -7,7 +7,8 @@
 #
 # Exits non-zero, with the reason, if the tree is dirty, the tag already
 # exists, or the version does not sort above the current release. With no
-# tag published yet, any vX.Y.Z is the first release.
+# plain vX.Y.Z tag is published yet, any vX.Y.Z of the module's major
+# version is the first release. Prerelease versions are refused.
 #
 # Run it before the tag is written; make release does. Nothing is public
 # until the push, so a refusal costs a git reset --hard HEAD~1 and a git
@@ -84,12 +85,16 @@ ok "tag is new"
 # The remote listing above succeeded, so an empty floor means nothing has
 # been published: this is the first release, which has nothing to sort
 # above.
-LATEST="$(matching '^v' | newest)"
+#
+# Only plain vX.Y.Z tags make the floor. sort -V puts v0.0.7-rc1 above
+# v0.0.7 and vnext above every number, so counting them would refuse the
+# release of a version that is not behind anything.
+LATEST="$(matching '^v[0-9]+\.[0-9]+\.[0-9]+$' | newest)"
 
 case "$TAG" in
   v*)
     printf '%s\n' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-      || die "$TAG is not of the form vX.Y.Z"
+      || die "$TAG is not a plain vX.Y.Z version; prereleases and other forms are not released by this guard"
     # Go's rule: a module whose path has no /vN suffix is v0 or v1; /vN is
     # vN. A v2.0.0 tag on the unsuffixed path cannot be withdrawn and no
     # consumer can require it as the module.
