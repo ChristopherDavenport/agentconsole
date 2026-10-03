@@ -588,3 +588,82 @@ func TestOpenRowGoesWhenItsResponseEnds(t *testing.T) {
 		t.Fatalf("rows after the response ended: %+v", m.Rows)
 	}
 }
+
+// pendingLog is a session that stopped at a deferred call: what a client
+// attaches to after a restart.
+func pendingLog(t *testing.T, reason string) (*agentsession.Session, string) {
+	t.Helper()
+	s := agentsession.New(agentsession.Header{})
+	add := func(e agentsession.Entry) string {
+		id, err := s.Append(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{"path":"/"}`}
+	add(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	callEntry := add(itemEntry(call, "resp1"))
+	if reason == agentsession.ReasonInputRequired {
+		add(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete the root?"))
+	}
+	add(agentsession.NewRunEnd("run1", reason, "", []string{"c1"}))
+	return s, callEntry
+}
+
+// A view attached to a session already at input_required shows the
+// permission from the record, with no live event.
+func TestAttachedViewShowsPendingPermissionsFromTheRecord(t *testing.T) {
+	s, _ := pendingLog(t, agentsession.ReasonInputRequired)
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	m := v.Model()
+	if m.Turn.State != RequiresAction || len(m.Permissions) != 1 {
+		t.Fatalf("turn %v, permissions %+v", m.Turn.State, m.Permissions)
+	}
+	p := m.Permissions[0]
+	if p.CallID != "c1" || p.Name != "rm" || p.Args != `{"path":"/"}` || p.Question != "delete the root?" {
+		t.Errorf("permission = %+v", p)
+	}
+	if m.Rows[0].Call.State != CallDeferred {
+		t.Errorf("call state = %v, want deferred", m.Rows[0].Call.State)
+	}
+
+	// Live events refine it rather than double it: the same run ending.
+	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{"path":"/"}`, Reason: agentturn.PendingDeferred}}})
+	if m := v.Model(); len(m.Permissions) != 1 || m.Permissions[0].Question != "delete the root?" {
+		t.Fatalf("after the live end: %+v", m.Permissions)
+	}
+
+	// The answer lands as an output, from this process or another.
+	if _, err := s.Append(itemEntry(openresponses.NewFunctionCallOutput("c1", "no"), "")); err != nil {
+		t.Fatal(err)
+	}
+	v.Record(agentsession.Change{Kind: agentsession.Reset, Session: s})
+	if m := v.Model(); len(m.Permissions) != 0 || m.Turn.State != Idle {
+		t.Fatalf("after the output: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}
+
+func TestAttachedViewShowsCutOffCallsFromTheRecord(t *testing.T) {
+	s, _ := pendingLog(t, agentsession.ReasonInterrupted)
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	m := v.Model()
+	if m.Turn.State != Idle || len(m.Permissions) != 0 || len(m.CutOff) != 1 || m.Rows[0].Call.State != CallCutOff {
+		t.Fatalf("turn %v, permissions %+v, cut off %+v", m.Turn.State, m.Permissions, m.CutOff)
+	}
+}
+
+// The end entry of a run the view watched ending says the same as the
+// live event: it must not wipe what a later live run says.
+func TestRecordPendingDoesNotOverrideALaterLiveRun(t *testing.T) {
+	s, _ := pendingLog(t, agentsession.ReasonInputRequired)
+	v := New()
+	v.Live(&client.RunStarted{RunID: "run2"})
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	if m := v.Model(); m.Turn.State != Running || len(m.Permissions) != 0 {
+		t.Fatalf("turn %v, permissions %+v: the record's older run overrode the live one", m.Turn.State, m.Permissions)
+	}
+}

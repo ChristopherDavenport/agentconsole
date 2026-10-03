@@ -291,11 +291,77 @@ func (v *View) Record(ch agentsession.Change) {
 	switch ch.Kind {
 	case agentsession.Snapshot, agentsession.Reset:
 		v.rebuild(ch.Session)
+		v.syncPending(ch.Session)
 	case agentsession.Appended:
 		v.setSession(ch.Session, "")
 		v.land(ch.Entry)
+		if r, ok := ch.Entry.(*agentsession.RunEntry); ok && r.IsEnd() {
+			v.syncPending(ch.Session)
+		}
 	case agentsession.Head:
 		v.setSession(ch.Session, ch.Leaf)
+		v.syncPending(ch.Session)
+	}
+}
+
+// syncPending reads what waits on an answer from the record: the calls a
+// run's end entry lists as pending that the path still holds without an
+// output. A view attached to a session that stopped at input_required
+// shows its permissions from here, with no live event, and the live
+// events refine them (the question of a call, a later run). The record's
+// last run speaks only when the live stream has said nothing of a later
+// one, and never while a run is going.
+func (v *View) syncPending(s *agentsession.Session) {
+	if v.turn.State == Running {
+		return
+	}
+	var last *agentsession.RunEntry
+	for i := len(v.path) - 1; i >= 0 && last == nil; i-- {
+		if r, ok := v.path[i].(*agentsession.RunEntry); ok {
+			last = r
+		}
+	}
+	if last == nil || !last.IsEnd() || (v.turn.RunID != "" && v.turn.RunID != last.RunID) {
+		return
+	}
+	waiting := map[string]bool{}
+	for _, id := range last.Pending {
+		waiting[id] = true
+	}
+	old := v.perms
+	v.perms, v.cut = nil, nil
+	calls, err := s.PendingCalls(v.path[len(v.path)-1].Base().ID)
+	if err == nil {
+		for _, c := range calls {
+			if !waiting[c.ID()] {
+				continue
+			}
+			p := Permission{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments}
+			known := false
+			for _, o := range old {
+				known = known || o.CallID == p.CallID
+			}
+			if last.Reason == agentsession.ReasonInputRequired && (c.Held() || known) {
+				p.Reason = string(agentturn.PendingDeferred)
+				if n := len(c.Decisions); n > 0 {
+					p.Question = c.Decisions[n-1].Reason
+				}
+				for _, o := range old {
+					if o.CallID == p.CallID && o.Question != "" {
+						p.Question = o.Question
+					}
+				}
+				v.perms = append(v.perms, p)
+				continue
+			}
+			p.Reason = last.Reason
+			v.cut = append(v.cut, p)
+		}
+	}
+	v.turn.RunID = last.RunID
+	v.turn.State = Idle
+	if len(v.perms) > 0 {
+		v.turn.State = RequiresAction
 	}
 }
 
@@ -325,11 +391,10 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	if leaf == "" {
 		leaf = s.Leaf()
 	}
-	leaf = resting(s, leaf)
-	v.leaf = leaf
+	v.leaf = resting(s, leaf)
 	// The session is the follower's own and valid until the next step,
 	// so the path and the leaves are copied out.
-	v.path = append([]agentsession.Entry(nil), s.Path(leaf)...)
+	v.path = append([]agentsession.Entry(nil), s.Path(lineEnd(s, leaf))...)
 	v.leaves = tips(s)
 }
 
@@ -347,6 +412,29 @@ func resting(s *agentsession.Session, id string) string {
 			break
 		}
 		id = e.Base().Parent
+	}
+	return id
+}
+
+// lineEnd walks from id down through the bookkeeping that follows an item
+// (the decisions, dispatches, response and run entries a branch ends
+// with) to the last of it, stopping where the next entry is an item. A
+// leaf rests on an item, and the entries behind it still say what became
+// of its calls and how its run ended.
+func lineEnd(s *agentsession.Session, id string) string {
+	for hops := 0; hops <= s.Len(); hops++ {
+		next := ""
+		for _, c := range s.Children(id) {
+			if e, ok := s.Entry(c); ok {
+				if _, isItem := e.(*agentsession.ItemEntry); !isItem {
+					next = c
+				}
+			}
+		}
+		if next == "" {
+			return id
+		}
+		id = next
 	}
 	return id
 }
@@ -789,6 +877,11 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 		case o.parent == fc.CallID:
 			c.Children = append(c.Children, Call{CallID: o.callID, Name: o.name, Args: o.args,
 				State: o.state, Partial: o.partial, Output: o.output})
+		}
+	}
+	for _, p := range v.perms {
+		if p.CallID == fc.CallID && c.State < CallDeferred {
+			c.State, c.Reason = CallDeferred, p.Question
 		}
 	}
 	for _, p := range v.cut {

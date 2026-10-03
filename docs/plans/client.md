@@ -216,11 +216,33 @@ headless) changed the sketch in these places.
   its followers, and the recorder sets a config entry's ID after
   appending it, which the race detector reports (see the findings in the
   build report).
-- **The turn state is from live events.** A view started on a session
-  whose last run ended input_required shows `Idle` and no permissions
-  until a live event says otherwise. The record has the run end with its
-  pending call IDs, so the view can read it from there; that is for the
-  TUI's resume path.
+- **Pending calls come from the record, live events refine them.** The
+  run end entry lists the calls left pending, and
+  `Session.PendingCalls` (agentsession v0.0.21) reads the ones without
+  an output with no tools. A view takes them on a snapshot, a reset, a
+  head move and each run end entry: a deferred call (its latest decision
+  is a hold) of an input_required run is a permission, with the hold's
+  reason as the question; any other is cut off. A view attached to a
+  session already at input_required therefore shows the permission with
+  no live event. The record's last run speaks only when the live stream
+  has said nothing of a later one and no run is going. (An earlier note
+  here said nothing exposed this; `PendingCalls` does.)
+- **Cut-off calls are not questions.** A call an abort or a failure
+  left unanswered is `CutOff`, with its own call state.
+- **Response IDs are compared strictly.** A row whose stream has not
+  named its response is identified by run and turn, and matches an entry
+  only while that entry's response is open. A response ends when its
+  live end arrives or its response entry was in the snapshot.
+- **A row still streaming when its response ends is dropped.** Only
+  `item_end` commits, so a message a guard withheld, or one a failed
+  response cut off, has no entry coming.
+- **Items kept from the model are rows.** The recorder writes an item
+  its filter hides from the model as a custom entry. It is on the
+  record, so it is rendered, flagged `KeptFromModel`.
+- **Branch tips and the leaf rest on items.** A label, a run end and a
+  response stand for their parent. The path is read to the end of the
+  bookkeeping behind the leaf, so run ends and decisions after the last
+  item still inform the calls and the turn.
 
 ## Open questions
 

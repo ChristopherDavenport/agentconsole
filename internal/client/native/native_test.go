@@ -466,3 +466,34 @@ func TestWithheldMessageIsNotLeftOnScreen(t *testing.T) {
 		t.Error("the withheld message was rendered as committed")
 	}
 }
+
+// TestLateAttachedViewSeesThePermission attaches a second view, fed by
+// the record alone, to a session that stopped at a deferred call. It
+// shows the permission from the snapshot, with no live event.
+func TestLateAttachedViewSeesThePermission(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "m", Tools: []agenttool.Tool{upperTool(nil)}, Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+		callTool("call_1", "upper", `{"text":"abc"}`),
+	}},
+		BeforeToolCall: func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+			return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "may I run upper?"}, nil
+		}}
+	r := newRig(t, cfg)
+	r.finish(r.prompt("go"))
+	r.waitFor("the permission", func(m view.Model) bool { return len(m.Permissions) == 1 })
+
+	late := view.New()
+	for ch, err := range r.be.Record().Follow(r.ctx, "") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		late.Record(ch)
+		break
+	}
+	m := late.Model()
+	if m.Turn.State != view.RequiresAction || len(m.Permissions) != 1 {
+		t.Fatalf("late view: turn %v, permissions %+v", m.Turn.State, m.Permissions)
+	}
+	if p := m.Permissions[0]; p.CallID != "call_1" || p.Name != "upper" || p.Question != "may I run upper?" {
+		t.Errorf("permission = %+v", p)
+	}
+}
