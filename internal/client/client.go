@@ -45,6 +45,13 @@ type Control interface {
 	// reply to a permission request.
 	Answer(ctx context.Context, answers ...agentturn.Answer) error
 	State() agentturn.State
+	// ContinueFrom moves the agent's head to the entry: the next prompt
+	// continues the conversation from there, on a branch of the session.
+	// It is how a client acts on what it saw in the tree, and the one
+	// control that moves the record's head. It is refused while a run
+	// goes. The move is recorded as a leaf label, so a follower sees the
+	// head move and a reopened session resumes there.
+	ContinueFrom(ctx context.Context, entryID string) error
 }
 
 // Record is the agent's session as a client follows it.
@@ -56,4 +63,14 @@ type Record interface {
 	// Verified reports whether the record is the agent's own, hashed and
 	// checkable, or one the backend synthesized from what it was told.
 	Verified() bool
+	// Read reads a session whole, as the caller's own: the followed one
+	// for the empty ID, or another the store holds (the origin of a
+	// fork, a subsession, a successor). It is what the tree and the
+	// detail panes are computed from, on demand and off the follow: the
+	// session it returns is a snapshot no later append reaches.
+	Read(ctx context.Context, sessionID string) (*agentsession.Session, error)
+	// Refs lists the refs that point at the session (the empty ID is the
+	// followed one), by name. A store that keeps no refs answers with
+	// agentsession.ErrNoRefs.
+	Refs(ctx context.Context, sessionID string) ([]agentsession.Ref, error)
 }

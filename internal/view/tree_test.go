@@ -133,3 +133,57 @@ func TestAtShowsTheLineEndingAtTheLeafAndKeepsNothing(t *testing.T) {
 		t.Errorf("branches = %+v", m.Branches)
 	}
 }
+
+// A head moved back to an entry that the old line continues past is marked
+// with a leaf label, and the next run extends it. The label is childless,
+// and counting it as a tip showed a phantom branch resting on the entry.
+func TestLeafLabelWhereTheHeadWasMovedIsNotABranch(t *testing.T) {
+	l := newLog(t)
+	root := l.append(itemEntry(msg("a", "user", "one"), ""))
+	r1 := l.append(itemEntry(msg("b", "assistant", "r1"), "r1"))
+	l.append(itemEntry(msg("c", "user", "two"), ""))
+	if err := l.s.Branch(r1); err != nil {
+		t.Fatal(err)
+	}
+	mark, err := l.s.MarkLeaf()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.append(mark)
+
+	// Nothing has been written on the new head yet: the old line's tip
+	// and the head itself, one each.
+	m := l.v.Model()
+	if len(m.Branches) != 2 {
+		t.Fatalf("branches = %+v, want the old line and the head", m.Branches)
+	}
+	if m.Leaf != r1 {
+		t.Fatalf("leaf = %s, want the head %s", m.Leaf, r1)
+	}
+	var current int
+	for _, b := range m.Branches {
+		if b.Current {
+			current++
+			if b.Leaf != r1 {
+				t.Errorf("the current branch rests on %s, want %s", b.Leaf, r1)
+			}
+		}
+	}
+	if current != 1 {
+		t.Errorf("%d current branches, want 1", current)
+	}
+
+	// The run extends the head: the label stops being the head's only
+	// mark and the branch is the new line.
+	l.append(itemEntry(msg("d", "user", "three"), ""))
+	m = l.v.Model()
+	if len(m.Branches) != 2 {
+		t.Fatalf("after the run extended the head: branches = %+v, want the old line and the new one", m.Branches)
+	}
+	for _, b := range m.Branches {
+		if b.Leaf == r1 {
+			t.Errorf("a phantom branch rests on the entry the head moved from: %+v", b)
+		}
+	}
+	_ = root
+}

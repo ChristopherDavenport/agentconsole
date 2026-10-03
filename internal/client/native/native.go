@@ -28,6 +28,9 @@ type Backend struct {
 	agent *agentturn.Agent
 	rec   *session.Recorder
 	store agentsession.Follower
+
+	mu     sync.Mutex
+	models agentturn.ReasoningModels // of the branch the head was moved to
 }
 
 var _ client.Backend = (*Backend)(nil)
@@ -53,28 +56,89 @@ func (b *Backend) Agent() *agentturn.Agent { return b.agent }
 func (b *Backend) SessionID() string { return b.rec.SessionID() }
 
 // Control implements [client.Backend].
-func (b *Backend) Control() client.Control { return control{b.agent} }
+func (b *Backend) Control() client.Control { return control{b} }
 
 // Record implements [client.Backend].
 func (b *Backend) Record() client.Record { return record{b} }
 
-type control struct{ a *agentturn.Agent }
+type control struct{ b *Backend }
+
+// run carries the reasoning attribution of the branch the agent was last
+// moved to, which Agent.SetTranscript cannot take: the loop leaves another
+// model's reasoning out of a request by it.
+func (c control) run(ctx context.Context) context.Context {
+	c.b.mu.Lock()
+	defer c.b.mu.Unlock()
+	if c.b.models != nil {
+		ctx = agentturn.ContextWithReasoningModels(ctx, c.b.models)
+	}
+	return ctx
+}
 
 func (c control) Prompt(ctx context.Context, items ...openresponses.Item) error {
-	_, err := c.a.Prompt(ctx, items...)
+	_, err := c.b.agent.Prompt(c.run(ctx), items...)
 	return err
 }
 
-func (c control) Steer(items ...openresponses.Item) { c.a.Steer(items...) }
+func (c control) Steer(items ...openresponses.Item) { c.b.agent.Steer(items...) }
 
-func (c control) Abort() { c.a.Abort() }
+func (c control) Abort() { c.b.agent.Abort() }
 
 func (c control) Answer(ctx context.Context, answers ...agentturn.Answer) error {
-	_, err := c.a.Resume(ctx, answers...)
+	_, err := c.b.agent.Resume(c.run(ctx), answers...)
 	return err
 }
 
-func (c control) State() agentturn.State { return c.a.State() }
+func (c control) State() agentturn.State { return c.b.agent.State() }
+
+// ContinueFrom moves the head: the recorder is rebased onto the entry
+// (which reseeds it from the context there), the agent is given the
+// transcript and the pending calls of that branch, and a leaf label is
+// appended so the move is on the record. Agentsession's Store has no
+// head move of its own (the cas store keeps a head, and nothing on the
+// Store interface sets it), so the label is how a follower, and a session
+// reopened later, learn where the head is.
+func (c control) ContinueFrom(ctx context.Context, entryID string) error {
+	b := c.b
+	if entryID == "" {
+		return errors.New("native: continue from: no entry")
+	}
+	if b.agent.State().Running {
+		return agentturn.ErrRunning
+	}
+	s, err := b.rec.Store().Open(ctx, b.rec.SessionID())
+	if err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	if err := b.rec.Rebase(s, entryID); err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	items, models, err := session.TranscriptModels(s)
+	if err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	pending, err := session.Pending(s, append(b.rec.ReadOptions(), session.WithContext(ctx))...)
+	if err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	if err := b.agent.SetTranscript(items); err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	if err := b.agent.SetPending(pending); err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	b.mu.Lock()
+	b.models = models
+	b.mu.Unlock()
+	mark, err := s.MarkLeaf()
+	if err != nil {
+		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+	}
+	if _, err := b.rec.Store().Append(ctx, b.rec.SessionID(), mark); err != nil {
+		return fmt.Errorf("native: continue from %s: mark the head: %w", entryID, err)
+	}
+	return nil
+}
 
 type record struct{ b *Backend }
 
@@ -85,6 +149,40 @@ func (r record) Follow(ctx context.Context, from agentsession.Cursor) iter.Seq2[
 // Verified is true: the record is the agent's own, written by its
 // recorder with request hashes a reader can check.
 func (record) Verified() bool { return true }
+
+// Read reads the session through the store's Reader, which takes no hold
+// and writes nothing, so it works beside the recorder writing it.
+func (r record) Read(ctx context.Context, id string) (*agentsession.Session, error) {
+	if id == "" {
+		id = r.b.rec.SessionID()
+	}
+	rd, ok := r.b.rec.Store().(agentsession.Reader)
+	if !ok {
+		return nil, fmt.Errorf("native: store %T cannot read a session without holding it", r.b.rec.Store())
+	}
+	return rd.Read(ctx, id)
+}
+
+// Refs lists the refs whose target is the session.
+func (r record) Refs(ctx context.Context, id string) ([]agentsession.Ref, error) {
+	if id == "" {
+		id = r.b.rec.SessionID()
+	}
+	rs, ok := r.b.rec.Store().(agentsession.RefStore)
+	if !ok {
+		return nil, agentsession.ErrNoRefs
+	}
+	var out []agentsession.Ref
+	for ref, err := range rs.ListRefs(ctx, "") {
+		if err != nil {
+			return nil, err
+		}
+		if ref.Target.Session == id {
+			out = append(out, ref)
+		}
+	}
+	return out, nil
+}
 
 // Live subscribes to the agent when it is called, not when the result is
 // first ranged over, so a client that calls it and then starts a run
