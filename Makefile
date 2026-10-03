@@ -2,7 +2,7 @@ GO ?= go
 STATICCHECK ?= $(GO) run honnef.co/go/tools/cmd/staticcheck@latest
 GOVULNCHECK ?= $(GO) run golang.org/x/vuln/cmd/govulncheck@latest
 
-.PHONY: build test vet fmt tidy tidy-check lint vuln check release-guard release
+.PHONY: build test vet fmt tidy tidy-check lint vuln check release-guard release guard-test
 
 build:
 	$(GO) build ./...
@@ -32,7 +32,11 @@ vuln:
 	$(GOVULNCHECK) ./...
 
 # Everything CI runs.
-check: fmt tidy-check vet lint vuln test
+check: fmt tidy-check vet lint vuln test guard-test
+
+# The release guard against throwaway repositories.
+guard-test:
+	@scripts/release-guard-test.sh
 
 # Checks one tag is safe to push, before it is pushed. A pushed tag is
 # permanent — the proxy and the checksum database keep the version
