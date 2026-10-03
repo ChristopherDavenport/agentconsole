@@ -162,9 +162,13 @@ type Row struct {
 	// Live is set for an overlay row: not on the record yet.
 	Live bool
 	// Open is set for a live row still streaming.
-	Open       bool
-	ResponseID string
-	Item       openresponses.Item
+	Open bool
+	// KeptFromModel marks a row the record holds as a custom entry: an
+	// item the filter kept out of the model's context. It is on the
+	// record, so it is shown, and a renderer may say it was not sent.
+	KeptFromModel bool
+	ResponseID    string
+	Item          openresponses.Item
 	// Call is set on the row of a function call.
 	Call *Call
 }
@@ -652,6 +656,13 @@ func (v *View) Model() Model {
 				row.Call = v.callView(fc, committed[x.ID])
 			}
 			m.Rows = append(m.Rows, row)
+		case *agentsession.CustomEntry:
+			// An item the filter keeps from the model is on the record
+			// as a custom entry. It is a row all the same: the record
+			// holds it, and the overlay row it replaced was shown.
+			if item, resp, ok := session.MarkedItem(x); ok {
+				m.Rows = append(m.Rows, Row{EntryID: x.ID, ResponseID: resp, Item: item, KeptFromModel: true})
+			}
 		}
 	}
 	m.Config = settings.Model

@@ -1,10 +1,12 @@
 package view
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
+	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/client"
@@ -348,5 +350,38 @@ func TestHiddenItemsAreNotRows(t *testing.T) {
 	l.append(e)
 	if m := l.v.Model(); len(m.Rows) != 0 {
 		t.Fatalf("rows = %+v", m.Rows)
+	}
+}
+
+// marked is the custom entry the recorder writes for an item the filter
+// keeps from the model: the item, and the response that produced it.
+func marked(t *testing.T, item openresponses.Item, resp string) *agentsession.CustomEntry {
+	t.Helper()
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := json.Marshal(resp)
+	return &agentsession.CustomEntry{NS: item.ItemType(), Data: data,
+		EntryBase: agentsession.EntryBase{Unknown: map[string]json.RawMessage{session.ResponseIDMember: id}}}
+}
+
+// An item kept from the model is on the record, so it is a row; it is
+// flagged, since it is not part of what the model saw.
+func TestItemKeptFromTheModelIsARow(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	r := &openresponses.ReasoningItem{ID: "rs1"}
+	l.stream("run1", "resp1", r, true)
+	if m := l.v.Model(); len(m.Rows) != 1 || !m.Rows[0].Live {
+		t.Fatalf("before the entry: %+v", m.Rows)
+	}
+	l.append(marked(t, r, "resp1"))
+	m := l.v.Model()
+	if len(m.Rows) != 1 || m.Rows[0].Live || m.Rows[0].EntryID == "" || !m.Rows[0].KeptFromModel {
+		t.Fatalf("after the entry: %+v", m.Rows)
+	}
+	if m.Rows[0].ResponseID != "resp1" {
+		t.Errorf("response = %q", m.Rows[0].ResponseID)
 	}
 }
