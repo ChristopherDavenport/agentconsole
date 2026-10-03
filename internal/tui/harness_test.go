@@ -190,16 +190,32 @@ type app struct {
 
 	// feedDelay holds each model the feed sends, to play a slow terminal.
 	feedDelay atomic.Int64
+
+	store agentsession.Store
+	rec   *session.Recorder
 }
 
-func newApp(t *testing.T, cfg agentturn.Config) *app {
+// starter opens the session the app's recorder writes, on the store.
+type starter func(ctx context.Context, store agentsession.Store) (*session.Recorder, error)
+
+func newApp(t *testing.T, cfg agentturn.Config) *app { return newAppOn(t, cfg, nil) }
+
+// newAppOn is newApp with a session of the test's own making, a fork for
+// one.
+func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, _, err := session.Start(ctx, store, agentsession.Header{Records: agentsession.AllRecords})
+	var rec *session.Recorder
+	if start != nil {
+		rec, err = start(ctx, store)
+	} else {
+		rec, _, err = session.Start(ctx, store, agentsession.Header{Records: agentsession.AllRecords,
+			Harness: &agentsession.Harness{Name: "tui-test", Version: "9"}, CWD: "/work/dir"})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +225,7 @@ func newApp(t *testing.T, cfg agentturn.Config) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{t: t, ctx: ctx, cancel: cancel, m: tui.New(ctx, be)}
+	a := &app{t: t, ctx: ctx, cancel: cancel, m: tui.New(ctx, be), store: store, rec: rec}
 	a.wait = tui.Attach(ctx, be, func(msg tea.Msg) {
 		if _, ok := msg.(tui.ModelMsg); ok {
 			time.Sleep(time.Duration(a.feedDelay.Load()))

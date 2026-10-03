@@ -18,11 +18,16 @@ committed, and live events carry only what is not committed yet.
   - `internal/view`: the reconciler. A pure model: record `Change`s and
     `LiveEvent`s in, what a client renders out. No goroutines, no I/O,
     no terminal.
+  - `internal/inspect`: the record-detail panes, computed on demand from
+    a snapshot of the session (`Record.Read`), never from the follower's
+    session. It decodes the records other products write (policy
+    verdicts, skill grants, memory manifests) from their JSON.
   - `internal/tui`: the Bubble Tea model (conversation, turn status,
-    permissions, input) and `Attach`, which feeds the view from the
-    record and live streams and sends each `view.Model` to the program.
+    permissions, input, the tree, the row cursor and the panes) and
+    `Attach`, which feeds the view from the record and live streams and
+    sends each `view.Model` to the program.
   - `cmd/agentconsole`: the binary, a native agent in process.
-- No tree or record-detail view yet; no ACP backend yet. Later steps.
+- No ACP backend yet. A later step.
 
 ## Rules
 
@@ -53,6 +58,13 @@ committed, and live events carry only what is not committed yet.
   `runDoneMsg`.
 - Tests drive `Update` and read `View()` against a real agent with a
   scripted model; no teatest.
+- Anything that reads the session beyond the feed's steps (the tree's
+  read-only views, the panes) runs in a `tea.Cmd` on a snapshot from
+  `Record.Read`. Calling the feed from `Update` would deadlock: a step
+  sends its model while holding the feed's lock, and the program's
+  goroutine would be waiting for that lock.
+- Viewing is local and continuing moves the head (`Control.ContinueFrom`,
+  a rebase and a leaf label): see the plan.
 
 ## Everyday commands
 

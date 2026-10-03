@@ -85,3 +85,28 @@ func TestOpenSessionErrors(t *testing.T) {
 	}
 	var _ agentsession.Store = st
 }
+
+// A session the client starts says who wrote it and where, in its own
+// header: session.WithHarness names the writer only for child sessions.
+func TestNewSessionsCarryTheHarnessAndTheDirectory(t *testing.T) {
+	for _, conversation := range []string{"", "named"} {
+		root := t.TempDir()
+		id, _ := roundTrip(t, "jsonl", root, "", conversation, "hi")
+		st, closeStore, err := openStore("jsonl", root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := st.(agentsession.Reader).Read(context.Background(), id)
+		closeStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := s.Header()
+		if h.Harness == nil || h.Harness.Name != harnessName || h.Harness.Version != harnessVersion {
+			t.Errorf("conversation %q: harness = %+v", conversation, h.Harness)
+		}
+		if h.CWD == "" {
+			t.Errorf("conversation %q: no cwd in the header", conversation)
+		}
+	}
+}

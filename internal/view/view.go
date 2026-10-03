@@ -49,6 +49,7 @@
 package view
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/ChristopherDavenport/agentsession"
@@ -182,6 +183,24 @@ type Row struct {
 	Item          openresponses.Item
 	// Call is set on the row of a function call.
 	Call *Call
+	// Fold is set on the row of a compaction entry: the point where the
+	// record folds what came before into a summary, which Item carries.
+	Fold *Fold
+}
+
+// Fold is what a compaction entry says it folded.
+type Fold struct {
+	// FirstKept is the entry the context keeps from: everything before it
+	// on the path is replaced by the summary in the model's request, and
+	// stays on the record.
+	FirstKept string
+	// SummaryLen is the summary's text length in runes.
+	SummaryLen int
+	// Pinned is how many items the compaction carries over whole.
+	Pinned int
+	// TokensBefore is the estimate that triggered the fold, 0 if not
+	// recorded.
+	TokensBefore int
 }
 
 // Permission is a call that waits for the caller.
@@ -203,6 +222,20 @@ type Model struct {
 	// branch tip the session has.
 	Leaf   string
 	Leaves []string
+	// Tail is the last entry of the viewed line: the leaf and the
+	// bookkeeping behind it. The line is Session.Path(Tail).
+	Tail string
+	// Entries is how many entries the session held at this step.
+	Entries int
+	// Branches describes the tips a tree shows, newest first. They are
+	// Leaves less a leaf label that only marks a head (see branchTips),
+	// plus the viewed line.
+	Branches []Branch
+	// Links are the session's link entries: its subsessions, its
+	// successor.
+	Links []Link
+	// Origin is where the session came from, by its header.
+	Origin Origin
 	// Config is the model in force at the leaf, by the record.
 	Config string
 	// Rows is the path's visible items, then the live rows.
@@ -292,6 +325,12 @@ type View struct {
 	leaf    string
 	leaves  []string
 	path    []agentsession.Entry
+	// branches, entries and origin are read from the session at each
+	// step, links from the entries that land.
+	branches []Branch
+	entries  int
+	origin   Origin
+	links    []Link
 	// parent maps the entries the view has seen to their parents, to tell
 	// whether two entries are on one line.
 	parent map[string]string
@@ -457,6 +496,7 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.landedOuts = map[string]bool{}
 	v.endSeen, v.endOrder = map[string]bool{}, nil
 	v.parent = map[string]string{}
+	v.links = nil
 	v.runTip, v.tipOwner, v.runOrder = map[string]string{}, map[string]string{}, nil
 	v.setSession(s, "")
 	v.replaying = true
@@ -482,6 +522,10 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 		v.parent[e.Base().ID] = e.Base().Parent
 	}
 	v.leaves = tips(s)
+	v.branches = branchesOf(s, branchTips(s, v.leaf), v.leaf)
+	v.entries = s.Len()
+	h := s.Header()
+	v.origin = Origin{ParentSession: h.ParentSession, Base: h.Base, SpawnedBy: h.SpawnedBy}
 }
 
 // resting reads an entry as the item its branch rests on. A run end, a
@@ -540,6 +584,49 @@ func lineEnd(s *agentsession.Session, id string) string {
 // that end on one item counted once. Session.Branches upstream would
 // replace this (agentsession#197).
 func tips(s *agentsession.Session) []string {
+	return tipsOf(s)
+}
+
+// branchTips are the tips a tree shows. They differ from [tips] in two
+// ways. A tip that is an ancestor of another is not a branch: the line
+// went on past it. That is what a head moved back to an entry leaves when
+// the next run extends it: the old line's bookkeeping (its response, its
+// run end) still ends on the entry, childless, and so does the leaf label
+// that marks the move. And the line being viewed is a branch even when
+// nothing but a label marks it: a head moved to an entry before its run
+// has written anything.
+func branchTips(s *agentsession.Session, viewed string) []string {
+	all := tipsOf(s)
+	interior := map[string]bool{}
+	for _, tip := range all {
+		for id, hops := tip, 0; hops <= s.Len(); hops++ {
+			e, ok := s.Entry(id)
+			if !ok || e.Base().Parent == "" {
+				break
+			}
+			id = e.Base().Parent
+			if id == tip {
+				continue
+			}
+			if interior[id] {
+				break // its ancestors are marked already
+			}
+			interior[id] = true
+		}
+	}
+	var out []string
+	for _, tip := range all {
+		if !interior[tip] {
+			out = append(out, tip)
+		}
+	}
+	if viewed != "" && !slices.Contains(out, viewed) {
+		out = append(out, viewed)
+	}
+	return out
+}
+
+func tipsOf(s *agentsession.Session) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range s.Leaves() {
@@ -556,6 +643,10 @@ func tips(s *agentsession.Session) []string {
 func (v *View) land(e agentsession.Entry) {
 	v.trackRun(e)
 	switch x := e.(type) {
+	case *agentsession.LinkEntry:
+		if !slices.ContainsFunc(v.links, func(l Link) bool { return l.Entry == x.ID }) {
+			v.links = append(v.links, Link{Rel: x.Rel, Session: x.Session, CallID: x.CallID, Entry: x.ID})
+		}
 	case *agentsession.ItemEntry:
 		v.landItem(x.Item, x.ResponseID)
 	case *agentsession.CustomEntry:
@@ -949,7 +1040,12 @@ func (v *View) Model() Model {
 		Leaf:    v.leaf,
 		Leaves:  append([]string(nil), v.leaves...),
 		Turn:    v.turn,
+		Tail:    v.tail(),
+		Entries: v.entries,
+		Origin:  v.origin,
+		Links:   append([]Link(nil), v.links...),
 	}
+	m.Branches = append([]Branch(nil), v.branches...)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c
@@ -968,6 +1064,10 @@ func (v *View) Model() Model {
 				row.Call = v.callView(fc, committed[x.ID])
 			}
 			m.Rows = append(m.Rows, row)
+		case *agentsession.CompactionEntry:
+			summary, _ := textOf(x.Summary)
+			m.Rows = append(m.Rows, Row{EntryID: x.ID, Item: x.Summary, Fold: &Fold{
+				FirstKept: x.FirstKept, SummaryLen: len([]rune(summary)), Pinned: len(x.Pinned), TokensBefore: x.TokensBefore}})
 		case *agentsession.CustomEntry:
 			// An item the filter keeps from the model is on the record
 			// as a custom entry. It is a row all the same: the record
