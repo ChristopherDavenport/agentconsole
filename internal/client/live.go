@@ -32,6 +32,8 @@ type RunStarted struct {
 type TurnStarted struct {
 	RunID string
 	Turn  int
+	// Model is the model the request names.
+	Model string
 }
 
 // ModelRetrying says the model call failed and will be tried again.
@@ -181,7 +183,7 @@ func FromEvent(ev agentturn.Event) (LiveEvent, bool) {
 	case *agentturn.RunStart:
 		return &RunStarted{RunID: e.RunID, Resume: e.Source == agentturn.SourceResume}, true
 	case *agentturn.TurnStart:
-		return &TurnStarted{RunID: e.RunID, Turn: e.Turn}, true
+		return &TurnStarted{RunID: e.RunID, Turn: e.Turn, Model: e.Request.Model}, true
 	case *agentturn.ModelRetry:
 		return &ModelRetrying{RunID: e.RunID, Turn: e.Turn, Attempt: e.Attempt, Err: e.Err, Delay: e.Delay}, true
 	case *agentturn.ItemStart:

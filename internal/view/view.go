@@ -1,0 +1,671 @@
+// Package view is the reconciler: a pure model that takes the record's
+// changes and the backend's live events, in whatever order they arrive,
+// and produces what a client renders.
+//
+// The rule is the plan's: the record is the truth for everything
+// committed, and live events cover only what is not. So a rendering is
+// the path's items from the record, then an overlay of what is in flight
+// on top: items still streaming, calls opened and not answered, the state
+// of the turn, the permissions that are out. An overlay item is dropped
+// when the entry carrying it lands, matched on the item's ID within its
+// response, or on the call ID for a function call and its output.
+//
+// # Order independence
+//
+// The record and the live stream reach a client through two paths, and
+// an entry is written before the live event that follows it is queued,
+// so a follower can deliver the entry first. The view therefore remembers
+// what has landed and ignores a live event for an item that has: an entry
+// never leaves a ghost behind it. A landed item is shown once, from the
+// record; an overlay item is shown once, until its entry lands.
+//
+// # The recorder's lags
+//
+// The overlay waits for the entry, never for the event.
+//   - A live item_end is not a commit. A model item that completes
+//     before the stream names its response is written at response_end,
+//     so its overlay copy stays through [client.ItemCompleted] and
+//     [client.ResponseCompleted] until the entry lands.
+//   - A config entry is written by the next entry-writing event, so the
+//     record's model lags the model of the turn running. Both are
+//     reported: [Model.Config] is the record's, [Turn.Model] the
+//     turn's.
+//   - A run's end flushes what is left of its overlay, but only once the
+//     record holds the run's end entry as well, which is written after
+//     everything the run wrote. Flushing at the live event alone would
+//     drop an item whose entry the follower has not delivered yet.
+//
+// # Limits
+//
+// An item with no ID, which only the loop appends (a prompt, a steered
+// message), has no key to reconcile on and is never overlaid: the
+// recorder writes it in the barrier of its item_end, so it is on the
+// record before the model is called. A function call output is not
+// overlaid either; the call row carries the result until the output
+// lands. A model that streams items with no ID would not show them live.
+//
+// A View is not safe for concurrent use; a client drives it from one
+// goroutine.
+package view
+
+import (
+	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn/session"
+	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/internal/client"
+)
+
+// TurnState says what the agent is doing.
+type TurnState int
+
+// Turn states.
+const (
+	// Idle: no run is going and nothing waits.
+	Idle TurnState = iota
+	// Running: a run is going.
+	Running
+	// RequiresAction: the last run ended with calls waiting for an
+	// answer, which [Model.Permissions] lists.
+	RequiresAction
+)
+
+// String names the state.
+func (s TurnState) String() string {
+	switch s {
+	case Idle:
+		return "idle"
+	case Running:
+		return "running"
+	case RequiresAction:
+		return "requires_action"
+	}
+	return "unknown"
+}
+
+// Turn is the state of the run, from live events alone.
+type Turn struct {
+	State TurnState
+	RunID string
+	// Number is the turn within the run, from 1, and 0 between runs.
+	Number int
+	// Model is the model the turn is calling, which can be ahead of
+	// [Model.Config]: the config entry is written by the next
+	// entry-writing event.
+	Model string
+	// Attempt is the number of the model call that failed and is being
+	// retried, 0 when none is.
+	Attempt int
+}
+
+// CallState says how far a call got.
+type CallState int
+
+// Call states.
+const (
+	// CallOpen: the call is on the record or the stream and has not
+	// reached its tool.
+	CallOpen CallState = iota
+	// CallRunning: the call was handed to its tool.
+	CallRunning
+	// CallEnded: the call ended and Output holds what the model sees.
+	CallEnded
+	// CallBlocked: a policy refused the call; Output says why.
+	CallBlocked
+	// CallDeferred: the call waits for an answer.
+	CallDeferred
+)
+
+// String names the state.
+func (s CallState) String() string {
+	switch s {
+	case CallOpen:
+		return "open"
+	case CallRunning:
+		return "running"
+	case CallEnded:
+		return "ended"
+	case CallBlocked:
+		return "blocked"
+	case CallDeferred:
+		return "deferred"
+	}
+	return "unknown"
+}
+
+// Call is how a function call stands.
+type Call struct {
+	CallID string
+	Name   string
+	Args   string
+	State  CallState
+	// Partial is the latest progress of a running tool.
+	Partial string
+	// Output is what the model sees, once the call has ended.
+	Output string
+	// Committed is set when the output is on the record, so the call is
+	// answered for good; before that Output is live.
+	Committed bool
+	// Verdict and Reason are the last policy decision the record holds
+	// for the call, and Reason the question of a deferred one.
+	Verdict string
+	Reason  string
+	// Children are the calls this call's tool made, live only.
+	Children []Call
+}
+
+// Row is one line of the conversation.
+type Row struct {
+	// EntryID is the entry that holds the item, and "" while the item is
+	// live only.
+	EntryID string
+	// Live is set for an overlay row: not on the record yet.
+	Live bool
+	// Open is set for a live row still streaming.
+	Open       bool
+	ResponseID string
+	Item       openresponses.Item
+	// Call is set on the row of a function call.
+	Call *Call
+}
+
+// Permission is a call that waits for the caller.
+type Permission struct {
+	CallID string
+	Name   string
+	Args   string
+	// Question is the reason the call was deferred, as a front puts it
+	// to the user.
+	Question string
+	Reason   string
+}
+
+// Model is what a client renders.
+type Model struct {
+	// Session is the followed session's ID.
+	Session string
+	// Leaf is the entry the rendered path ends at, and Leaves every
+	// branch tip the session has.
+	Leaf   string
+	Leaves []string
+	// Config is the model in force at the leaf, by the record.
+	Config string
+	// Rows is the path's visible items, then the live rows.
+	Rows        []Row
+	Turn        Turn
+	Permissions []Permission
+}
+
+type ovItem struct {
+	run        string
+	turn       int
+	key        key
+	responseID string
+	item       openresponses.Item
+	done       bool
+}
+
+type ovCall struct {
+	run      string
+	callID   string
+	name     string
+	args     string
+	parent   string
+	state    CallState
+	partial  string
+	output   string
+	reason   string
+	finished bool
+}
+
+type runState struct {
+	liveEnded  bool
+	entryEnded bool
+}
+
+// key identifies an item across the live stream and the record.
+type key struct {
+	call bool // a function call, keyed by call ID
+	id   string
+}
+
+// View reconciles the record with the live stream.
+type View struct {
+	session string
+	leaf    string
+	leaves  []string
+	path    []agentsession.Entry
+
+	// What the record holds, by key: every entry that has landed on any
+	// branch.
+	landedItems map[string][]string // item ID to the response IDs it landed under
+	landedCalls map[string]bool     // function call items, by call ID
+	landedOuts  map[string]bool     // function call outputs, by call ID
+
+	items []*ovItem
+	calls []*ovCall
+	perms []Permission
+	runs  map[string]*runState
+	turn  Turn
+}
+
+// New returns an empty view.
+func New() *View {
+	return &View{
+		landedItems: map[string][]string{},
+		landedCalls: map[string]bool{},
+		landedOuts:  map[string]bool{},
+		runs:        map[string]*runState{},
+	}
+}
+
+// Record applies a change from the record's follow.
+func (v *View) Record(ch agentsession.Change) {
+	switch ch.Kind {
+	case agentsession.Snapshot, agentsession.Reset:
+		v.rebuild(ch.Session)
+	case agentsession.Appended:
+		v.setSession(ch.Session, "")
+		v.land(ch.Entry)
+	case agentsession.Head:
+		v.setSession(ch.Session, ch.Leaf)
+	}
+}
+
+// rebuild starts from a session read whole: what the view derived from
+// the record before is dropped, and the overlay is pruned against what the
+// session holds, so an overlay item the new session has is not shown
+// twice and one it lacks stays until its entry lands.
+func (v *View) rebuild(s *agentsession.Session) {
+	v.landedItems = map[string][]string{}
+	v.landedCalls = map[string]bool{}
+	v.landedOuts = map[string]bool{}
+	for _, r := range v.runs {
+		r.entryEnded = false
+	}
+	v.setSession(s, "")
+	for _, e := range s.Entries() {
+		v.land(e)
+	}
+}
+
+func (v *View) setSession(s *agentsession.Session, leaf string) {
+	if s == nil {
+		return
+	}
+	v.session = s.ID()
+	if leaf == "" {
+		leaf = s.Leaf()
+	}
+	v.leaf = leaf
+	// The session is the follower's own and valid until the next step,
+	// so the path and the leaves are copied out.
+	v.path = append([]agentsession.Entry(nil), s.Path(leaf)...)
+	v.leaves = append([]string(nil), s.Leaves()...)
+}
+
+// land records an entry that has landed and drops what it replaces.
+func (v *View) land(e agentsession.Entry) {
+	switch x := e.(type) {
+	case *agentsession.ItemEntry:
+		v.landItem(x.Item, x.ResponseID)
+	case *agentsession.CustomEntry:
+		// An item the filter keeps from the model is written as a custom
+		// entry, which is still the item landing.
+		if item, resp, ok := session.MarkedItem(x); ok {
+			v.landItem(item, resp)
+		}
+	case *agentsession.RunEntry:
+		if x.IsEnd() {
+			v.run(x.RunID).entryEnded = true
+			v.flushIfSettled(x.RunID)
+		}
+	}
+}
+
+func (v *View) landItem(item openresponses.Item, responseID string) {
+	switch x := item.(type) {
+	case *openresponses.FunctionCall:
+		v.landedCalls[x.CallID] = true
+		v.dropItems(func(o *ovItem) bool { return o.key.call && o.key.id == x.CallID })
+	case *openresponses.FunctionCallOutput:
+		v.landedOuts[x.CallID] = true
+		v.dropCall(x.CallID)
+	default:
+		id := client.ItemID(item)
+		if id == "" {
+			return
+		}
+		v.landedItems[id] = append(v.landedItems[id], responseID)
+		v.dropItems(func(o *ovItem) bool { return !o.key.call && o.key.id == id && compatible(o.responseID, responseID) })
+	}
+}
+
+// compatible reports whether two response IDs can name one response: an
+// item the stream has not placed yet has none.
+func compatible(a, b string) bool { return a == "" || b == "" || a == b }
+
+func (v *View) landed(k key, responseID string) bool {
+	if k.call {
+		return v.landedCalls[k.id]
+	}
+	for _, r := range v.landedItems[k.id] {
+		if compatible(r, responseID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *View) dropItems(match func(*ovItem) bool) {
+	kept := v.items[:0]
+	for _, o := range v.items {
+		if !match(o) {
+			kept = append(kept, o)
+		}
+	}
+	clear(v.items[len(kept):])
+	v.items = kept
+}
+
+// dropCall ends the overlay of a call whose output has landed: its state,
+// the calls its tool made, and the permission that asked about it.
+func (v *View) dropCall(callID string) {
+	kept := v.calls[:0]
+	for _, c := range v.calls {
+		if c.callID != callID && c.parent != callID {
+			kept = append(kept, c)
+		}
+	}
+	clear(v.calls[len(kept):])
+	v.calls = kept
+	perms := v.perms[:0]
+	for _, p := range v.perms {
+		if p.CallID != callID {
+			perms = append(perms, p)
+		}
+	}
+	v.perms = perms
+	if len(v.perms) == 0 && v.turn.State == RequiresAction {
+		v.turn.State = Idle
+	}
+}
+
+func (v *View) run(id string) *runState {
+	r := v.runs[id]
+	if r == nil {
+		r = &runState{}
+		v.runs[id] = r
+	}
+	return r
+}
+
+// flushIfSettled flushes a run's leftovers once both halves of its end
+// are in: the live event and the record's end entry.
+func (v *View) flushIfSettled(runID string) {
+	r := v.runs[runID]
+	if r == nil || !r.liveEnded || !r.entryEnded {
+		return
+	}
+	v.flush(runID)
+	delete(v.runs, runID)
+}
+
+// flush drops what a finished run left in the overlay, except the calls
+// that still wait for an answer.
+func (v *View) flush(runID string) {
+	v.dropItems(func(o *ovItem) bool { return o.run == runID })
+	waiting := map[string]bool{}
+	for _, p := range v.perms {
+		waiting[p.CallID] = true
+	}
+	kept := v.calls[:0]
+	for _, c := range v.calls {
+		if c.run != runID || waiting[c.callID] || waiting[c.parent] {
+			kept = append(kept, c)
+		}
+	}
+	clear(v.calls[len(kept):])
+	v.calls = kept
+}
+
+// Live applies a live event.
+func (v *View) Live(ev client.LiveEvent) {
+	switch e := ev.(type) {
+	case *client.RunStarted:
+		// A run that starts has answered every call that waited, since
+		// the agent refuses it otherwise.
+		for id, r := range v.runs {
+			if id != e.RunID && r.liveEnded {
+				v.flush(id)
+				delete(v.runs, id)
+			}
+		}
+		v.perms = nil
+		kept := v.calls[:0]
+		for _, c := range v.calls {
+			if c.state != CallDeferred {
+				kept = append(kept, c)
+			}
+		}
+		clear(v.calls[len(kept):])
+		v.calls = kept
+		v.run(e.RunID)
+		v.turn = Turn{State: Running, RunID: e.RunID}
+	case *client.TurnStarted:
+		v.turn.Number, v.turn.Attempt = e.Turn, 0
+		v.turn.Model = e.Model
+	case *client.ModelRetrying:
+		// The failed attempt's items are dropped with it.
+		v.turn.Attempt = e.Attempt
+		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == e.Turn })
+	case *client.ItemOpened:
+		v.item(e.RunID, e.ResponseID, e.Item, false)
+	case *client.ItemUpdated:
+		v.item(e.RunID, e.ResponseID, e.Item, false)
+	case *client.ItemCompleted:
+		v.item(e.RunID, e.ResponseID, e.Item, true)
+	case *client.ResponseCompleted:
+		for _, o := range v.items {
+			if o.run == e.RunID && o.responseID == "" && o.done {
+				o.responseID = e.ResponseID
+			}
+		}
+	case *client.ToolOpened:
+		if v.landedOuts[e.CallID] {
+			return
+		}
+		c := v.call(e.RunID, e.CallID)
+		c.name, c.args, c.parent = e.Name, e.Args, e.Parent
+	case *client.ToolDispatched:
+		if v.landedOuts[e.CallID] {
+			return
+		}
+		c := v.call(e.RunID, e.CallID)
+		c.name, c.state = e.Name, CallRunning
+	case *client.ToolProgress:
+		if v.landedOuts[e.CallID] {
+			return
+		}
+		c := v.call(e.RunID, e.CallID)
+		c.name, c.partial = e.Name, e.Partial
+	case *client.ToolFinished:
+		v.toolFinished(e)
+	case *client.RunEnded:
+		v.runEnded(e)
+	}
+}
+
+func (v *View) item(runID, responseID string, item openresponses.Item, done bool) {
+	if item == nil {
+		return
+	}
+	var k key
+	switch x := item.(type) {
+	case *openresponses.FunctionCallOutput:
+		return
+	case *openresponses.FunctionCall:
+		k = key{call: true, id: x.CallID}
+	default:
+		k = key{id: client.ItemID(item)}
+	}
+	if k.id == "" || v.landed(k, responseID) {
+		return
+	}
+	for _, o := range v.items {
+		if o.key == k && o.run == runID && compatible(o.responseID, responseID) {
+			o.item = item
+			if responseID != "" {
+				o.responseID = responseID
+			}
+			o.done = o.done || done
+			return
+		}
+	}
+	v.items = append(v.items, &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done})
+}
+
+func (v *View) call(runID, callID string) *ovCall {
+	for _, c := range v.calls {
+		if c.callID == callID {
+			return c
+		}
+	}
+	c := &ovCall{run: runID, callID: callID}
+	v.calls = append(v.calls, c)
+	return c
+}
+
+func (v *View) toolFinished(e *client.ToolFinished) {
+	if v.landedOuts[e.CallID] {
+		return
+	}
+	c := v.call(e.RunID, e.CallID)
+	c.name, c.parent, c.finished = e.Name, e.Parent, true
+	c.output, c.reason = e.Result, e.Reason
+	switch {
+	case e.Deferred:
+		c.state, c.output = CallDeferred, ""
+		v.permit(Permission{CallID: e.CallID, Name: e.Name, Args: c.args, Question: e.Reason, Reason: "deferred"})
+	case e.Blocked:
+		c.state = CallBlocked
+	default:
+		c.state = CallEnded
+		if e.Err != nil && c.output == "" {
+			c.output = e.Err.Error()
+		}
+	}
+}
+
+func (v *View) permit(p Permission) {
+	for i := range v.perms {
+		if v.perms[i].CallID == p.CallID {
+			if p.Question == "" {
+				p.Question = v.perms[i].Question
+			}
+			v.perms[i] = p
+			return
+		}
+	}
+	v.perms = append(v.perms, p)
+}
+
+func (v *View) runEnded(e *client.RunEnded) {
+	// The run's own list of what waits is authoritative: it replaces
+	// what the deferred calls reported one by one, keeping their
+	// questions.
+	old := v.perms
+	v.perms = nil
+	for _, p := range e.Pending {
+		next := Permission{CallID: p.CallID, Name: p.Name, Args: p.Args, Reason: string(p.Reason)}
+		for _, o := range old {
+			if o.CallID == p.CallID {
+				next.Question = o.Question
+			}
+		}
+		v.perms = append(v.perms, next)
+	}
+	v.turn.RunID, v.turn.Number, v.turn.Attempt = e.RunID, 0, 0
+	v.turn.State = Idle
+	if len(v.perms) > 0 {
+		v.turn.State = RequiresAction
+	}
+	v.run(e.RunID).liveEnded = true
+	v.flushIfSettled(e.RunID)
+}
+
+// Model returns what to render now. It shares nothing with the view.
+func (v *View) Model() Model {
+	m := Model{
+		Session: v.session,
+		Leaf:    v.leaf,
+		Leaves:  append([]string(nil), v.leaves...),
+		Turn:    v.turn,
+	}
+	committed := map[string]*agentsession.Call{}
+	for _, c := range agentsession.Calls(v.path) {
+		committed[c.Entry.ID] = c
+	}
+	var settings agentsession.Settings
+	for _, e := range v.path {
+		switch x := e.(type) {
+		case *agentsession.ConfigEntry:
+			settings = settings.Apply(x)
+		case *agentsession.ItemEntry:
+			if !x.IsVisible() {
+				continue
+			}
+			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item}
+			if fc, ok := x.Item.(*openresponses.FunctionCall); ok {
+				row.Call = v.callView(fc, committed[x.ID])
+			}
+			m.Rows = append(m.Rows, row)
+		}
+	}
+	m.Config = settings.Model
+	for _, o := range v.items {
+		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item)}
+		if fc, ok := o.item.(*openresponses.FunctionCall); ok {
+			row.Call = v.callView(fc, nil)
+		}
+		m.Rows = append(m.Rows, row)
+	}
+	m.Permissions = append([]Permission(nil), v.perms...)
+	return m
+}
+
+// callView merges what the record holds of a call with its overlay.
+func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) *Call {
+	c := &Call{CallID: fc.CallID, Name: fc.Name, Args: fc.Arguments}
+	if rec != nil {
+		if rec.Dispatch != nil {
+			c.State = CallRunning
+		}
+		if n := len(rec.Decisions); n > 0 {
+			d := rec.Decisions[n-1]
+			c.Verdict, c.Reason = d.Verdict, d.Reason
+		}
+		if rec.Output != nil {
+			if out, ok := rec.Output.Item.(*openresponses.FunctionCallOutput); ok {
+				c.State, c.Output, c.Committed = CallEnded, out.Output.String(), true
+				return c
+			}
+		}
+	}
+	for _, o := range v.calls {
+		switch {
+		case o.callID == fc.CallID:
+			if o.state > c.State {
+				c.State = o.state
+			}
+			c.Partial, c.Output = o.partial, o.output
+			if o.reason != "" {
+				c.Reason = o.reason
+			}
+		case o.parent == fc.CallID:
+			c.Children = append(c.Children, Call{CallID: o.callID, Name: o.name, Args: o.args,
+				State: o.state, Partial: o.partial, Output: o.output})
+		}
+	}
+	return c
+}
