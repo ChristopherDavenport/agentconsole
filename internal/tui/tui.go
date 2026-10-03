@@ -126,7 +126,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case runDoneMsg:
 		m.busy, m.aborting = false, false
-		clear(m.decided)
+		// The answers stay: the view may not have caught up with the run
+		// yet and still list the permissions just answered. They are
+		// dropped when the view stops listing them (syncPermissions), or
+		// here when the answer failed and has to be given again.
+		if msg.err != nil {
+			clear(m.decided)
+		}
 		m.refusing = false
 		m.err = ""
 		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
