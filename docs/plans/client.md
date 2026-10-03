@@ -72,7 +72,7 @@ grants, memory manifests and folds are all entries.
 
 ## The contract
 
-An internal package, `internal/client`, written against the stack's own
+A package, `client`, written against the stack's own
 types:
 
 ```go
@@ -274,7 +274,7 @@ headless) changed the sketch in these places.
 - **A run's start entry settles an earlier run only if the stream saw it
   begin later** (`runSeq`), not any start entry: a reset replays older
   starts.
-- **The interleaving test** (`internal/view/prop_test.go`) plays scripted
+- **The interleaving test** (`view/prop_test.go`) plays scripted
   runs as the agent and recorder would, delivers the record's changes and
   the live events in random interleavings with resets and head moves, and
   checks the view after each step. `AGENTCONSOLE_SEEDS` and

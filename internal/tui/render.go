@@ -8,7 +8,7 @@ import (
 
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // styles are the few the views use. Colors degrade with the terminal:

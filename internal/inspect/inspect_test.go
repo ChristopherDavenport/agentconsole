@@ -15,10 +15,10 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
-	"github.com/ChristopherDavenport/agentconsole/internal/client/native"
+	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 type step = func(ctx context.Context, em *openresponses.Emitter) error

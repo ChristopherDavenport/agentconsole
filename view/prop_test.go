@@ -9,8 +9,8 @@ package view
 // step the invariants hold; once both streams are in, the view equals a
 // rendering of the final record alone.
 //
-//	AGENTCONSOLE_SEEDS=20000 go test ./internal/view -run TestInterleavings
-//	AGENTCONSOLE_SEED0=1234 AGENTCONSOLE_SEEDS=1 go test ./internal/view -run TestInterleavings -v
+//	AGENTCONSOLE_SEEDS=20000 go test ./view -run TestInterleavings
+//	AGENTCONSOLE_SEED0=1234 AGENTCONSOLE_SEEDS=1 go test ./view -run TestInterleavings -v
 //
 // replays a seed. The default is 150 seeds.
 
@@ -29,7 +29,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 func envInt(name string, def int) int {

@@ -12,7 +12,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 	"github.com/ChristopherDavenport/openresponses/echo"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 type textArgs struct {

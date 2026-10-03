@@ -20,7 +20,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 // Backend drives one agent and follows the session its recorder writes.
