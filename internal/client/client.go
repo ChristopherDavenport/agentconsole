@@ -22,9 +22,10 @@ type Backend interface {
 	Control() Control
 	// Live streams the uncommitted part of the agent's activity: deltas,
 	// open tool calls, turn state, permission requests. It runs until ctx
-	// is done. Events that happen while nobody ranges over it are not
-	// replayed: a client ranges before it starts a run, and reads the
-	// state of a run already going from Control.State.
+	// is done. It subscribes when it is called, so a client that calls it
+	// and then starts a run misses nothing; events from before the call
+	// are not replayed, and a run already going is read from
+	// Control.State.
 	Live(ctx context.Context) iter.Seq2[LiveEvent, error]
 	// Record follows the agent's session.
 	Record() Record
