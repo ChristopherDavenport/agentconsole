@@ -382,13 +382,9 @@ func (v *View) reconcilePending() {
 		return
 	}
 	var last *agentsession.RunEntry
-	onPath := map[string]bool{}
-	for i := len(v.path) - 1; i >= 0; i-- {
+	for i := len(v.path) - 1; i >= 0 && last == nil; i-- {
 		if r, ok := v.path[i].(*agentsession.RunEntry); ok {
-			if last == nil {
-				last = r
-			}
-			onPath[r.RunID] = true
+			last = r
 		}
 	}
 	old := v.perms
@@ -399,7 +395,7 @@ func (v *View) reconcilePending() {
 			v.turn.State = RequiresAction
 		}
 	}()
-	if f := v.liveFacts; f != nil && v.liveEnded[f.RunID] && !v.endSeen[f.RunID] && (!onPath[f.RunID] || (last != nil && last.RunID == f.RunID)) {
+	if f := v.liveFacts; f != nil && v.liveEnded[f.RunID] && !v.endSeen[f.RunID] && (!v.runKnown(f.RunID) || (last != nil && last.RunID == f.RunID)) {
 		for _, p := range f.Pending {
 			if v.landedOuts[p.CallID] {
 				continue
@@ -1057,6 +1053,15 @@ func (v *View) tail() string {
 // and the run is not extending it; the rows are shown again when the view
 // returns. A run whose entries have not landed yet extends whatever is
 // viewed, and so does one a reset took out of the log.
+// runKnown reports whether the record has delivered the run's start entry,
+// on any branch. A live run end for a run it has not is ahead of the
+// record; one for a run it has, that the viewed path does not hold, is for
+// a line the view has moved off.
+func (v *View) runKnown(runID string) bool {
+	_, ok := v.runTip[runID]
+	return ok
+}
+
 func (v *View) onLine(runID string) bool {
 	tip, ok := v.runTip[runID]
 	if !ok {

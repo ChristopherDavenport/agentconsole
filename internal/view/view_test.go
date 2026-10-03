@@ -1123,3 +1123,35 @@ func TestReplayedStartOfALaterRunSettlesNothing(t *testing.T) {
 		t.Fatal("the replayed start of run2 settled run1 before its entries could land")
 	}
 }
+
+// The record has the run's start, on a branch the view has moved off, and
+// not yet its end: the live end for that run says nothing about the viewed
+// line. (A run the record has not delivered at all is ahead of the record,
+// and its live end stands.)
+func TestLiveEndOfARunOnAnotherBranchBeforeItsEndEntryShowsNoPermission(t *testing.T) {
+	s := agentsession.New(agentsession.Header{})
+	add := func(e agentsession.Entry) string {
+		id, err := s.Append(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	add(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	u1 := add(itemEntry(msg("u1", "user", "one"), ""))
+	add(agentsession.NewRunEnd("run1", agentsession.ReasonDone, "", nil))
+	add(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
+	add(itemEntry(&openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}, "resp1"))
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	if err := s.Branch(u1); err != nil {
+		t.Fatal(err)
+	}
+	v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: u1})
+	v.Live(&client.RunStarted{RunID: "run2"})
+	v.Live(&client.RunEnded{RunID: "run2", Reason: agentturn.ReasonInputRequired,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	if m := v.Model(); len(m.Permissions) != 0 || m.Turn.State != Idle {
+		t.Fatalf("the viewed line holds no such call: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}
