@@ -35,27 +35,71 @@ type opts struct {
 	output    bool // tool arguments and output in full
 }
 
-// renderRows renders the conversation, wrapped to width.
-func renderRows(m view.Model, o opts, width int) string {
-	if width < 10 {
-		width = 10
-	}
+// hiddenOutputs are the rows whose call's row carries their output, by
+// index.
+func hiddenOutputs(m view.Model) map[int]bool {
 	answered := map[string]bool{}
 	for _, row := range m.Rows {
 		if row.Call != nil {
 			answered[row.Call.CallID] = true
 		}
 	}
-	var blocks []string
-	for _, row := range m.Rows {
+	hidden := map[int]bool{}
+	for i, row := range m.Rows {
 		if out, ok := row.Item.(*openresponses.FunctionCallOutput); ok && answered[out.CallID] {
-			continue // the call's row carries its output
-		}
-		if b := renderRow(row, o); b != "" {
-			blocks = append(blocks, wrap(b, width))
+			hidden[i] = true
 		}
 	}
-	return strings.Join(blocks, "\n\n")
+	return hidden
+}
+
+// gutter is the width of the cursor's column while a row is selected.
+const gutter = 2
+
+// renderRows renders the conversation, wrapped to width. With a row
+// selected (sel is its entry), every block gets a two-column gutter with
+// a marker on the selected one, and the line the selected block starts at
+// and its height are returned so the viewport can scroll to it.
+func renderRows(m view.Model, o opts, width int, sel string) (content string, line, height int) {
+	if width < 10 {
+		width = 10
+	}
+	hidden := hiddenOutputs(m)
+	w := width
+	if sel != "" {
+		w = max(width-gutter, 8)
+	}
+	var blocks []string
+	at := 0
+	for i, row := range m.Rows {
+		if hidden[i] {
+			continue
+		}
+		b := renderRow(row, o)
+		if b == "" {
+			continue
+		}
+		b = wrap(b, w)
+		if sel != "" {
+			mark := "  "
+			if row.EntryID == sel {
+				mark = warnStyle.Render("▶") + " "
+				line, height = at, lipgloss.Height(b)
+			}
+			ls := strings.Split(b, "\n")
+			for j := range ls {
+				if j == 0 {
+					ls[j] = mark + ls[j]
+				} else {
+					ls[j] = "  " + ls[j]
+				}
+			}
+			b = strings.Join(ls, "\n")
+		}
+		blocks = append(blocks, b)
+		at += lipgloss.Height(b) + 1
+	}
+	return strings.Join(blocks, "\n\n"), line, height
 }
 
 func wrap(s string, width int) string {
@@ -63,6 +107,13 @@ func wrap(s string, width int) string {
 }
 
 func renderRow(row view.Row, o opts) string {
+	if f := row.Fold; f != nil {
+		s := fmt.Sprintf("[compaction] context from %s on, summary %d chars", shortID(f.FirstKept), f.SummaryLen)
+		if f.Pinned > 0 {
+			s += fmt.Sprintf(", %d pinned", f.Pinned)
+		}
+		return dimStyle.Render(s)
+	}
 	tag := ""
 	switch {
 	case row.KeptFromModel:

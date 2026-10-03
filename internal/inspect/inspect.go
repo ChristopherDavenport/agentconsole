@@ -40,6 +40,9 @@ type Source interface {
 type Inspector struct {
 	src Source
 
+	// readMu serializes reading, so two panes asked for at once read the
+	// session once.
+	readMu sync.Mutex
 	mu     sync.Mutex
 	snaps  map[string]*agentsession.Session
 	verify map[string]Verify
@@ -61,6 +64,8 @@ func (in *Inspector) Reads() int {
 // snapshot returns a read of the session holding at least entries
 // entries: the last one read when it does, and a new read otherwise.
 func (in *Inspector) snapshot(ctx context.Context, id string, entries int) (*agentsession.Session, error) {
+	in.readMu.Lock()
+	defer in.readMu.Unlock()
 	in.mu.Lock()
 	s := in.snaps[id]
 	in.mu.Unlock()

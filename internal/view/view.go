@@ -584,33 +584,52 @@ func lineEnd(s *agentsession.Session, id string) string {
 // that end on one item counted once. Session.Branches upstream would
 // replace this (agentsession#197).
 func tips(s *agentsession.Session) []string {
-	return tipsOf(s, false)
+	return tipsOf(s)
 }
 
 // branchTips are the tips a tree shows. They differ from [tips] in two
-// ways. A childless label is a tip only when it is the only thing behind
-// its parent: a leaf label appended where another entry already continues
-// (a head moved back to an entry, which the run then extends) marks the
-// head and is not a branch of its own. And the line being viewed is a
-// branch even when nothing but a label marks it: a head moved to an entry
-// before its run has written anything.
+// ways. A tip that is an ancestor of another is not a branch: the line
+// went on past it. That is what a head moved back to an entry leaves when
+// the next run extends it: the old line's bookkeeping (its response, its
+// run end) still ends on the entry, childless, and so does the leaf label
+// that marks the move. And the line being viewed is a branch even when
+// nothing but a label marks it: a head moved to an entry before its run
+// has written anything.
 func branchTips(s *agentsession.Session, viewed string) []string {
-	out := tipsOf(s, true)
+	all := tipsOf(s)
+	interior := map[string]bool{}
+	for _, tip := range all {
+		for id, hops := tip, 0; hops <= s.Len(); hops++ {
+			e, ok := s.Entry(id)
+			if !ok || e.Base().Parent == "" {
+				break
+			}
+			id = e.Base().Parent
+			if id == tip {
+				continue
+			}
+			if interior[id] {
+				break // its ancestors are marked already
+			}
+			interior[id] = true
+		}
+	}
+	var out []string
+	for _, tip := range all {
+		if !interior[tip] {
+			out = append(out, tip)
+		}
+	}
 	if viewed != "" && !slices.Contains(out, viewed) {
 		out = append(out, viewed)
 	}
 	return out
 }
 
-func tipsOf(s *agentsession.Session, skipMarks bool) []string {
+func tipsOf(s *agentsession.Session) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range s.Leaves() {
-		if e, ok := s.Entry(id); ok && skipMarks {
-			if _, isLabel := e.(*agentsession.LabelEntry); isLabel && continues(s, e.Base().Parent, id) {
-				continue
-			}
-		}
 		id = resting(s, id)
 		if !seen[id] {
 			seen[id] = true
@@ -618,22 +637,6 @@ func tipsOf(s *agentsession.Session, skipMarks bool) []string {
 		}
 	}
 	return out
-}
-
-// continues reports whether the entry has a child other than the label:
-// something that is not a bookmark behind it.
-func continues(s *agentsession.Session, parent, label string) bool {
-	for _, c := range s.Children(parent) {
-		if c == label {
-			continue
-		}
-		if e, ok := s.Entry(c); ok {
-			if _, isLabel := e.(*agentsession.LabelEntry); !isLabel {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // land records an entry that has landed and drops what it replaces.

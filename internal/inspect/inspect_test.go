@@ -484,3 +484,31 @@ func TestAnEntryOffTheLineIsRefused(t *testing.T) {
 	}
 	var _ client.Record = r.be.Record()
 }
+
+// Two panes asked for together (a fast Tab Tab) read the session once.
+func TestPanesAskedTogetherReadTheSessionOnce(t *testing.T) {
+	r := newRig(t, agentturn.Config{ModelName: "m", Model: &script{responses: []step{say("a")}}})
+	r.prompt("one")
+	m := r.model()
+	row := rowWith(t, m, isAssistant)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if _, err := r.in.Entry(r.ctx, "", m.Tail, row.EntryID, m.Entries); err != nil {
+				t.Error(err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := r.in.Session(r.ctx, "", m.Tail, m.Entries); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := r.in.Reads(); got != 1 {
+		t.Errorf("%d reads, want 1", got)
+	}
+}

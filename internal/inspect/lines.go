@@ -56,30 +56,6 @@ func (e Entry) Lines() []string {
 	if e.KeptFromModel {
 		add("note:     kept from the model: the context leaves it out of every request")
 	}
-	if r := e.Response; r != nil {
-		add("")
-		add("response %s (entry %s)", r.ResponseID, short(r.Entry))
-		add("  model:    %s", orNone(r.Model))
-		add("  status:   %s", orNone(r.Status))
-		add("  usage:    %s", usageLine(r.Usage))
-		if r.LatencyMS > 0 {
-			add("  latency:  %d ms", r.LatencyMS)
-		}
-		if r.Attempts > 1 {
-			add("  attempts: %d model calls", r.Attempts)
-		}
-		switch r.Verify.State {
-		case Verified:
-			add("  request:  verified, the path rebuilds the request that hashes to %s", short(r.RequestHash))
-		case Unhashed:
-			add("  request:  UNHASHED, no request hash recorded")
-			add("            why: %s", r.Verify.Why)
-		default:
-			add("  request:  %s: %s", r.Verify.State, r.Verify.Why)
-		}
-	} else if e.Type == "item" || e.KeptFromModel {
-		add("response: none (an input item, or its response is not on the line yet)")
-	}
 	if c := e.Call; c != nil {
 		add("")
 		add("call %s %s", c.CallID, c.Name)
@@ -154,6 +130,30 @@ func (e Entry) Lines() []string {
 			}
 			l = append(l, s)
 		}
+	}
+	if r := e.Response; r != nil {
+		add("")
+		add("response %s (entry %s)", r.ResponseID, short(r.Entry))
+		add("  model:    %s", orNone(r.Model))
+		add("  status:   %s", orNone(r.Status))
+		add("  usage:    %s", usageLine(r.Usage))
+		if r.LatencyMS > 0 {
+			add("  latency:  %d ms", r.LatencyMS)
+		}
+		if r.Attempts > 1 {
+			add("  attempts: %d model calls", r.Attempts)
+		}
+		switch r.Verify.State {
+		case Verified:
+			add("  request:  verified, the path rebuilds the request that hashes to %s", short(r.RequestHash))
+		case Unhashed:
+			add("  request:  UNHASHED, no request hash recorded")
+			add("            why: %s", r.Verify.Why)
+		default:
+			add("  request:  %s: %s", r.Verify.State, r.Verify.Why)
+		}
+	} else if e.Type == "item" || e.KeptFromModel {
+		add("response: none (an input item, or its response is not on the line yet)")
 	}
 	if f := e.Fold; f != nil {
 		add("")

@@ -217,3 +217,39 @@ func TestACompactionIsARowThatSaysWhatItFolded(t *testing.T) {
 		t.Errorf("row = %+v fold = %+v, want entry %s first kept %s", fold, f, id, kept)
 	}
 }
+
+// The old line's bookkeeping ends on the entry the head moved back to: its
+// response and its run end are childless once the new run hangs from the
+// entry itself. A tip resting on an entry another line continues past is
+// not a branch.
+func TestBookkeepingOfTheOldLineIsNotABranchOnceTheHeadIsExtended(t *testing.T) {
+	l := newLog(t)
+	l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	l.append(itemEntry(msg("a", "user", "one"), ""))
+	r1 := l.append(itemEntry(msg("b", "assistant", "r1"), "resp1"))
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	// The old line goes on: two, r2.
+	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
+	l.append(itemEntry(msg("c", "user", "two"), ""))
+	r2 := l.append(itemEntry(msg("d", "assistant", "r2"), "resp2"))
+	l.append(agentsession.NewRunEnd("run2", "done", "", nil))
+
+	if err := l.s.Branch(r1); err != nil {
+		t.Fatal(err)
+	}
+	mark, _ := l.s.MarkLeaf()
+	l.append(mark)
+	l.append(agentsession.NewRunStart("run3", agentsession.SourceInput, ""))
+	l.append(itemEntry(msg("e", "user", "three"), ""))
+	r3 := l.append(itemEntry(msg("f", "assistant", "r3"), "resp3"))
+	l.append(agentsession.NewRunEnd("run3", "done", "", nil))
+
+	m := l.v.Model()
+	var got []string
+	for _, b := range m.Branches {
+		got = append(got, b.Leaf)
+	}
+	if len(got) != 2 || !(got[0] == r3 && got[1] == r2) {
+		t.Errorf("branches rest on %v, want the new line %s then the old %s (and not %s)", got, r3, r2, r1)
+	}
+}
