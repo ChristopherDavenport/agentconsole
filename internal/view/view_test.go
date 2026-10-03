@@ -667,3 +667,34 @@ func TestRecordPendingDoesNotOverrideALaterLiveRun(t *testing.T) {
 		t.Fatalf("turn %v, permissions %+v: the record's older run overrode the live one", m.Turn.State, m.Permissions)
 	}
 }
+
+// Head to an interior item shows the line as it stood there: the model in
+// force is the one at that item, not one a later run's config set.
+func TestHeadToAnInteriorItemStopsAtTheRewindPoint(t *testing.T) {
+	l := newLog(t)
+	l.append(&agentsession.ConfigEntry{Model: "m1"})
+	l.append(itemEntry(msg("u1", "user", "one"), ""))
+	a1 := l.append(itemEntry(msg("a1", "assistant", "answer"), "resp1"))
+	l.append(&agentsession.ResponseEntry{ResponseID: "resp1", Status: openresponses.ResponseStatusCompleted})
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
+	l.append(&agentsession.ConfigEntry{Model: "m2"})
+	l.append(itemEntry(msg("u2", "user", "two"), ""))
+	if m := l.v.Model(); m.Config != "m2" || len(m.Rows) != 3 {
+		t.Fatalf("setup: config %q, %d rows", m.Config, len(m.Rows))
+	}
+	if err := l.s.Branch(a1); err != nil {
+		t.Fatal(err)
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Head, Session: l.s, Leaf: a1})
+	m := l.v.Model()
+	if m.Config != "m1" {
+		t.Errorf("config at the rewind point = %q, want m1", m.Config)
+	}
+	if len(m.Rows) != 2 || m.Leaf != a1 {
+		t.Errorf("rows %d, leaf %s", len(m.Rows), m.Leaf)
+	}
+	if last := l.v.path[len(l.v.path)-1]; last.EntryType() == agentsession.TypeRun && last.(*agentsession.RunEntry).IsStart() {
+		t.Errorf("the path runs into the next run's start")
+	}
+}

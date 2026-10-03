@@ -416,20 +416,30 @@ func resting(s *agentsession.Session, id string) string {
 	return id
 }
 
-// lineEnd walks from id down through the bookkeeping that follows an item
-// (the decisions, dispatches, response and run entries a branch ends
-// with) to the last of it, stopping where the next entry is an item. A
-// leaf rests on an item, and the entries behind it still say what became
-// of its calls and how its run ended.
+// lineEnd walks from id down through the bookkeeping the run that made an
+// item wrote behind it (its decisions, dispatches, response and run end),
+// to the last of it. It stops at an item, and at what belongs to a later
+// run or turn: a run start and a config entry. A leaf rests on an item,
+// and the entries behind it still say what became of its calls and how
+// its run ended; but a head moved back to an interior item must show the
+// line as it stood there, with the model in force there.
 func lineEnd(s *agentsession.Session, id string) string {
 	for hops := 0; hops <= s.Len(); hops++ {
 		next := ""
 		for _, c := range s.Children(id) {
-			if e, ok := s.Entry(c); ok {
-				if _, isItem := e.(*agentsession.ItemEntry); !isItem {
-					next = c
+			e, ok := s.Entry(c)
+			if !ok {
+				continue
+			}
+			switch x := e.(type) {
+			case *agentsession.ItemEntry, *agentsession.ConfigEntry:
+				continue
+			case *agentsession.RunEntry:
+				if x.IsStart() {
+					continue
 				}
 			}
+			next = c
 		}
 		if next == "" {
 			return id
