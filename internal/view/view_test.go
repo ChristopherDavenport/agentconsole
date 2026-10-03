@@ -851,3 +851,40 @@ func TestResetReplayDoesNotSettleALiveEndedRun(t *testing.T) {
 		t.Fatalf("after run1's entries: %+v", m.Rows)
 	}
 }
+
+// A head move or a snapshot that arrives after the run's live end and
+// before its end entry has landed must not drop what the live end said:
+// the run is on the viewed path (its start entry landed), and its end is
+// still on the way.
+func TestHeadBeforeTheRunEndEntryKeepsTheLivePermission(t *testing.T) {
+	s := agentsession.New(agentsession.Header{})
+	add := func(e agentsession.Entry) string {
+		id, err := s.Append(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	add(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	callEntry := add(itemEntry(&openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}, "resp1"))
+	add(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete?"))
+
+	v := New()
+	v.Live(&client.RunStarted{RunID: "run1"})
+	v.Live(&client.ToolFinished{RunID: "run1", CallID: "c1", Name: "rm", Deferred: true, Reason: "delete?"})
+	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	for _, kind := range []agentsession.ChangeKind{agentsession.Snapshot, agentsession.Reset, agentsession.Head} {
+		v.Record(agentsession.Change{Kind: kind, Session: s, Leaf: callEntry})
+		if m := v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
+			t.Fatalf("%v before the run end entry: %+v, %v", kind, m.Permissions, m.Turn.State)
+		}
+	}
+	// The end entry lands and says the same.
+	e := agentsession.NewRunEnd("run1", agentsession.ReasonInputRequired, "", []string{"c1"})
+	add(e)
+	v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, Entry: e})
+	if m := v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
+		t.Fatalf("after the end entry: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}

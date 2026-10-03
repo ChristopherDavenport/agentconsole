@@ -347,7 +347,11 @@ func (v *View) syncPending(s *agentsession.Session) {
 			liveRunOnPath = liveRunOnPath || r.RunID == v.turn.RunID
 		}
 	}
-	if !liveRunOnPath && v.liveEnded[v.turn.RunID] && !v.endSeen[v.turn.RunID] {
+	// The live stream saw the run end and the record has not delivered
+	// its end entry. Either the viewed path does not hold the run yet
+	// (the record is behind), or it holds the run's start and the end is
+	// on its way: in both the live end's facts stand.
+	if v.liveEnded[v.turn.RunID] && !v.endSeen[v.turn.RunID] && (!liveRunOnPath || (last != nil && last.RunID == v.turn.RunID)) {
 		return
 	}
 	if last == nil || !last.IsEnd() {
