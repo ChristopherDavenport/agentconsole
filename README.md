@@ -9,4 +9,31 @@ live events only for what the record does not hold yet. A conversation,
 its branches, its policy decisions and its verification are one view,
 whether the run is live or long finished.
 
-Status: design. See `docs/plans/client.md`.
+Status: the conversation and turn views work against an agent run in
+process. The tree and record-detail views and the ACP backend are later
+steps. The design is in `docs/plans/client.md`.
+
+## Usage
+
+```sh
+go run ./cmd/agentconsole --model qwen3:1.7b
+```
+
+The model comes from an OpenAI-compatible Responses endpoint:
+`--base-url` (default `http://localhost:11434/v1`, Ollama), `--model`,
+and the API key from the environment variable named by `--api-key-env`
+(default `OPENAI_API_KEY`). Sessions are recorded under `--store-root`
+(`--store jsonl` or `cas`; default `~/.local/share/agentconsole/sessions`).
+
+- `--session ID` resumes a session; `--session ref:NAME` resumes the one a
+  ref points to.
+- `--conversation NAME` continues the named conversation, creating it the
+  first time.
+- `--tools none|clock`, `--confirm-tools` (ask before every tool call),
+  `--instructions`, `--max-turns`.
+
+In the terminal: Enter sends a prompt, or steers while a run is going;
+Ctrl-C aborts a run, and quits when idle; PgUp, PgDn, Up, Down, Home, End
+and the mouse wheel scroll; Ctrl-R shows reasoning; Ctrl-O shows tool
+arguments and output in full. When a tool call needs permission, y
+approves and n refuses, with an optional reason.
