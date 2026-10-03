@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +68,14 @@ func genScript(r *rand.Rand, pf profile) pScript {
 		}
 		if i > 0 && r.Intn(100) < 8 {
 			sc.Elems = append(sc.Elems, pElem{Kind: "bookmark", To: r.Intn(50)})
+			continue
+		}
+		if i > 0 && r.Intn(100) < 8 {
+			kind := "link"
+			if r.Intn(2) == 0 {
+				kind = "compact"
+			}
+			sc.Elems = append(sc.Elems, pElem{Kind: kind, To: r.Intn(50)})
 			continue
 		}
 		el := pElem{Kind: "run", Approve: r.Intn(2) == 0, HiddenPrompt: r.Intn(100) < 10}
@@ -466,6 +475,9 @@ func (c *checker) step(what string, moved bool) string {
 	if m.Leaf != ref.leaf {
 		return fail("leaf %s, want %s", m.Leaf, ref.leaf)
 	}
+	if msg := c.treeFacts(m, ref); msg != "" {
+		return fail("%s", msg)
+	}
 	// A committed row is not dropped unless the viewed path moved; a live
 	// row is governed by the liveness rules below.
 	for u, info := range c.prev {
@@ -648,6 +660,32 @@ type rendering struct {
 	landedOuts map[string]bool
 	dispatched map[string]bool
 	entryIDs   map[string]bool
+	// What a tree shows, computed on its own: the branches (tips that no
+	// other tip's line passes through, and the viewed one), the links, the
+	// compactions on the viewed line, and how many entries there are.
+	branches []refBranch
+	links    []refLink
+	folds    []refFold
+	n        int
+}
+
+type refBranch struct {
+	leaf, role string
+	current    bool
+}
+
+type refLink struct{ rel, session, callID, entry string }
+
+type refFold struct {
+	uid, entry, firstKept string
+	summaryLen, pinned    int
+}
+
+func textOfItem(item openresponses.Item) string {
+	if m, ok := item.(*openresponses.Message); ok {
+		return m.Text()
+	}
+	return ""
 }
 
 func render(s *agentsession.Session) rendering {
@@ -681,6 +719,12 @@ func render(s *agentsession.Session) rendering {
 			}
 		}
 		kids[b.Parent] = append(kids[b.Parent], b.ID)
+		if l, ok := e.(*agentsession.LinkEntry); ok {
+			out.links = append(out.links, refLink{rel: l.Rel, session: l.Session, callID: l.CallID, entry: l.ID})
+		}
+		if c, ok := e.(*agentsession.CompactionEntry); ok {
+			out.uids[rowUID(Row{Item: c.Summary})] = true
+		}
 		if it, ok := e.(*agentsession.ItemEntry); ok {
 			out.uids[rowUID(Row{Item: it.Item})] = true
 		}
@@ -746,6 +790,10 @@ func render(s *agentsession.Session) rendering {
 				out.rows = append(out.rows, rowUID(Row{Item: item}))
 			}
 		}
+		if c, ok := e.(*agentsession.CompactionEntry); ok {
+			out.rows = append(out.rows, rowUID(Row{Item: c.Summary}))
+			out.folds = append(out.folds, refFold{uid: rowUID(Row{Item: c.Summary}), entry: c.ID, firstKept: c.FirstKept, summaryLen: len([]rune(textOfItem(c.Summary))), pinned: len(c.Pinned)})
+		}
 	}
 	out.tail = tail
 	for _, e := range line {
@@ -775,6 +823,43 @@ func render(s *agentsession.Session) rendering {
 			seen[id] = true
 			out.leaves = append(out.leaves, id)
 		}
+	}
+	out.n = len(entries)
+	// Branches: a tip is a branch unless another tip's line passes through
+	// it; the viewed line is one whatever. Newest first.
+	through := map[string]bool{}
+	for _, tip := range out.leaves {
+		for _, e := range pathTo(tip) {
+			if e.Base().ID != tip {
+				through[e.Base().ID] = true
+			}
+		}
+	}
+	var tips []string
+	for _, tip := range out.leaves {
+		if !through[tip] {
+			tips = append(tips, tip)
+		}
+	}
+	if out.leaf != "" && !slices.Contains(tips, out.leaf) {
+		tips = append(tips, out.leaf)
+	}
+	for i := len(tips) - 1; i >= 0; i-- {
+		b := refBranch{leaf: tips[i], current: tips[i] == out.leaf}
+		for id, hops := tips[i], 0; id != "" && hops < 64; hops++ {
+			e, ok := byID[id]
+			if !ok {
+				break
+			}
+			if it, ok := e.(*agentsession.ItemEntry); ok && it.IsVisible() {
+				if m, ok := it.Item.(*openresponses.Message); ok {
+					b.role = string(m.Role)
+					break
+				}
+			}
+			id = e.Base().Parent
+		}
+		out.branches = append(out.branches, b)
 	}
 	// What waits, from the line's last run.
 	var last *agentsession.RunEntry
@@ -1158,6 +1243,10 @@ func TestGeneratorCoverage(t *testing.T) {
 				if x.Label != nil && *x.Label == agentsession.LeafLabel {
 					seen["leaf label"]++
 				}
+			case *agentsession.LinkEntry:
+				seen["link entry"]++
+			case *agentsession.CompactionEntry:
+				seen["compaction"]++
 			case *agentsession.ResponseEntry:
 				if x.Status == openresponses.ResponseStatusFailed && x.ResponseID == "" {
 					seen["cut response with no ID"]++
@@ -1198,10 +1287,59 @@ func TestGeneratorCoverage(t *testing.T) {
 		}
 	}
 	for _, k := range []string{"late config", "head record", "marked item", "hidden item", "steered input", "bookmark", "leaf label",
-		"cut response with no ID", "named mid-stream", "tool progress", "child call", "retry", "withheld", "unnamed stream", "input required", "aborted", "failed"} {
+		"cut response with no ID", "named mid-stream", "link entry", "compaction", "tool progress", "child call", "retry", "withheld", "unnamed stream", "input required", "aborted", "failed"} {
 		if seen[k] == 0 {
 			t.Errorf("the generator never produced %q in 400 scripts", k)
 		}
 	}
 	t.Logf("coverage over 400 scripts: %v", seen)
+}
+
+// treeFacts checks what the tree and the detail panes read off the model
+// against the reference renderer: the branches, the tail of the line, the
+// links and the compaction rows.
+func (c *checker) treeFacts(m Model, ref rendering) string {
+	if m.Tail != ref.tail {
+		return fmt.Sprintf("tail %s, want %s", m.Tail, ref.tail)
+	}
+	if m.Entries != ref.n {
+		return fmt.Sprintf("%d entries, the record has %d", m.Entries, ref.n)
+	}
+	if len(m.Branches) != len(ref.branches) {
+		return fmt.Sprintf("%d branches %v, want %d %v", len(m.Branches), m.Branches, len(ref.branches), ref.branches)
+	}
+	for i, b := range m.Branches {
+		w := ref.branches[i]
+		if b.Leaf != w.leaf || b.Current != w.current || b.Role != w.role {
+			return fmt.Sprintf("branch %d is %+v, want %+v", i, b, w)
+		}
+		if (w.role == "") != (b.Label == "(no message)") {
+			return fmt.Sprintf("branch %d label %q with role %q", i, b.Label, w.role)
+		}
+	}
+	if len(m.Links) != len(ref.links) {
+		return fmt.Sprintf("links %v, want %v", m.Links, ref.links)
+	}
+	for i, l := range m.Links {
+		w := ref.links[i]
+		if l.Rel != w.rel || l.Session != w.session || l.CallID != w.callID || l.Entry != w.entry {
+			return fmt.Sprintf("link %d is %+v, want %+v", i, l, w)
+		}
+	}
+	var folds []Row
+	for _, row := range m.Rows {
+		if row.Fold != nil {
+			folds = append(folds, row)
+		}
+	}
+	if len(folds) != len(ref.folds) {
+		return fmt.Sprintf("%d compaction rows, want %d", len(folds), len(ref.folds))
+	}
+	for i, row := range folds {
+		w := ref.folds[i]
+		if row.EntryID != w.entry || row.Fold.FirstKept != w.firstKept || row.Fold.SummaryLen != w.summaryLen || row.Fold.Pinned != w.pinned {
+			return fmt.Sprintf("compaction row %d is %+v (entry %s), want %+v", i, row.Fold, row.EntryID, w)
+		}
+	}
+	return ""
 }
