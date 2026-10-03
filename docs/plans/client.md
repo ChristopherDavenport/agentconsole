@@ -256,6 +256,30 @@ headless) changed the sketch in these places.
   writes, where no live end ever comes and the set would otherwise grow
   for ever.
 
+- **Response identity changed after the interleaving test.** Marking a
+  response over by its response entry was wrong: the record can be a whole
+  run ahead of the live stream, with the entry and the response entry in
+  before the stream's first event for the item. The view now settles a
+  response only on the live stream's end of it (`closed`), and matches a
+  live item that has no response yet to an entry by ID and text: what the
+  stream has is the start of what the entry holds, and an entry in a
+  response the stream ended is not the item's. A reused ID with other text
+  is another item; the same ID and the same text in a response the stream
+  never saw is taken for landed until the stream names the response.
+- **What waits is decided from the viewed path, always.** The record's
+  last run on the viewed line decides, and a live run end stands in for it
+  only until the record delivers its end entry (`reconcilePending`, run on
+  every record change and every live run end). A live end for a run the
+  viewed path has moved off says nothing about the viewed line.
+- **A run's start entry settles an earlier run only if the stream saw it
+  begin later** (`runSeq`), not any start entry: a reset replays older
+  starts.
+- **The interleaving test** (`internal/view/prop_test.go`) plays scripted
+  runs as the agent and recorder would, delivers the record's changes and
+  the live events in random interleavings with resets and head moves, and
+  checks the view after each step. `AGENTCONSOLE_SEEDS` and
+  `AGENTCONSOLE_SEED0` run more seeds or replay one.
+
 ## Open questions
 
 - **The terminal toolkit.** The likely choice is Bubble Tea. It needs

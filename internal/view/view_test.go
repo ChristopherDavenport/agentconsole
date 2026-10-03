@@ -888,3 +888,176 @@ func TestHeadBeforeTheRunEndEntryKeepsTheLivePermission(t *testing.T) {
 		t.Fatalf("after the end entry: %+v, %v", m.Permissions, m.Turn.State)
 	}
 }
+
+// A model switch inside a run writes its config entry behind the tool
+// outputs of the turn before. Head to that output shows the model it ran
+// under, not the one the next turn switched to.
+func TestHeadToAToolOutputStopsBeforeTheNextTurnsConfig(t *testing.T) {
+	l := newLog(t)
+	l.append(&agentsession.ConfigEntry{Model: "m1"})
+	l.append(itemEntry(msg("u1", "user", "go"), ""))
+	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "tool", Arguments: `{}`}
+	callEntry := l.append(itemEntry(call, "resp1"))
+	l.append(&agentsession.ResponseEntry{ResponseID: "resp1", Status: openresponses.ResponseStatusCompleted})
+	l.append(agentsession.NewDispatch("c1", callEntry))
+	out := l.append(itemEntry(openresponses.NewFunctionCallOutput("c1", "ok"), ""))
+	l.append(&agentsession.ConfigEntry{Model: "m2"})
+	l.append(itemEntry(msg("a2", "assistant", "done"), "resp2"))
+	if m := l.v.Model(); m.Config != "m2" {
+		t.Fatalf("setup: %q", m.Config)
+	}
+	if err := l.s.Branch(out); err != nil {
+		t.Fatal(err)
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Head, Session: l.s, Leaf: out})
+	if m := l.v.Model(); m.Config != "m1" || len(m.Rows) != 3 {
+		t.Errorf("config %q with %d rows, want m1 with 3", m.Config, len(m.Rows))
+	}
+}
+
+// ---- Pinned from the interleaving test (prop_test.go): each is a minimized
+// failure it found.
+
+// The record is ahead of the live stream by a whole run, and the stream has
+// not said a word yet: the entries of an unnamed response, its response
+// entry among them, are in before the first live event of its items. The
+// events that follow are the entries'. (The view is not Running yet, so a
+// response entry cannot be taken as proof that the stream is past it.)
+func TestRecordAheadByAWholeRunLeavesNoGhost(t *testing.T) {
+	l := newLog(t)
+	l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	l.append(itemEntry(msg("msg_0", "assistant", "m3 done"), "resp2"))
+	l.append(&agentsession.ResponseEntry{ResponseID: "resp2", Status: openresponses.ResponseStatusCompleted})
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.stream("run1", "", msg("msg_0", "assistant", "m3 do"), false)
+	l.stream("run1", "", msg("msg_0", "assistant", "m3 done"), true)
+	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
+		t.Fatalf("ghost: %+v", m.Rows)
+	}
+}
+
+// A reset takes entries back and they are written again. What the first
+// delivery taught the view about their response must not outlive the log
+// it came from.
+func TestResetThenTheSameEntriesAgainLeavesNoGhost(t *testing.T) {
+	l := newLog(t)
+	// The record delivers an unnamed response's entries, the stream not
+	// yet started.
+	l.append(itemEntry(msg("msg_0", "assistant", "m3 done"), "resp2"))
+	l.append(&agentsession.ResponseEntry{ResponseID: "resp2", Status: openresponses.ResponseStatusCompleted})
+	// The log is replaced by one that lacks both; the stream is mid-item.
+	l.v.Record(agentsession.Change{Kind: agentsession.Reset, Session: agentsession.New(agentsession.Header{})})
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.stream("run1", "", msg("msg_0", "assistant", "m3 do"), false)
+	fresh := agentsession.New(agentsession.Header{})
+	l.s = fresh
+	l.v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: fresh})
+	l.append(itemEntry(msg("msg_0", "assistant", "m3 done"), "resp2"))
+	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
+		t.Fatalf("ghost after the entries were written again: %+v", m.Rows)
+	}
+}
+
+// Two entries that name no response, with the same item ID, are told apart
+// by their text: the live row of one is not the other's entry.
+func TestEntriesWithNoResponseAreMatchedByText(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&client.TurnStarted{RunID: "run2", Turn: 1})
+	l.stream("run2", "", msg("msg_0", "assistant", "m7 do"), false)
+	l.append(itemEntry(msg("msg_0", "assistant", "m3 done"), ""))
+	if m := l.v.Model(); len(m.Rows) != 2 || liveRows(m) != 1 {
+		t.Fatalf("an entry of another item took the live row: %+v", m.Rows)
+	}
+}
+
+// A run start entry settles a live-ended run only when the stream saw that
+// run begin after it. An older run's start, delivered again after a reset
+// took the log back, settles nothing.
+func TestAnOlderRunsStartEntryDoesNotSettleALaterRun(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&client.RunStarted{RunID: "run3"}) // as seen by the stream
+	l.stream("run3", "resp3", msg("m13", "assistant", "pending"), true)
+	l.v.Live(&client.RunEnded{RunID: "run3", Reason: agentturn.ReasonDone})
+	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
+	if liveRows(l.v.Model()) != 1 {
+		t.Fatal("run2's start entry flushed run3's overlay")
+	}
+}
+
+// A live run end for a run the viewed path has moved off says nothing about
+// the viewed line: its permission is not shown there.
+func TestLiveRunEndForAnotherBranchShowsNoPermission(t *testing.T) {
+	s := agentsession.New(agentsession.Header{})
+	add := func(e agentsession.Entry) string {
+		id, err := s.Append(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	add(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	u := add(itemEntry(msg("u1", "user", "go"), ""))
+	callEntry := add(itemEntry(&openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}, "resp1"))
+	add(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete?"))
+	add(agentsession.NewRunEnd("run1", agentsession.ReasonInputRequired, "", []string{"c1"}))
+	mark := agentsession.NewLabelEntry(u, agentsession.LeafLabel)
+	if err := s.Branch(u); err != nil {
+		t.Fatal(err)
+	}
+	add(mark)
+
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: u})
+	// The stream's end of run1 arrives after the head moved off its line.
+	v.Live(&client.RunStarted{RunID: "run1"})
+	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	if m := v.Model(); len(m.Permissions) != 0 || m.Turn.State != Idle {
+		t.Fatalf("the viewed line holds no such call: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}
+
+// The record is ahead of the stream: the run that answers the permission has
+// its start entry in before the stream's RunStarted. The line has moved on.
+func TestRunStartEntryAheadOfTheStreamClearsThePermission(t *testing.T) {
+	s, _ := pendingLog(t, agentsession.ReasonInputRequired)
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	if m := v.Model(); len(m.Permissions) != 1 {
+		t.Fatal("setup")
+	}
+	e := agentsession.NewRunStart("run2", agentsession.SourceResume, "")
+	if _, err := s.Append(e); err != nil {
+		t.Fatal(err)
+	}
+	v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, Entry: e})
+	if m := v.Model(); len(m.Permissions) != 0 || m.Turn.State != Idle {
+		t.Fatalf("after the resume run's start entry: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}
+
+// A leaf label moves the follower's leaf as it is appended, a step before
+// the head change that says so; what waits is the new line's from then.
+func TestLabelAppendedBeforeItsHeadDropsTheOtherBranchsPermission(t *testing.T) {
+	s, _ := pendingLog(t, agentsession.ReasonInputRequired)
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	u := s.Entries()[0].Base().ID // the run start: the line's root
+	if err := s.Branch(u); err != nil {
+		t.Fatal(err)
+	}
+	mark := agentsession.NewLabelEntry(u, agentsession.LeafLabel)
+	if _, err := s.Append(mark); err != nil {
+		t.Fatal(err)
+	}
+	v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, Entry: mark})
+	if m := v.Model(); len(m.Permissions) != 0 {
+		t.Fatalf("the permission outlived the move: %+v", m.Permissions)
+	}
+}

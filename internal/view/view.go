@@ -49,6 +49,8 @@
 package view
 
 import (
+	"strings"
+
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
@@ -234,6 +236,35 @@ type ovCall struct {
 	finished bool
 }
 
+// maxSettled caps the responses remembered as over. Past it the oldest are
+// forgotten: an item with no response yet and the ID of a response that old
+// would be taken for one that landed, which needs more than maxSettled
+// responses between the two.
+const maxSettled = 4096
+
+// boundedSet is a set of strings that forgets its oldest when full.
+type boundedSet struct {
+	m     map[string]bool
+	order []string
+	max   int
+}
+
+func newBoundedSet(max int) *boundedSet { return &boundedSet{m: map[string]bool{}, max: max} }
+
+func (b *boundedSet) add(s string) {
+	if b.m[s] {
+		return
+	}
+	b.m[s] = true
+	b.order = append(b.order, s)
+	for len(b.order) > b.max {
+		delete(b.m, b.order[0])
+		b.order = b.order[1:]
+	}
+}
+
+func (b *boundedSet) has(s string) bool { return b.m[s] }
+
 // maxEndSeen caps the run end entries remembered ahead of their live ends.
 // An end entry is kept until the live RunEnded for its run settles it, so
 // the cap only bites if the record runs more than maxEndSeen runs ahead of
@@ -261,19 +292,12 @@ type View struct {
 
 	// What the record holds, by key: every entry that has landed on any
 	// branch.
-	landedItems map[string][]string // item ID to the response IDs it landed under
-	landedCalls map[string]bool     // function call items, by call ID
-	landedOuts  map[string]bool     // function call outputs, by call ID
-	// settled are the responses known to be over: the live stream ended
-	// them, or the record held their response entry when it was read. An
-	// item with no response ID yet cannot belong to one.
-	settled map[string]bool
-	// recorded are responses whose entry landed while the live stream
-	// was still inside the turn that made them: the stream may not have
-	// delivered their items yet, so they are not over for it until it
-	// moves on. responded says this turn's response ended live.
-	recorded  map[string]bool
-	responded bool
+	landedItems map[string][]landedItem // by item ID
+	landedCalls map[string]bool         // function call items, by call ID
+	landedOuts  map[string]bool         // function call outputs, by call ID
+	// closed are the responses the live stream ended. A row with no
+	// response yet cannot belong to one.
+	closed *boundedSet
 	// replaying is set while a snapshot or reset is read in.
 	replaying bool
 
@@ -286,6 +310,11 @@ type View struct {
 	// delivered, capped, since a run the live stream never mentions
 	// (another process's) is never settled by it.
 	liveEnded map[string]bool
+	// runSeq orders the runs the live stream saw begin.
+	runSeq map[string]int
+	seq    int
+	// liveFacts is the last run end the live stream reported.
+	liveFacts *client.RunEnded
 	endSeen   map[string]bool
 	endOrder  []string
 	turn      Turn
@@ -294,12 +323,12 @@ type View struct {
 // New returns an empty view.
 func New() *View {
 	return &View{
-		landedItems: map[string][]string{},
+		landedItems: map[string][]landedItem{},
 		landedCalls: map[string]bool{},
 		landedOuts:  map[string]bool{},
-		settled:     map[string]bool{},
-		recorded:    map[string]bool{},
+		closed:      newBoundedSet(maxSettled),
 		liveEnded:   map[string]bool{},
+		runSeq:      map[string]int{},
 		endSeen:     map[string]bool{},
 	}
 }
@@ -309,95 +338,107 @@ func (v *View) Record(ch agentsession.Change) {
 	switch ch.Kind {
 	case agentsession.Snapshot, agentsession.Reset:
 		v.rebuild(ch.Session)
-		v.syncPending(ch.Session)
+		v.reconcilePending()
 	case agentsession.Appended:
 		v.setSession(ch.Session, "")
 		v.land(ch.Entry)
-		if r, ok := ch.Entry.(*agentsession.RunEntry); ok && r.IsEnd() {
-			v.syncPending(ch.Session)
-		}
+		// Any entry can move the viewed line (the follower's leaf is
+		// its newest entry), so what waits is read again.
+		v.reconcilePending()
 	case agentsession.Head:
 		v.setSession(ch.Session, ch.Leaf)
-		v.syncPending(ch.Session)
+		v.reconcilePending()
 	}
 }
 
-// syncPending reads what waits on an answer from the record, for the path
-// being viewed: the calls the end entry of the path's last run lists as
-// pending that the path still holds without an output. It runs on every
-// snapshot, reset, head move and run end entry, so what is shown is
-// always the viewed line's. A view attached to a session that stopped at
-// input_required shows its permissions from here with no live event, and
-// live events refine them (the question of a call). It yields to the
-// live stream in two cases: a run is going, and the live stream saw a run
-// end that the record has not delivered yet, which the viewed path does
-// not hold because the record is behind, not because it is another
-// branch.
-func (v *View) syncPending(s *agentsession.Session) {
+// reconcilePending decides what waits on an answer, for the path being
+// viewed. The record decides: the calls the end entry of the path's last
+// run lists as pending that the path still holds without an output. It
+// runs on every snapshot, reset, head move, run end entry and live run
+// end, so what is shown is always the viewed line's, and a view attached
+// to a session that stopped at input_required shows its permissions with
+// no live event. The live stream refines it (the question of a call) and
+// stands in for it in two cases: a run is going, and the live stream saw a
+// run end that the record has not delivered yet, whether the viewed path
+// does not hold the run (the record is behind) or holds its start and the
+// end is on its way. A live end the record has delivered, or one for a run
+// the viewed path moved off, says nothing about the viewed line.
+func (v *View) reconcilePending() {
 	if v.turn.State == Running {
 		return
 	}
 	var last *agentsession.RunEntry
-	liveRunOnPath := v.turn.RunID == ""
+	onPath := map[string]bool{}
 	for i := len(v.path) - 1; i >= 0; i-- {
 		if r, ok := v.path[i].(*agentsession.RunEntry); ok {
 			if last == nil {
 				last = r
 			}
-			liveRunOnPath = liveRunOnPath || r.RunID == v.turn.RunID
+			onPath[r.RunID] = true
 		}
 	}
-	// The live stream saw the run end and the record has not delivered
-	// its end entry. Either the viewed path does not hold the run yet
-	// (the record is behind), or it holds the run's start and the end is
-	// on its way: in both the live end's facts stand.
-	if v.liveEnded[v.turn.RunID] && !v.endSeen[v.turn.RunID] && (!liveRunOnPath || (last != nil && last.RunID == v.turn.RunID)) {
+	old := v.perms
+	v.perms, v.cut = nil, nil
+	defer func() {
+		v.turn.State = Idle
+		if len(v.perms) > 0 {
+			v.turn.State = RequiresAction
+		}
+	}()
+	if f := v.liveFacts; f != nil && v.liveEnded[f.RunID] && !v.endSeen[f.RunID] && (!onPath[f.RunID] || (last != nil && last.RunID == f.RunID)) {
+		for _, p := range f.Pending {
+			if v.landedOuts[p.CallID] {
+				continue
+			}
+			next := Permission{CallID: p.CallID, Name: p.Name, Args: p.Args, Reason: string(p.Reason)}
+			if f.Reason == agentturn.ReasonInputRequired && p.Reason == agentturn.PendingDeferred {
+				next.Question = questionOf(old, p.CallID)
+				v.perms = append(v.perms, next)
+			} else {
+				v.cut = append(v.cut, next)
+			}
+		}
 		return
 	}
 	if last == nil || !last.IsEnd() {
-		v.perms, v.cut = nil, nil
-		v.turn.State = Idle
 		return
 	}
 	waiting := map[string]bool{}
 	for _, id := range last.Pending {
 		waiting[id] = true
 	}
-	old := v.perms
-	v.perms, v.cut = nil, nil
-	calls, err := s.PendingCalls(v.path[len(v.path)-1].Base().ID)
-	if err == nil {
-		for _, c := range calls {
-			if !waiting[c.ID()] {
-				continue
+	for _, c := range agentsession.Calls(v.path) {
+		if !c.Pending() || !waiting[c.ID()] {
+			continue
+		}
+		p := Permission{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments}
+		known := false
+		for _, o := range old {
+			known = known || o.CallID == p.CallID
+		}
+		if last.Reason == agentsession.ReasonInputRequired && (c.Held() || known) {
+			p.Reason = string(agentturn.PendingDeferred)
+			if n := len(c.Decisions); n > 0 {
+				p.Question = c.Decisions[n-1].Reason
 			}
-			p := Permission{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments}
-			known := false
-			for _, o := range old {
-				known = known || o.CallID == p.CallID
+			if q := questionOf(old, p.CallID); q != "" {
+				p.Question = q
 			}
-			if last.Reason == agentsession.ReasonInputRequired && (c.Held() || known) {
-				p.Reason = string(agentturn.PendingDeferred)
-				if n := len(c.Decisions); n > 0 {
-					p.Question = c.Decisions[n-1].Reason
-				}
-				for _, o := range old {
-					if o.CallID == p.CallID && o.Question != "" {
-						p.Question = o.Question
-					}
-				}
-				v.perms = append(v.perms, p)
-				continue
-			}
-			p.Reason = last.Reason
-			v.cut = append(v.cut, p)
+			v.perms = append(v.perms, p)
+			continue
+		}
+		p.Reason = last.Reason
+		v.cut = append(v.cut, p)
+	}
+}
+
+func questionOf(perms []Permission, callID string) string {
+	for _, p := range perms {
+		if p.CallID == callID {
+			return p.Question
 		}
 	}
-	v.turn.RunID = last.RunID
-	v.turn.State = Idle
-	if len(v.perms) > 0 {
-		v.turn.State = RequiresAction
-	}
+	return ""
 }
 
 // rebuild starts from a session read whole: what the view derived from
@@ -405,7 +446,7 @@ func (v *View) syncPending(s *agentsession.Session) {
 // session holds, so an overlay item the new session has is not shown
 // twice and one it lacks stays until its entry lands.
 func (v *View) rebuild(s *agentsession.Session) {
-	v.landedItems = map[string][]string{}
+	v.landedItems = map[string][]landedItem{}
 	v.landedCalls = map[string]bool{}
 	v.landedOuts = map[string]bool{}
 	v.endSeen, v.endOrder = map[string]bool{}, nil
@@ -511,12 +552,6 @@ func (v *View) land(e agentsession.Entry) {
 		if item, resp, ok := session.MarkedItem(x); ok {
 			v.landItem(item, resp)
 		}
-	case *agentsession.ResponseEntry:
-		if v.replaying || v.turn.State != Running || v.responded {
-			v.settled[x.ResponseID] = true
-		} else {
-			v.recorded[x.ResponseID] = true
-		}
 	case *agentsession.RunEntry:
 		if x.IsEnd() {
 			v.noteEnd(x.RunID)
@@ -525,16 +560,20 @@ func (v *View) land(e agentsession.Entry) {
 		}
 		// A run's start lands behind everything the runs before it
 		// wrote, so a run that ended live and wrote no end entry is
-		// settled by it. Not while history is read in: a snapshot or
-		// reset replays starts that precede a run it may not hold yet.
-		if v.replaying {
+		// settled by the start of a run the live stream saw begin after
+		// it. A start entry of any other run says nothing of the order:
+		// a reset replays older runs' starts, and a run the live stream
+		// never saw may be anywhere.
+		later, known := v.runSeq[x.RunID]
+		if v.replaying || !known {
 			return
 		}
 		for id := range v.liveEnded {
-			if id != x.RunID {
+			if seq, ok := v.runSeq[id]; ok && id != x.RunID && seq < later {
 				v.flush(id)
 				delete(v.liveEnded, id)
 				delete(v.endSeen, id)
+				delete(v.runSeq, id)
 			}
 		}
 	}
@@ -565,21 +604,60 @@ func (v *View) landItem(item openresponses.Item, responseID string) {
 		if id == "" {
 			return
 		}
-		v.landedItems[id] = append(v.landedItems[id], responseID)
-		v.dropItems(func(o *ovItem) bool { return !o.key.call && o.key.id == id && v.same(o.responseID, responseID) })
+		v.landedItems[id] = append(v.landedItems[id], landedItem{resp: responseID, item: item})
+		v.dropItems(func(o *ovItem) bool {
+			return !o.key.call && o.key.id == id && v.match(o.responseID, o.item, responseID, item)
+		})
 	}
 }
 
-// same reports whether an overlay item of response overlay is the item an
-// entry of response entry holds. Response IDs are compared strictly. The
-// one case that is not an equality is an overlay row whose stream has not
-// named its response yet: it is the entry's if that response is still
-// open, since a response that is over cannot be the one the row is in.
-func (v *View) same(overlay, entry string) bool {
-	if overlay == entry {
+type landedItem struct {
+	resp string
+	item openresponses.Item
+}
+
+// match reports whether a live item of response liveResp is the item an
+// entry of response entryResp holds. Response IDs are compared strictly.
+// The one case that is not an equality is a live item whose stream has not
+// named its response yet. The record can be ahead of the live stream, so
+// the entry of such an item may land before the stream has said a word of
+// it; then the item is the entry's if the entry's response is not one the
+// stream has ended, and what the stream has of the item is the start of
+// what the entry holds. A response ended on the stream cannot be the one
+// the row is in, and a reused ID with other text is another item.
+func (v *View) match(liveResp string, live openresponses.Item, entryResp string, entry openresponses.Item) bool {
+	if liveResp != "" || entryResp != "" {
+		if liveResp == entryResp {
+			return true
+		}
+		if liveResp != "" {
+			return false
+		}
+	}
+	// An item whose response is named nowhere yet, or never (an entry
+	// with no response), has only its ID and its text to go on.
+	return !v.closed.has(entryResp) && startOf(live, entry)
+}
+
+// startOf reports whether live can be the item entry so far: for text, a
+// prefix of it; for an item that has none, any.
+func startOf(live, entry openresponses.Item) bool {
+	lt, lok := textOf(live)
+	et, eok := textOf(entry)
+	if !lok || !eok {
 		return true
 	}
-	return overlay == "" && entry != "" && !v.settled[entry]
+	return strings.HasPrefix(et, lt)
+}
+
+func textOf(item openresponses.Item) (string, bool) {
+	switch v := item.(type) {
+	case *openresponses.Message:
+		return v.Text(), true
+	case *openresponses.ReasoningItem:
+		return v.Summary.Text(), true
+	}
+	return "", false
 }
 
 // sameTurn reports whether two rows of one run and turn can be one item:
@@ -587,12 +665,12 @@ func (v *View) same(overlay, entry string) bool {
 // turn identify a row until the stream names its response.
 func sameTurn(a, b string) bool { return a == b || a == "" || b == "" }
 
-func (v *View) landed(k key, responseID string) bool {
+func (v *View) landed(k key, responseID string, item openresponses.Item) bool {
 	if k.call {
 		return v.landedCalls[k.id]
 	}
-	for _, r := range v.landedItems[k.id] {
-		if v.same(responseID, r) {
+	for _, l := range v.landedItems[k.id] {
+		if v.match(responseID, item, l.resp, l.item) {
 			return true
 		}
 	}
@@ -649,6 +727,7 @@ func (v *View) flushIfSettled(runID string) {
 	v.flush(runID)
 	delete(v.liveEnded, runID)
 	delete(v.endSeen, runID)
+	delete(v.runSeq, runID)
 }
 
 // flush drops what a finished run left in the overlay, except the calls
@@ -673,10 +752,15 @@ func (v *View) flush(runID string) {
 func (v *View) Live(ev client.LiveEvent) {
 	switch e := ev.(type) {
 	case *client.RunStarted:
+		v.seq++
+		v.runSeq[e.RunID] = v.seq
+		for id, q := range v.runSeq {
+			if q < v.seq-maxEndSeen {
+				delete(v.runSeq, id)
+			}
+		}
 		// A run that starts has answered every call that waited, since
 		// the agent refuses it otherwise.
-		v.settleRecorded()
-		v.responded = false
 		v.perms, v.cut = nil, nil
 		kept := v.calls[:0]
 		for _, c := range v.calls {
@@ -688,8 +772,6 @@ func (v *View) Live(ev client.LiveEvent) {
 		v.calls = kept
 		v.turn = Turn{State: Running, RunID: e.RunID}
 	case *client.TurnStarted:
-		v.settleRecorded()
-		v.responded = false
 		v.turn.Number, v.turn.Attempt = e.Turn, 0
 		v.turn.Model = e.Model
 	case *client.ModelRetrying:
@@ -705,10 +787,8 @@ func (v *View) Live(ev client.LiveEvent) {
 	case *client.ResponseCompleted:
 		// The response names the items that completed before the stream
 		// did, and is over: an item with no response yet is not its.
-		v.settleRecorded()
-		v.responded = true
 		if e.ResponseID != "" {
-			v.settled[e.ResponseID] = true
+			v.closed.add(e.ResponseID)
 			for _, o := range v.items {
 				if o.run == e.RunID && o.turn == v.turn.Number && o.responseID == "" {
 					o.responseID = e.ResponseID
@@ -719,8 +799,8 @@ func (v *View) Live(ev client.LiveEvent) {
 				if o.key.call || o.responseID != e.ResponseID {
 					return false
 				}
-				for _, r := range v.landedItems[o.key.id] {
-					if r == e.ResponseID {
+				for _, l := range v.landedItems[o.key.id] {
+					if l.resp == e.ResponseID {
 						return true
 					}
 				}
@@ -769,7 +849,7 @@ func (v *View) item(runID, responseID string, item openresponses.Item, done bool
 	default:
 		k = key{id: client.ItemID(item)}
 	}
-	if k.id == "" || v.landed(k, responseID) {
+	if k.id == "" || v.landed(k, responseID, item) {
 		return
 	}
 	for _, o := range v.items {
@@ -830,39 +910,14 @@ func (v *View) permit(p Permission) {
 	v.perms = append(v.perms, p)
 }
 
-func (v *View) settleRecorded() {
-	for r := range v.recorded {
-		v.settled[r] = true
-	}
-	clear(v.recorded)
-}
-
 func (v *View) runEnded(e *client.RunEnded) {
-	v.settleRecorded()
-	// The run's own list of what waits is authoritative: it replaces
-	// what the deferred calls reported one by one, keeping their
-	// questions.
-	old := v.perms
-	v.perms, v.cut = nil, nil
-	for _, p := range e.Pending {
-		next := Permission{CallID: p.CallID, Name: p.Name, Args: p.Args, Reason: string(p.Reason)}
-		if e.Reason == agentturn.ReasonInputRequired && p.Reason == agentturn.PendingDeferred {
-			for _, o := range old {
-				if o.CallID == p.CallID {
-					next.Question = o.Question
-				}
-			}
-			v.perms = append(v.perms, next)
-		} else {
-			v.cut = append(v.cut, next)
-		}
-	}
 	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld = e.RunID, 0, 0, e.Withheld
 	v.turn.State = Idle
-	if len(v.perms) > 0 {
-		v.turn.State = RequiresAction
-	}
+	v.liveFacts = e
 	v.liveEnded[e.RunID] = true
+	// What waits is the run's own list while the record has not delivered
+	// its end, and the record's after.
+	v.reconcilePending()
 	v.flushIfSettled(e.RunID)
 }
 
