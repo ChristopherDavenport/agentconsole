@@ -10,6 +10,7 @@ import (
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
+	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
@@ -263,4 +264,25 @@ func TestAFailedMovePutsTheHeadBack(t *testing.T) {
 	if got := strings.Join(sp.last(), "|"); got != "one|r1|two|r2|three" {
 		t.Errorf("the next request carried %q, want the old line", got)
 	}
+}
+
+// Continuing from a call whose output is further down the old line would
+// leave the agent with a pending call nothing can answer: refused.
+func TestContinueFromACallWithoutItsOutputIsRefused(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "m", Tools: []agenttool.Tool{upperTool(nil)},
+		Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{callTool("call_1", "upper", `{"text":"a"}`), say(nil, nil, "done"), say(nil, nil, "next")}}}
+	r := newRig(t, cfg)
+	r.finish(r.prompt("go"))
+	m := r.waitFor("done", func(m view.Model) bool { return idle(m) && entryOf(m, "done") != "" })
+	var call string
+	for _, row := range m.Rows {
+		if row.Call != nil {
+			call = row.EntryID
+		}
+	}
+	err := r.ctl.ContinueFrom(r.ctx, call)
+	if err == nil || !strings.Contains(err.Error(), "without an output") {
+		t.Fatalf("err = %v, want a refusal", err)
+	}
+	r.finish(r.prompt("still works"))
 }

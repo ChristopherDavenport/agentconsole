@@ -108,6 +108,9 @@ func (c control) State() agentturn.State { return c.b.agent.State() }
 //   - a leaf label, and an entry on a fork's prefix above its base, are
 //     refused: agentsession would not let the leaf rest there (its
 //     mayRestOn is not exported, so the rule is repeated here);
+//   - an entry that leaves function calls without an output is refused: the
+//     agent would be left with pending calls nothing in the client can
+//     answer, and the next prompt would fail.
 //
 // The run check and the move are not atomic: agentturn exposes no lock to
 // hold across Rebase and SetTranscript, so a run that starts in between
@@ -130,6 +133,11 @@ func (c control) ContinueFrom(ctx context.Context, entryID string) (err error) {
 	}
 	if err := mayRestOn(s, entryID); err != nil {
 		return fail(err)
+	}
+	if calls, err := s.PendingCalls(entryID); err != nil {
+		return fail(err)
+	} else if len(calls) > 0 {
+		return fail(fmt.Errorf("it leaves %d tool call(s) without an output (%s); continue from the answer after it", len(calls), calls[0].Call.Name))
 	}
 
 	prevLeaf, prev := s.Leaf(), b.agent.State()
