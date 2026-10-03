@@ -13,6 +13,39 @@ Status: the conversation, turn, tree and record-detail views work against
 an agent run in process. The ACP backend is a later step. The design is in
 `docs/plans/client.md`.
 
+## As a library
+
+A coding agent embeds the client by building a backend over its own agent
+and handing it to `console.Run`. For an agent assembled with agentkit:
+
+```go
+kit, err := agentkit.New(ctx,
+	agentkit.WithModel(model, "gpt-5"),
+	agentkit.WithTools(read, write, bash),
+	agentkit.WithPolicy(policy, matchers),
+	agentkit.WithSession(store, agentsession.Header{CWD: cwd}),
+	// agentkit.WithResumedSession(store, id) to continue a session:
+	// a call held for approval before the restart is answered after it.
+)
+if err != nil {
+	return err
+}
+defer kit.Close()
+
+be, err := kitbackend.New(kit)
+if err != nil {
+	return err
+}
+defer be.Close()
+return console.Run(ctx, be) // returns when the user quits; the store is then safe to close
+```
+
+For an `agentturn.Agent` built by hand, attach its `session.Recorder`
+and use `native.New(agent, rec)` instead; `native` does not import
+agentkit. The public packages are `console`, `client`, `client/native`,
+`client/kitbackend` and `view`; the terminal model and the record panes
+are internal.
+
 ## Usage
 
 ```sh
