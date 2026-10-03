@@ -90,6 +90,20 @@ case "$TAG" in
   v*)
     printf '%s\n' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
       || die "$TAG is not of the form vX.Y.Z"
+    # Go's rule: a module whose path has no /vN suffix is v0 or v1; /vN is
+    # vN. A v2.0.0 tag on the unsuffixed path cannot be withdrawn and no
+    # consumer can require it as the module.
+    MODPATH="$(sed -n 's/^module[[:space:]]*//p' go.mod | head -1)"
+    MAJOR="${TAG#v}"; MAJOR="${MAJOR%%.*}"
+    if printf '%s\n' "$MODPATH" | grep -qE '/v[0-9]+$'; then
+      WANT="${MODPATH##*/v}"
+      [ "$MAJOR" = "$WANT" ] \
+        || die "$TAG does not match the module path $MODPATH, whose major version is $WANT"
+    else
+      [ "$MAJOR" = 0 ] || [ "$MAJOR" = 1 ] \
+        || die "$TAG is major version $MAJOR, but the module path $MODPATH has no /v$MAJOR suffix; a v2 or later needs the path to say so (and go.mod changed first)"
+    fi
+    ok "major version $MAJOR matches the module path"
     if [ -z "$LATEST" ]; then
       ok "$TAG is the first release"
     else
