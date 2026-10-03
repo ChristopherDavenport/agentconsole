@@ -440,15 +440,15 @@ func TestManifestDeltasFold(t *testing.T) {
 	if s.Manifest == nil || len(s.Manifest.Entries) != 3 || s.Manifest.Entries[1].Bytes != 7 || s.Manifest.Entries[2].Name != "c" {
 		t.Fatalf("manifest = %+v", s.Manifest)
 	}
-	if s.ManifestSkipped != 0 {
-		t.Errorf("skipped %d", s.ManifestSkipped)
+	if len(s.ManifestRefused) != 0 {
+		t.Errorf("refused %+v", s.ManifestRefused)
 	}
 	// A delta on a manifest the path does not hold is skipped and counted.
 	r.annotate("agentmemory:render", map[string]any{"base": "sha256:nope", "hash": "sha256:x", "entries": []any{map[string]any{"keep": 1}}})
 	m = r.model()
 	s, _ = r.in.Session(r.ctx, "", m.Tail, m.Entries)
-	if s.ManifestSkipped != 1 || len(s.Manifest.Entries) != 3 {
-		t.Errorf("skipped %d, entries %d", s.ManifestSkipped, len(s.Manifest.Entries))
+	if len(s.ManifestRefused) != 1 || len(s.Manifest.Entries) != 3 {
+		t.Errorf("refused %+v, entries %d", s.ManifestRefused, len(s.Manifest.Entries))
 	}
 }
 
@@ -546,5 +546,50 @@ func TestScopeRevocationEndsEveryGrant(t *testing.T) {
 				t.Errorf("the pane does not show the revocation:\n%s", joined(s.Lines()))
 			}
 		})
+	}
+}
+
+// A delta is refused, and shown as refused, when its result does not hash
+// to what it says, or its elements are malformed; the manifest in force
+// stays the last good one.
+func TestRefusedManifestDeltasAreShownAsRefused(t *testing.T) {
+	r := newRig(t, agentturn.Config{ModelName: "m", Model: &script{responses: []step{say("hi")}}})
+	r.prompt("hello")
+	a := inspect.Manifest{Entries: []inspect.ManifestEntry{{Scope: "user", Name: "a", Hash: "sha256:1", Bytes: 1}}}
+	r.annotate("agentmemory:render", a)
+	entry := func(scope, name string) map[string]any {
+		return map[string]any{"scope": scope, "name": name, "hash": "sha256:x", "bytes": 1}
+	}
+	keep := map[string]any{"keep": 1}
+	bad := []map[string]any{
+		// the reviewer's: keeps a and adds evil under a hash that is not the result's
+		{"base": inspect.ManifestHash(a), "hash": "sha256:deadbeef", "entries": []any{keep, entry("user", "evil")}},
+		// keep and entry on one element
+		{"base": inspect.ManifestHash(a), "hash": "sha256:x", "entries": []any{map[string]any{"keep": 1, "scope": "user", "name": "z"}}},
+		// an entry naming nothing
+		{"base": inspect.ManifestHash(a), "hash": "sha256:x", "entries": []any{keep, entry("", "")}},
+		// keeping more than is left
+		{"base": inspect.ManifestHash(a), "hash": "sha256:x", "entries": []any{map[string]any{"keep": 5}}},
+	}
+	for _, d := range bad {
+		r.annotate("agentmemory:render", d)
+	}
+	m := r.model()
+	s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Manifest == nil || len(s.Manifest.Entries) != 1 || s.Manifest.Entries[0].Name != "a" {
+		t.Fatalf("manifest in force = %+v, want the last good one [a]", s.Manifest)
+	}
+	if len(s.ManifestRefused) != len(bad) {
+		t.Fatalf("refused %d, want %d: %+v", len(s.ManifestRefused), len(bad), s.ManifestRefused)
+	}
+	text := joined(s.Lines())
+	if !strings.Contains(text, "REFUSED manifest record") || !strings.Contains(text, "deadbeef") {
+		t.Errorf("the pane does not say why:\n%s", text)
+	}
+	if strings.Contains(text, "user/evil") {
+		t.Errorf("a refused delta shows as memory:\n%s", text)
 	}
 }
