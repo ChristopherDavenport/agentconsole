@@ -94,6 +94,9 @@ type Turn struct {
 	// [Model.Config]: the config entry is written by the next
 	// entry-writing event.
 	Model string
+	// Withheld is set when the last run ended because a guard withheld
+	// a message: the text that streamed was never committed.
+	Withheld bool
 	// Attempt is the number of the model call that failed and is being
 	// retried, 0 when none is.
 	Attempt int
@@ -576,6 +579,10 @@ func (v *View) Live(ev client.LiveEvent) {
 				return false
 			})
 		}
+		// An item still streaming when its response ends never got an
+		// item_end, so the record will not hold it: a message the guard
+		// withheld, or one a failed response cut off.
+		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == v.turn.Number && !o.done })
 	case *client.ToolOpened:
 		if v.landedOuts[e.CallID] {
 			return
@@ -694,7 +701,7 @@ func (v *View) runEnded(e *client.RunEnded) {
 			v.cut = append(v.cut, next)
 		}
 	}
-	v.turn.RunID, v.turn.Number, v.turn.Attempt = e.RunID, 0, 0
+	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld = e.RunID, 0, 0, e.Withheld
 	v.turn.State = Idle
 	if len(v.perms) > 0 {
 		v.turn.State = RequiresAction

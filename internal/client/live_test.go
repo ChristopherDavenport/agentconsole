@@ -55,3 +55,14 @@ func TestRunEndedListsPending(t *testing.T) {
 		t.Errorf("pending = %+v", end.Pending)
 	}
 }
+
+func TestFromEventCarriesWithheld(t *testing.T) {
+	ev, _ := FromEvent(&agentturn.ResponseEnd{RunID: "r", Response: &openresponses.Response{ID: "resp"}, Withheld: true})
+	if !ev.(*ResponseCompleted).Withheld {
+		t.Error("response_end lost Withheld")
+	}
+	ev, _ = FromEvent(&agentturn.RunEnd{RunID: "r", Withheld: true})
+	if !ev.(*RunEnded).Withheld {
+		t.Error("run_end lost Withheld")
+	}
+}

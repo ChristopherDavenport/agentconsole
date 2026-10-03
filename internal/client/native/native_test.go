@@ -2,6 +2,8 @@ package native_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -422,5 +424,45 @@ func TestBranchAndHead(t *testing.T) {
 	m = r.waitFor("the head on the side branch again", func(m view.Model) bool { return m.Leaf == sideID })
 	if len(m.Rows) != 2 || len(assistantRows(m)) != 0 {
 		t.Errorf("rows on the side branch = %s", describe(m))
+	}
+}
+
+// TestWithheldMessageIsNotLeftOnScreen runs a message OutputGuard
+// withholds. Its deltas stream, so the text is shown live; it never gets
+// an item_end or an entry, so once the response ends withheld the row
+// must go, and nothing renders it as committed.
+func TestWithheldMessageIsNotLeftOnScreen(t *testing.T) {
+	g := newGates()
+	guard := func(context.Context, agentturn.OutputInfo) (*openresponses.Message, error) {
+		return nil, fmt.Errorf("%w: not for the user", agentturn.ErrGuard)
+	}
+	r := newRig(t, agentturn.Config{ModelName: "m", OutputGuard: guard, Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+		say(g, map[int]string{0: "mid"}, "secret ", "text"),
+	}}})
+	r.allowDrop = true // the live row goes once the response ends
+	run := r.prompt("hi")
+	g.arrive(t, "mid")
+	r.waitFor("the streamed text", func(m view.Model) bool {
+		rows := assistantRows(m)
+		return len(rows) == 1 && rows[0].Live
+	})
+	g.release("mid")
+	err := <-run
+	if err == nil || !errors.Is(err, agentturn.ErrGuard) {
+		t.Logf("run error: %v", err)
+	}
+	m := r.waitFor("the run over", func(m view.Model) bool { return m.Turn.State != view.Running && m.Turn.RunID != "" })
+	if rows := assistantRows(m); len(rows) != 0 {
+		t.Errorf("the withheld message is still rendered: %s", describe(m))
+	}
+	if r.ever(func(m view.Model) bool {
+		for _, row := range assistantRows(m) {
+			if !row.Live {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Error("the withheld message was rendered as committed")
 	}
 }

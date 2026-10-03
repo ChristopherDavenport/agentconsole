@@ -568,3 +568,23 @@ func TestOnlyDeferredCallsOfAnInputRequiredRunAreQuestions(t *testing.T) {
 		t.Fatalf("permissions %+v, cut off %+v, turn %v", m.Permissions, m.CutOff, m.Turn.State)
 	}
 }
+
+// A row still streaming when its response ends never got an item_end: a
+// message OutputGuard withheld, or one a failed response cut off. The
+// record will not hold it, so it goes with the response, not at the end
+// of the run.
+func TestOpenRowGoesWhenItsResponseEnds(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.stream("run1", "resp1", msg("done", "assistant", "finished"), true)
+	l.stream("run1", "resp1", msg("held", "assistant", "withheld text"), false)
+	if liveRows(l.v.Model()) != 2 {
+		t.Fatal("setup")
+	}
+	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	m := l.v.Model()
+	if liveRows(m) != 1 || client.ItemID(m.Rows[0].Item) != "done" {
+		t.Fatalf("rows after the response ended: %+v", m.Rows)
+	}
+}

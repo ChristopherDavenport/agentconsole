@@ -79,6 +79,9 @@ type ResponseCompleted struct {
 	ResponseID string
 	Model      string
 	Status     openresponses.ResponseStatus
+	// Withheld says OutputGuard withheld a message of the response: the
+	// text that streamed has no item_end and no entry.
+	Withheld bool
 }
 
 // ToolOpened announces a call the loop is about to settle. Parent is the
@@ -136,10 +139,12 @@ type Pending struct {
 // RunEnded closes a run. Pending lists the calls the run left waiting,
 // which is the authoritative permission list for Reason input_required.
 type RunEnded struct {
-	RunID   string
-	Reason  agentturn.Reason
-	Err     error
-	Pending []Pending
+	RunID  string
+	Reason agentturn.Reason
+	Err    error
+	// Withheld says the run ended because a guard withheld a message.
+	Withheld bool
+	Pending  []Pending
 }
 
 func (*RunStarted) liveEvent()        {}
@@ -202,7 +207,7 @@ func FromEvent(ev agentturn.Event) (LiveEvent, bool) {
 		if e.Response == nil {
 			return nil, false
 		}
-		return &ResponseCompleted{RunID: e.RunID, ResponseID: e.Response.ID, Model: e.Response.Model, Status: e.Response.Status}, true
+		return &ResponseCompleted{RunID: e.RunID, ResponseID: e.Response.ID, Model: e.Response.Model, Status: e.Response.Status, Withheld: e.Withheld}, true
 	case *agentturn.ToolStart:
 		return &ToolOpened{RunID: e.RunID, CallID: e.CallID, Name: e.Name, Args: string(e.Args), Parent: e.Parent}, true
 	case *agentturn.ToolDispatch:
@@ -213,7 +218,7 @@ func FromEvent(ev agentturn.Event) (LiveEvent, bool) {
 		return &ToolFinished{RunID: e.RunID, CallID: e.CallID, Name: e.Name, Result: resultText(e.Result),
 			Err: e.Err, Blocked: e.Blocked, Deferred: e.Deferred, Reason: e.Reason, Parent: e.Parent}, true
 	case *agentturn.RunEnd:
-		end := &RunEnded{RunID: e.RunID, Reason: e.Reason, Err: e.Err}
+		end := &RunEnded{RunID: e.RunID, Reason: e.Reason, Err: e.Err, Withheld: e.Withheld}
 		for _, p := range e.Pending {
 			if p.Call == nil {
 				continue
