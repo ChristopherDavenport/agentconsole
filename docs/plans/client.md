@@ -305,10 +305,68 @@ headless) changed the sketch in these places.
   bookmarks, head records without an entry, progress, child calls and
   steered input, and a recorder that settles the config late.
 
+## Decided in implementation, step 3 (conversation and turn views)
+
+- **The toolkit is Bubble Tea**, with `bubbles` (viewport, textinput) and
+  `lipgloss`, and nothing else direct: bubbletea v1.3.10, bubbles v1.0.0
+  (which requires exactly that bubbletea and lipgloss v1.1.0), lipgloss
+  v1.1.0. Why these: they are the de facto Go TUI stack, their Update and
+  View are plain functions, so the model is tested headless by sending
+  messages and reading `View()`, with no teatest; and the transitive
+  weight is the terminal basics (termenv, x/ansi, runewidth, uniseg). No
+  testing dependency was added.
+- **The view is fed under one lock, and the model is taken inside it.**
+  `tui.Attach` follows Live and Record on two goroutines. The view is not
+  safe for concurrent use, and a `Change.Session` is valid only until the
+  follow takes its next step, so the change must be applied before the
+  iterator resumes: it cannot be handed to the program's goroutine. Each
+  step is applied, the `view.Model` taken (it shares nothing with the
+  view) and sent to the program as a `ModelMsg` inside the lock, so the
+  program sees the models in the order they were applied.
+- **Prompt and Answer run in tea.Cmds.** The model keeps its own `busy`
+  flag from the moment the command starts until it returns, since the
+  view's turn state lags at both ends. Enter prompts when idle and steers
+  when busy or the view says running; Ctrl-C aborts a running run (a second
+  one quits, in case the abort never ends the run) and quits when idle.
+- **Permissions are answered one at a time, sent together.** Each
+  permission out is asked in turn (y approves, n asks for an optional
+  reason and Enter refuses); once every one has an answer, one
+  `Control.Answer` carries them all, since a resume has to settle what
+  is pending. A refusal is `agentturn.Refuse`, so it ends the run without
+  calling the model, and its output says the user refused and why. Answers
+  are recorded `By` "human".
+- **Keys.** The conversation scrolls on PgUp, PgDn, Ctrl-Up, Ctrl-Down,
+  Ctrl-Home, Ctrl-End and the wheel; the arrows, Home and End edit the
+  input line. SIGINT and SIGTERM from outside are an `InterruptMsg`, the
+  same as Ctrl-C (the program's own handling is off).
+- **A feed that stops is not restarted.** The status line says so and
+  says to resume the session; a new feed would start from a new view and
+  a Live subscription that misses what the run emitted meanwhile.
+- **Quitting waits for the run's write.** After the program ends, main
+  aborts and waits up to three seconds for the in-flight Prompt or Answer
+  (`Model.Drain`) before cancelling and closing the store.
+- **Collapsing is global.** Ctrl-R shows or hides all reasoning, Ctrl-O
+  shows tool arguments and output in full (three lines and 120 columns
+  otherwise). No per-row cursor yet.
+- **The binary.** `cmd/agentconsole` runs an `agentturn.Agent` in
+  process. `--session ID` or `--session ref:NAME` resumes,
+  `--conversation NAME` resolves or creates the ref with
+  agentsession's `SessionFor` and resumes the session, neither starts a
+  new one. A resumed agent is seeded with `session.AgentOptions`. Tools are
+  none or a clock; `--confirm-tools` defers every call so the permission
+  path can be driven by hand. agentkit integration (real tools, policy,
+  skills, memory) is a later step.
+- **What the contract and the view did not carry.**
+  - A hidden item never reaches the view, so a row cannot be shown as
+    hidden: only `KeptFromModel` rows are distinguished.
+  - A live reasoning row shows no text while it streams (its length reads
+    0 until the entry lands), so a streaming reasoning row shows only that
+    the model is thinking.
+  - `Model.Rows` is the whole path on each step and the TUI renders all of
+    it on each step; a long conversation will want a per-row cache.
+
 ## Open questions
 
-- **The terminal toolkit.** The likely choice is Bubble Tea. It needs
-  to be picked, along with its dependency weight, before step 3.
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
   once. A reviewer's argument edit, which agentpolicy supports, has no
   ACP shape. It shows only on native backends until ACP has one.
