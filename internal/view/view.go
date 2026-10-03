@@ -234,7 +234,16 @@ type ovCall struct {
 	finished bool
 }
 
-// maxEndSeen caps the run end entries remembered.
+// maxEndSeen caps the run end entries remembered ahead of their live ends.
+// An end entry is kept until the live RunEnded for its run settles it, so
+// the cap only bites if the record runs more than maxEndSeen runs ahead of
+// the live stream: then the oldest end entries are forgotten, and a run
+// whose live end arrives after that is never settled by its end entry. Its
+// overlay rows would stay until the start entry of a later run lands, the
+// one other thing that settles it. In the native backend an entry is
+// written before its live event is queued and both are consumed in
+// order, so the record cannot be that far ahead; the cap bounds a session
+// written by another process, which no live event ever settles.
 const maxEndSeen = 64
 
 // key identifies an item across the live stream and the record.

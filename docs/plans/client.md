@@ -244,6 +244,18 @@ headless) changed the sketch in these places.
   bookkeeping behind the leaf, so run ends and decisions after the last
   item still inform the calls and the turn.
 
+- **The run-end memory is capped at 64.** The view remembers the run end
+  entries the record delivered ahead of the live stream's `RunEnded`, to
+  settle a run when the second half arrives. The set holds 64. What is
+  lost past it: a run whose end entry was evicted before its live end
+  arrived is not settled by that entry, so its leftover overlay rows stay
+  until the start entry of a later run lands. That needs the record to be
+  more than 64 runs ahead of the live stream, which the native backend
+  cannot be (the entry is written before its event is queued, and both
+  are consumed in order). The cap exists for sessions another process
+  writes, where no live end ever comes and the set would otherwise grow
+  for ever.
+
 ## Open questions
 
 - **The terminal toolkit.** The likely choice is Bubble Tea. It needs
