@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -229,4 +230,28 @@ func TestFeedFailureStaysOnTheStatusLine(t *testing.T) {
 	if !strings.Contains(s, "FEED STOPPED") {
 		t.Errorf("the feed failure was cleared:\n%s", s)
 	}
+}
+
+// TestAnsweredPermissionIsNotOfferedAgainWhileTheViewLags: the run ends
+// (runDoneMsg) before the slow feed has told the view, which still lists
+// the permission just answered.
+func TestAnsweredPermissionIsNotOfferedAgainWhileTheViewLags(t *testing.T) {
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = deferAll("may I run upper?")
+	a := newApp(t, cfg)
+	a.submit("go")
+	a.waitFor("the permission", has("Permission requested"))
+
+	a.feedDelay.Store(int64(200 * time.Millisecond))
+	a.typeText("y")
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if s := a.screen(); strings.Contains(s, "Permission requested") {
+			t.Fatalf("the answered permission was offered again:\n%s", s)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	a.feedDelay.Store(0)
+	a.waitFor("the run finished", all(has("ABC", "done", "idle"), lacks("Permission requested")))
 }

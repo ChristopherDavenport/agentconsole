@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -186,6 +187,9 @@ type app struct {
 
 	wg   sync.WaitGroup
 	wait func()
+
+	// feedDelay holds each model the feed sends, to play a slow terminal.
+	feedDelay atomic.Int64
 }
 
 func newApp(t *testing.T, cfg agentturn.Config) *app {
@@ -206,7 +210,12 @@ func newApp(t *testing.T, cfg agentturn.Config) *app {
 		t.Fatal(err)
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, m: tui.New(ctx, be)}
-	a.wait = tui.Attach(ctx, be, a.send)
+	a.wait = tui.Attach(ctx, be, func(msg tea.Msg) {
+		if _, ok := msg.(tui.ModelMsg); ok {
+			time.Sleep(time.Duration(a.feedDelay.Load()))
+		}
+		a.send(msg)
+	})
 	t.Cleanup(func() {
 		cancel()
 		a.wait()
