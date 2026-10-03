@@ -151,6 +151,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
+	case InterruptMsg:
+		return m.interrupt()
 	case tea.KeyMsg:
 		return m.key(msg)
 	}
@@ -176,6 +178,24 @@ func (m *Model) syncPermissions() {
 	}
 }
 
+// InterruptMsg is an interrupt from outside the terminal, SIGINT or
+// SIGTERM: it does what Ctrl-C does. The host turns the program's own
+// signal handling off (tea.WithoutSignalHandler) and sends this instead,
+// since bubbletea's ends the program with an error and no abort.
+type InterruptMsg struct{}
+
+// interrupt aborts a running run, and quits when idle or when an abort
+// has not ended the run.
+func (m *Model) interrupt() (tea.Model, tea.Cmd) {
+	if m.running() && !m.aborting {
+		m.aborting = true
+		m.ctl.Abort()
+		m.relayout()
+		return m, nil
+	}
+	return m, tea.Quit
+}
+
 // Drain waits until every Prompt and Answer the model started has
 // returned, or timeout, and reports whether they all did. A host calls it
 // after the program ends and the run was aborted, before it closes the
@@ -195,14 +215,7 @@ func (m *Model) Drain(timeout time.Duration) bool {
 func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		if m.running() && !m.aborting {
-			m.aborting = true
-			m.ctl.Abort()
-			m.relayout()
-			return m, nil
-		}
-		// Idle, or an abort that has not ended the run: leave.
-		return m, tea.Quit
+		return m.interrupt()
 	case "pgup":
 		m.vp.PageUp()
 		return m, nil

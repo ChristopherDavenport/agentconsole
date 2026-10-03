@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -54,10 +55,8 @@ func run() error {
 		return fmt.Errorf("--model is required (for Ollama, a name from `ollama list`)")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	// The terminal is in raw mode under the program, so ctrl+c arrives as
-	// a key, not a signal; this covers a SIGINT sent from outside.
 
 	st, closeStore, err := openStore(*storeKind, *storeRoot)
 	if err != nil {
@@ -104,7 +103,23 @@ func run() error {
 	}
 
 	m := tui.New(ctx, be)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
+	// ctrl+c) is made the same thing: the program's own handling would
+	// end it with an error, without aborting the run.
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx), tea.WithoutSignalHandler())
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+	go func() {
+		for {
+			select {
+			case <-sigs:
+				p.Send(tui.InterruptMsg{})
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	wait := tui.Attach(ctx, be, p.Send)
 	_, err = p.Run()
 	// A run may still be going (a second ctrl+c quits without waiting for
