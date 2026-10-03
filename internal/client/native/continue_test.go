@@ -64,7 +64,9 @@ func TestContinueFromMovesTheHead(t *testing.T) {
 	r.finish(r.prompt("two"))
 	m := r.waitFor("r2", func(m view.Model) bool { return idle(m) && entryOf(m, "r2") != "" })
 	r1 := entryOf(m, "r1")
-	r.allowDrop = true
+	r.mu.Lock()
+	r.allowDrop = true // the view leaves the abandoned line
+	r.mu.Unlock()
 
 	if err := r.ctl.ContinueFrom(r.ctx, r1); err != nil {
 		t.Fatal(err)
