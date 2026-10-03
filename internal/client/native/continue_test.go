@@ -2,15 +2,19 @@ package native_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentsession/jsonl"
 	"github.com/ChristopherDavenport/agentturn"
+	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
+	"github.com/ChristopherDavenport/agentconsole/internal/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/view"
 )
 
@@ -142,5 +146,121 @@ func TestContinueFromAnUnknownEntryFails(t *testing.T) {
 	}
 	if err := r.ctl.ContinueFrom(r.ctx, ""); err == nil {
 		t.Error("continuing from no entry succeeded")
+	}
+}
+
+// A fork's prefix above its base is not a place the leaf may rest, and
+// ContinueFrom said so only after the recorder had moved: the error, and
+// every prompt after it, was agentsession's base rule. The target is
+// refused first and the session goes on.
+func TestContinueFromAForksPrefixIsRefusedAndTheForkStillWorks(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store, err := jsonl.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	origin, err := store.Create(ctx, agentsession.Header{Records: agentsession.AllRecords})
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(role, txt string) string {
+		m := openresponses.UserText(txt)
+		if role == "assistant" {
+			m.Role = openresponses.RoleAssistant
+		}
+		id, err := store.Append(ctx, origin.ID(), agentsession.NewItemEntry(m))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	above := add("user", "origin question")
+	base := add("assistant", "origin answer")
+	rec, _, err := session.Start(ctx, store, agentsession.Header{Records: agentsession.AllRecords, ParentSession: origin.ID(), Base: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp := &spy{next: &script{responses: []func(context.Context, *openresponses.Emitter) error{say(nil, nil, "fork answer"), say(nil, nil, "again")}}}
+	ag := agentturn.New(agentturn.Config{Model: sp, ModelName: "m"})
+	defer rec.Attach(ag)()
+	be, err := native.New(ag, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := be.Control().ContinueFrom(ctx, above); err == nil || !strings.Contains(err.Error(), "can only continue from its base") {
+		t.Fatalf("err = %v, want a refusal naming the prefix", err)
+	}
+	if err := be.Control().Prompt(ctx, openresponses.UserText("hi")); err != nil {
+		t.Fatalf("the fork is broken after the refusal: %v", err)
+	}
+	// The base itself is a place to continue from.
+	if err := be.Control().ContinueFrom(ctx, base); err != nil {
+		t.Fatalf("continue from the base: %v", err)
+	}
+	if err := be.Control().Prompt(ctx, openresponses.UserText("again?")); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(sp.last(), "|"); got != "origin question|origin answer|again?" {
+		t.Errorf("request = %q", got)
+	}
+}
+
+func TestContinueFromALeafLabelIsRefused(t *testing.T) {
+	r := newRig(t, agentturn.Config{ModelName: "m", Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{say(nil, nil, "a"), say(nil, nil, "b")}}})
+	r.finish(r.prompt("one"))
+	m := r.waitFor("a", func(m view.Model) bool { return idle(m) && entryOf(m, "a") != "" })
+	if err := r.ctl.ContinueFrom(r.ctx, entryOf(m, "a")); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := r.be.Record().Read(r.ctx, "")
+	var label string
+	for _, e := range s.Entries() {
+		if l, ok := e.(*agentsession.LabelEntry); ok && l.Label != nil {
+			label = l.ID
+		}
+	}
+	if label == "" {
+		t.Fatal("no label to try")
+	}
+	if err := r.ctl.ContinueFrom(r.ctx, label); err == nil || !strings.Contains(err.Error(), "leaf label") {
+		t.Errorf("err = %v, want a refusal of the label", err)
+	}
+	r.finish(r.prompt("two"))
+}
+
+// A step that fails after the recorder moved puts the old leaf, transcript
+// and pending calls back: the next prompt continues the old line.
+func TestAFailedMovePutsTheHeadBack(t *testing.T) {
+	sp := &spy{next: &script{responses: []func(context.Context, *openresponses.Emitter) error{
+		say(nil, nil, "r1"), say(nil, nil, "r2"), say(nil, nil, "r3"),
+	}}}
+	r := newRig(t, agentturn.Config{Model: sp, ModelName: "scripted"})
+	r.finish(r.prompt("one"))
+	r.waitFor("r1", func(m view.Model) bool { return idle(m) && entryOf(m, "r1") != "" })
+	r.finish(r.prompt("two"))
+	m := r.waitFor("r2", func(m view.Model) bool { return idle(m) && entryOf(m, "r2") != "" })
+	before := r.sess.Leaf()
+	r.mu.Lock()
+	r.allowDrop = true // the follower sees the head at r1 for a moment
+	r.mu.Unlock()
+
+	r.be.FailAfterRebase(func() error { return errors.New("injected") })
+	err := r.ctl.ContinueFrom(r.ctx, entryOf(m, "r1"))
+	if err == nil || !strings.Contains(err.Error(), "injected") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), "putting the head back failed") {
+		t.Errorf("the undo failed: %v", err)
+	}
+	r.be.FailAfterRebase(nil)
+	r.waitFor("the old line back in view", func(m view.Model) bool { return entryOf(m, "r2") != "" })
+	if got := r.sess.Leaf(); got != before {
+		t.Errorf("leaf = %s, want the old %s", got, before)
+	}
+	r.finish(r.prompt("three"))
+	if got := strings.Join(sp.last(), "|"); got != "one|r1|two|r2|three" {
+		t.Errorf("the next request carried %q, want the old line", got)
 	}
 }
