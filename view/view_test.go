@@ -10,7 +10,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 // log is a session the tests write by hand, handing the view the same

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // ModelMsg carries what the view renders after one more step of the

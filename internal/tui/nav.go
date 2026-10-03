@@ -11,7 +11,7 @@ import (
 	"github.com/ChristopherDavenport/agentsession"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // The viewing state: which screen, which pane under the conversation, and

@@ -4,8 +4,11 @@
 // committed yet, and Record for what is.
 //
 // The rule behind the split is that the record is the truth for everything
-// committed and live events carry only what is not. The package
-// internal/view turns the two streams into what a client renders.
+// committed and live events carry only what is not. Package
+// [github.com/ChristopherDavenport/agentconsole/view] turns the two
+// streams into what a client renders, and package
+// [github.com/ChristopherDavenport/agentconsole/console] runs the
+// terminal client over a Backend.
 package client
 
 import (

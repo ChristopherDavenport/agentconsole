@@ -9,19 +9,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client/native"
-	"github.com/ChristopherDavenport/agentconsole/internal/tui"
+	"github.com/ChristopherDavenport/agentconsole/client/native"
+	"github.com/ChristopherDavenport/agentconsole/console"
 )
 
 func main() {
@@ -30,9 +26,6 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-// drainTimeout bounds the wait for an aborted run to write its end.
-const drainTimeout = 3 * time.Second
 
 type clockArgs struct{}
 
@@ -55,8 +48,7 @@ func run() error {
 		return fmt.Errorf("--model is required (for Ollama, a name from `ollama list`)")
 	}
 
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
+	ctx := context.Background()
 
 	st, closeStore, err := openStore(*storeKind, *storeRoot)
 	if err != nil {
@@ -102,36 +94,7 @@ func run() error {
 		return err
 	}
 
-	m := tui.New(ctx, be)
-	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
-	// ctrl+c) is made the same thing: the program's own handling would
-	// end it with an error, without aborting the run.
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx), tea.WithoutSignalHandler())
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigs)
-	go func() {
-		for {
-			select {
-			case <-sigs:
-				p.Send(tui.InterruptMsg{})
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	wait := tui.Attach(ctx, be, p.Send)
-	_, err = p.Run()
-	// A run may still be going (a second ctrl+c quits without waiting for
-	// an abort to land). Let it write its end before the store closes;
-	// the context's cancel is the last resort.
-	be.Control().Abort()
-	if !m.Drain(drainTimeout) {
-		fmt.Fprintln(os.Stderr, "agentconsole: a run did not end; closing the session as it is")
-	}
-	stop()
-	m.Drain(drainTimeout)
-	wait()
+	err = console.Run(ctx, be)
 	if err == nil {
 		fmt.Fprintln(os.Stderr, "session", be.SessionID())
 	}
