@@ -222,10 +222,8 @@ type ovCall struct {
 	finished bool
 }
 
-type runState struct {
-	liveEnded  bool
-	entryEnded bool
-}
+// maxEndSeen caps the run end entries remembered.
+const maxEndSeen = 64
 
 // key identifies an item across the live stream and the record.
 type key struct {
@@ -253,8 +251,14 @@ type View struct {
 	items []*ovItem
 	calls []*ovCall
 	perms []Permission
-	runs  map[string]*runState
-	turn  Turn
+	// liveEnded are the runs whose live end was seen and whose overlay
+	// waits for the record; endSeen the end entries the record has
+	// delivered, capped, since a run the live stream never mentions
+	// (another process's) is never settled by it.
+	liveEnded map[string]bool
+	endSeen   map[string]bool
+	endOrder  []string
+	turn      Turn
 }
 
 // New returns an empty view.
@@ -264,7 +268,8 @@ func New() *View {
 		landedCalls: map[string]bool{},
 		landedOuts:  map[string]bool{},
 		settled:     map[string]bool{},
-		runs:        map[string]*runState{},
+		liveEnded:   map[string]bool{},
+		endSeen:     map[string]bool{},
 	}
 }
 
@@ -289,9 +294,7 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.landedItems = map[string][]string{}
 	v.landedCalls = map[string]bool{}
 	v.landedOuts = map[string]bool{}
-	for _, r := range v.runs {
-		r.entryEnded = false
-	}
+	v.endSeen, v.endOrder = map[string]bool{}, nil
 	v.setSession(s, "")
 	for _, e := range s.Entries() {
 		v.land(e)
@@ -361,9 +364,32 @@ func (v *View) land(e agentsession.Entry) {
 		}
 	case *agentsession.RunEntry:
 		if x.IsEnd() {
-			v.run(x.RunID).entryEnded = true
+			v.noteEnd(x.RunID)
 			v.flushIfSettled(x.RunID)
+			return
 		}
+		// A run's start lands behind everything the runs before it
+		// wrote, so a run that ended live and wrote no end entry is
+		// settled by it.
+		for id := range v.liveEnded {
+			if id != x.RunID {
+				v.flush(id)
+				delete(v.liveEnded, id)
+				delete(v.endSeen, id)
+			}
+		}
+	}
+}
+
+func (v *View) noteEnd(id string) {
+	if v.endSeen[id] {
+		return
+	}
+	v.endSeen[id] = true
+	v.endOrder = append(v.endOrder, id)
+	for len(v.endOrder) > maxEndSeen {
+		delete(v.endSeen, v.endOrder[0])
+		v.endOrder = v.endOrder[1:]
 	}
 }
 
@@ -448,24 +474,15 @@ func (v *View) dropCall(callID string) {
 	}
 }
 
-func (v *View) run(id string) *runState {
-	r := v.runs[id]
-	if r == nil {
-		r = &runState{}
-		v.runs[id] = r
-	}
-	return r
-}
-
 // flushIfSettled flushes a run's leftovers once both halves of its end
 // are in: the live event and the record's end entry.
 func (v *View) flushIfSettled(runID string) {
-	r := v.runs[runID]
-	if r == nil || !r.liveEnded || !r.entryEnded {
+	if !v.liveEnded[runID] || !v.endSeen[runID] {
 		return
 	}
 	v.flush(runID)
-	delete(v.runs, runID)
+	delete(v.liveEnded, runID)
+	delete(v.endSeen, runID)
 }
 
 // flush drops what a finished run left in the overlay, except the calls
@@ -492,12 +509,6 @@ func (v *View) Live(ev client.LiveEvent) {
 	case *client.RunStarted:
 		// A run that starts has answered every call that waited, since
 		// the agent refuses it otherwise.
-		for id, r := range v.runs {
-			if id != e.RunID && r.liveEnded {
-				v.flush(id)
-				delete(v.runs, id)
-			}
-		}
 		v.perms = nil
 		kept := v.calls[:0]
 		for _, c := range v.calls {
@@ -507,7 +518,6 @@ func (v *View) Live(ev client.LiveEvent) {
 		}
 		clear(v.calls[len(kept):])
 		v.calls = kept
-		v.run(e.RunID)
 		v.turn = Turn{State: Running, RunID: e.RunID}
 	case *client.TurnStarted:
 		v.turn.Number, v.turn.Attempt = e.Turn, 0
@@ -664,7 +674,7 @@ func (v *View) runEnded(e *client.RunEnded) {
 	if len(v.perms) > 0 {
 		v.turn.State = RequiresAction
 	}
-	v.run(e.RunID).liveEnded = true
+	v.liveEnded[e.RunID] = true
 	v.flushIfSettled(e.RunID)
 }
 

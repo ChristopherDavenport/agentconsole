@@ -2,6 +2,7 @@ package view
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
@@ -150,14 +151,68 @@ func TestRunEndFlushesOnlyWhenTheRecordHasTheEndToo(t *testing.T) {
 	}
 }
 
-func TestNextRunFlushesAnEndedRunThatNeverWroteItsEnd(t *testing.T) {
+// A run that ended and whose entries the follower has not delivered yet
+// keeps its overlay when the next run starts: the rows are not dropped
+// before their entries exist.
+func TestNextRunDoesNotDropWhatTheRecordHasNotDelivered(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.stream("run1", "resp1", msg("m1", "assistant", "pending entry"), true)
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.v.Live(&client.RunStarted{RunID: "run2"})
+	if m := l.v.Model(); len(m.Rows) != 1 {
+		t.Fatalf("run1's row was dropped before its entry landed: %+v", m.Rows)
+	}
+	l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	l.append(itemEntry(msg("m1", "assistant", "pending entry"), "resp1"))
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	m := l.v.Model()
+	if len(m.Rows) != 1 || m.Rows[0].Live {
+		t.Fatalf("after run1's entries: %+v", m.Rows)
+	}
+}
+
+// Settling a run leaves no state behind.
+func TestSettledRunLeavesNoState(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	if len(l.v.liveEnded) != 0 || len(l.v.endSeen) != 0 {
+		t.Errorf("settled run left state: %d live ends, %d entry ends", len(l.v.liveEnded), len(l.v.endSeen))
+	}
+}
+
+// A run that never wrote its end entry is settled by the start entry of
+// the run after it, which lands behind everything the first wrote.
+func TestNextRunStartEntrySettlesARunWithNoEndEntry(t *testing.T) {
 	l := newLog(t)
 	l.v.Live(&client.RunStarted{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "lost"), true)
 	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonError})
 	l.v.Live(&client.RunStarted{RunID: "run2"})
-	if liveRows(l.v.Model()) != 0 {
-		t.Fatal("the leftover outlived the next run's start")
+	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
+	if m := l.v.Model(); liveRows(m) != 0 {
+		t.Fatalf("the orphan outlived the next run's start entry: %+v", m.Rows)
+	}
+}
+
+// The state kept for run ends is bounded: a long history adds none, and
+// a session written by another process, which no live event ever
+// settles, adds a capped number.
+func TestRunEndStateIsBounded(t *testing.T) {
+	l := newLog(t)
+	for i := range 300 {
+		id := fmt.Sprintf("run%d", i)
+		l.append(agentsession.NewRunStart(id, agentsession.SourceInput, ""))
+		l.append(agentsession.NewRunEnd(id, "done", "", nil))
+	}
+	if len(l.v.endSeen) > maxEndSeen {
+		t.Errorf("appended run ends kept: %d", len(l.v.endSeen))
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Reset, Session: l.s})
+	if len(l.v.endSeen) > maxEndSeen {
+		t.Errorf("rebuild kept %d run ends", len(l.v.endSeen))
 	}
 }
 
