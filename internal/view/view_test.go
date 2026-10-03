@@ -469,33 +469,54 @@ func TestReusedItemIDIsNotLandedBeforeTheStreamNamesItsResponse(t *testing.T) {
 	}
 }
 
-// An entry drops the overlay of its own response, not of another's.
+// An entry drops the overlay of its own response, not of a later one that
+// reuses the ID and has not been named yet, even when the entry lands
+// after the stream has moved on.
 func TestEntryDoesNotDropAnotherResponsesOverlay(t *testing.T) {
 	l := newLog(t)
 	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.stream("run1", "resp2", msg("msg_0", "assistant", "second"), false)
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.stream("run1", "resp1", msg("msg_0", "assistant", "first"), true)
+	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.stream("run1", "", msg("msg_0", "assistant", "second"), false)
+	if liveRows(l.v.Model()) != 2 {
+		t.Fatal("setup: want both rows live")
+	}
+	// The follower is behind: resp1's entry lands now.
 	l.append(itemEntry(msg("msg_0", "assistant", "first"), "resp1"))
 	m := l.v.Model()
-	if len(m.Rows) != 2 || !m.Rows[1].Live {
-		t.Fatalf("resp1's entry dropped resp2's overlay: %+v", m.Rows)
+	if len(m.Rows) != 2 || m.Rows[0].Live || !m.Rows[1].Live || text(m.Rows[1].Item) != "second" {
+		t.Fatalf("resp1's entry took resp2's overlay: %+v", m.Rows)
 	}
 }
 
-// The other order: the entry of an unnamed item lands before the live
-// stream has said anything. Its response is still open, so the entry is
-// the item's, and the late live events leave no second row.
+// The entry of an unnamed item that lands before the stream's events for
+// it is the item's: no ghost. Once its response is over, a third item
+// reusing the ID is shown.
 func TestUnnamedItemWhoseEntryLandedFirst(t *testing.T) {
 	l := newLog(t)
 	l.v.Live(&client.RunStarted{RunID: "run1"})
 	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
-	l.append(itemEntry(msg("msg_0", "assistant", "hi"), "resp1"))
-	l.stream("run1", "", msg("msg_0", "assistant", "hi"), true)
-	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
-		t.Fatalf("ghost: %+v", m.Rows)
-	}
+	l.stream("run1", "resp1", msg("msg_0", "assistant", "one"), true)
+	l.append(itemEntry(msg("msg_0", "assistant", "one"), "resp1"))
 	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
-	if m := l.v.Model(); len(m.Rows) != 1 {
+
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.append(itemEntry(msg("msg_0", "assistant", "two"), "resp2"))
+	l.stream("run1", "", msg("msg_0", "assistant", "two"), true)
+	if m := l.v.Model(); len(m.Rows) != 2 || liveRows(m) != 0 {
+		t.Fatalf("ghost of the entry that landed first: %+v", m.Rows)
+	}
+	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp2"})
+	if m := l.v.Model(); len(m.Rows) != 2 {
 		t.Fatalf("after response end: %+v", m.Rows)
+	}
+
+	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 3})
+	l.stream("run1", "", msg("msg_0", "assistant", "three"), false)
+	if m := l.v.Model(); len(m.Rows) != 3 || !m.Rows[2].Live {
+		t.Fatalf("the third reuse of the ID was hidden: %+v", m.Rows)
 	}
 }
 

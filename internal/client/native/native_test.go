@@ -2,7 +2,6 @@ package native_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -429,8 +428,9 @@ func TestBranchAndHead(t *testing.T) {
 
 // TestWithheldMessageIsNotLeftOnScreen runs a message OutputGuard
 // withholds. Its deltas stream, so the text is shown live; it never gets
-// an item_end or an entry, so once the response ends withheld the row
-// must go, and nothing renders it as committed.
+// an item_end or an entry. The run is parked between the response's end
+// and the run's end, and the row must already be gone there: not left for
+// the run's end to flush.
 func TestWithheldMessageIsNotLeftOnScreen(t *testing.T) {
 	g := newGates()
 	guard := func(context.Context, agentturn.OutputInfo) (*openresponses.Message, error) {
@@ -439,7 +439,17 @@ func TestWithheldMessageIsNotLeftOnScreen(t *testing.T) {
 	r := newRig(t, agentturn.Config{ModelName: "m", OutputGuard: guard, Model: &script{responses: []func(context.Context, *openresponses.Emitter) error{
 		say(g, map[int]string{0: "mid"}, "secret ", "text"),
 	}}})
-	r.allowDrop = true // the live row goes once the response ends
+	// Registered after the rig's own subscribers, so the view has been
+	// handed the response's end when this holds the run.
+	unsub := r.agent.Subscribe(func(ctx context.Context, ev agentturn.Event) error {
+		if end, ok := ev.(*agentturn.ResponseEnd); ok && end.Withheld {
+			return g.hold(ctx, "after-response-end")
+		}
+		return nil
+	})
+	defer unsub()
+	t.Cleanup(func() { g.release("mid"); g.release("after-response-end") })
+	r.allowDrop = true // the live row goes once its response ends
 	run := r.prompt("hi")
 	g.arrive(t, "mid")
 	r.waitFor("the streamed text", func(m view.Model) bool {
@@ -447,13 +457,21 @@ func TestWithheldMessageIsNotLeftOnScreen(t *testing.T) {
 		return len(rows) == 1 && rows[0].Live
 	})
 	g.release("mid")
-	err := <-run
-	if err == nil || !errors.Is(err, agentturn.ErrGuard) {
+	g.arrive(t, "after-response-end")
+
+	m := r.waitFor("the row gone while the run is still going", func(m view.Model) bool {
+		return m.Turn.State == view.Running && len(assistantRows(m)) == 0
+	})
+	if m.Turn.Withheld {
+		t.Error("Withheld is reported before the run ended")
+	}
+	g.release("after-response-end")
+	if err := <-run; err != nil {
 		t.Logf("run error: %v", err)
 	}
-	m := r.waitFor("the run over", func(m view.Model) bool { return m.Turn.State != view.Running && m.Turn.RunID != "" })
-	if rows := assistantRows(m); len(rows) != 0 {
-		t.Errorf("the withheld message is still rendered: %s", describe(m))
+	m = r.waitFor("the run over", func(m view.Model) bool { return m.Turn.State != view.Running && m.Turn.RunID != "" })
+	if len(assistantRows(m)) != 0 || !m.Turn.Withheld {
+		t.Errorf("after the run: %s, withheld=%v", describe(m), m.Turn.Withheld)
 	}
 	if r.ever(func(m view.Model) bool {
 		for _, row := range assistantRows(m) {

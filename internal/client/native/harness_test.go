@@ -68,9 +68,18 @@ func (g *gates) arrive(t *testing.T, name string) {
 	}
 }
 
+// release lets the script go on. It is safe to call twice, so a test can
+// release in a cleanup as well, which a failed test needs: a script parked
+// at a gate would hold the run, and the rig's cleanup waits for the run.
 func (g *gates) release(name string) {
 	_, open := g.chans(name)
-	close(open)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	select {
+	case <-open:
+	default:
+		close(open)
+	}
 }
 
 // script is a model that answers each request with the next of its
@@ -224,6 +233,9 @@ func newRig(t *testing.T, cfg agentturn.Config) *rig {
 		}
 	}()
 	t.Cleanup(func() {
+		if t.Failed() {
+			cancel() // a run parked at a gate must not outlive a failed test
+		}
 		r.runs.Wait()
 		cancel()
 		<-done
