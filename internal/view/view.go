@@ -304,24 +304,37 @@ func (v *View) Record(ch agentsession.Change) {
 	}
 }
 
-// syncPending reads what waits on an answer from the record: the calls a
-// run's end entry lists as pending that the path still holds without an
-// output. A view attached to a session that stopped at input_required
-// shows its permissions from here, with no live event, and the live
-// events refine them (the question of a call, a later run). The record's
-// last run speaks only when the live stream has said nothing of a later
-// one, and never while a run is going.
+// syncPending reads what waits on an answer from the record, for the path
+// being viewed: the calls the end entry of the path's last run lists as
+// pending that the path still holds without an output. It runs on every
+// snapshot, reset, head move and run end entry, so what is shown is
+// always the viewed line's. A view attached to a session that stopped at
+// input_required shows its permissions from here with no live event, and
+// live events refine them (the question of a call). It yields to the
+// live stream in two cases: a run is going, and the live stream saw a run
+// end that the record has not delivered yet, which the viewed path does
+// not hold because the record is behind, not because it is another
+// branch.
 func (v *View) syncPending(s *agentsession.Session) {
 	if v.turn.State == Running {
 		return
 	}
 	var last *agentsession.RunEntry
-	for i := len(v.path) - 1; i >= 0 && last == nil; i-- {
+	liveRunOnPath := v.turn.RunID == ""
+	for i := len(v.path) - 1; i >= 0; i-- {
 		if r, ok := v.path[i].(*agentsession.RunEntry); ok {
-			last = r
+			if last == nil {
+				last = r
+			}
+			liveRunOnPath = liveRunOnPath || r.RunID == v.turn.RunID
 		}
 	}
-	if last == nil || !last.IsEnd() || (v.turn.RunID != "" && v.turn.RunID != last.RunID) {
+	if !liveRunOnPath && v.liveEnded[v.turn.RunID] && !v.endSeen[v.turn.RunID] {
+		return
+	}
+	if last == nil || !last.IsEnd() {
+		v.perms, v.cut = nil, nil
+		v.turn.State = Idle
 		return
 	}
 	waiting := map[string]bool{}

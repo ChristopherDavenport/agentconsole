@@ -698,3 +698,64 @@ func TestHeadToAnInteriorItemStopsAtTheRewindPoint(t *testing.T) {
 		t.Errorf("the path runs into the next run's start")
 	}
 }
+
+// After Head to a branch that does not hold the call, nothing on the
+// viewed path waits, whatever the live stream said of the run that did.
+func TestHeadToAnotherBranchDropsItsPermissions(t *testing.T) {
+	s := agentsession.New(agentsession.Header{})
+	add := func(e agentsession.Entry) string {
+		id, err := s.Append(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	add(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	u := add(itemEntry(msg("u1", "user", "go"), ""))
+	callEntry := add(itemEntry(&openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}, "resp1"))
+	add(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete?"))
+	add(agentsession.NewRunEnd("run1", agentsession.ReasonInputRequired, "", []string{"c1"}))
+
+	v := New()
+	v.Live(&client.RunStarted{RunID: "run1"})
+	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+	if m := v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
+		t.Fatalf("setup: %+v, %v", m.Permissions, m.Turn.State)
+	}
+
+	side := itemEntry(msg("s1", "user", "side"), "")
+	side.Parent = u
+	sid := add(side)
+	v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, ID: sid, Entry: side})
+	if err := s.Branch(sid); err != nil {
+		t.Fatal(err)
+	}
+	v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: sid})
+	m := v.Model()
+	if len(m.Permissions) != 0 || m.Turn.State != Idle {
+		t.Errorf("the side branch shows %+v with the turn %v", m.Permissions, m.Turn.State)
+	}
+	// And back: the call is on the path again, and still waits.
+	if err := s.Branch(callEntry); err != nil {
+		t.Fatal(err)
+	}
+	v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: callEntry})
+	if m := v.Model(); len(m.Permissions) != 1 || m.Permissions[0].Question != "delete?" || m.Turn.State != RequiresAction {
+		t.Errorf("back on the call's branch: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}
+
+// The record can be behind the live stream: a run that ended live and
+// whose end entry has not been delivered keeps what it said.
+func TestLiveRunEndIsKeptWhileTheRecordIsBehind(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
+		Pending: []client.Pending{{CallID: "c1", Name: "rm", Reason: agentturn.PendingDeferred}}})
+	l.v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: l.s})
+	if m := l.v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
+		t.Fatalf("the lagging record wiped the live permission: %+v, %v", m.Permissions, m.Turn.State)
+	}
+}
