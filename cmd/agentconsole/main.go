@@ -30,6 +30,9 @@ func main() {
 	}
 }
 
+// drainTimeout bounds the wait for an aborted run to write its end.
+const drainTimeout = 3 * time.Second
+
 type clockArgs struct{}
 
 func run() error {
@@ -100,10 +103,19 @@ func run() error {
 		return err
 	}
 
-	p := tea.NewProgram(tui.New(ctx, be), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	m := tui.New(ctx, be)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	wait := tui.Attach(ctx, be, p.Send)
 	_, err = p.Run()
+	// A run may still be going (a second ctrl+c quits without waiting for
+	// an abort to land). Let it write its end before the store closes;
+	// the context's cancel is the last resort.
+	be.Control().Abort()
+	if !m.Drain(drainTimeout) {
+		fmt.Fprintln(os.Stderr, "agentconsole: a run did not end; closing the session as it is")
+	}
 	stop()
+	m.Drain(drainTimeout)
 	wait()
 	if err == nil {
 		fmt.Fprintln(os.Stderr, "session", be.SessionID())
