@@ -17,6 +17,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -62,6 +64,10 @@ type Model struct {
 	// fresh Live subscription that misses what the run emitted meanwhile.
 	err     string
 	feedErr string
+
+	// inflight counts the Prompt and Answer commands that have not
+	// returned, for [Model.Drain].
+	inflight sync.WaitGroup
 
 	// decided are the answers given so far to the permissions out, by call.
 	decided map[string]agentturn.Answer
@@ -167,6 +173,22 @@ func (m *Model) syncPermissions() {
 		if !out[id] {
 			delete(m.decided, id)
 		}
+	}
+}
+
+// Drain waits until every Prompt and Answer the model started has
+// returned, or timeout, and reports whether they all did. A host calls it
+// after the program ends and the run was aborted, before it closes the
+// store the run is writing its end to. Call it only once the program has
+// stopped sending messages to the model.
+func (m *Model) Drain(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() { m.inflight.Wait(); close(done) }()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
@@ -279,7 +301,11 @@ func (m *Model) decide(a agentturn.Answer) (tea.Model, tea.Cmd) {
 	m.err = ""
 	m.relayout()
 	ctl, ctx := m.ctl, m.ctx
-	return m, func() tea.Msg { return runDoneMsg{err: ctl.Answer(ctx, answers...)} }
+	m.inflight.Add(1)
+	return m, func() tea.Msg {
+		defer m.inflight.Done()
+		return runDoneMsg{err: ctl.Answer(ctx, answers...)}
+	}
 }
 
 // send takes the input: a prompt when idle, a steer while a run goes.
@@ -298,7 +324,11 @@ func (m *Model) send() (tea.Model, tea.Cmd) {
 	m.err = ""
 	m.relayout()
 	ctl, ctx := m.ctl, m.ctx
-	return m, func() tea.Msg { return runDoneMsg{err: ctl.Prompt(ctx, item)} }
+	m.inflight.Add(1)
+	return m, func() tea.Msg {
+		defer m.inflight.Done()
+		return runDoneMsg{err: ctl.Prompt(ctx, item)}
+	}
 }
 
 // relayout sizes the parts and refills the viewport, keeping it at the

@@ -255,3 +255,21 @@ func TestAnsweredPermissionIsNotOfferedAgainWhileTheViewLags(t *testing.T) {
 	a.feedDelay.Store(0)
 	a.waitFor("the run finished", all(has("ABC", "done", "idle"), lacks("Permission requested")))
 }
+
+// TestDrainWaitsForTheRunsControlCall: after the program ends, a host
+// must be able to wait for the Prompt it started to return.
+func TestDrainWaitsForTheRunsControlCall(t *testing.T) {
+	g := newGates()
+	a := newApp(t, cfgWith(say(g, map[int]string{0: "mid"}, "partial", "more")))
+	t.Cleanup(func() { g.release("mid") })
+	a.submit("start")
+	g.arrive(t, "mid")
+
+	if a.m.Drain(50 * time.Millisecond) {
+		t.Fatal("Drain returned while the run was in flight")
+	}
+	a.cancel() // what the host does last; the held script ends with the context
+	if !a.m.Drain(wait) {
+		t.Fatal("Drain did not see the run end")
+	}
+}
