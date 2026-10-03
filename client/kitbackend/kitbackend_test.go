@@ -526,7 +526,7 @@ func TestConsoleApprovesAKitCallFromTheTerminal(t *testing.T) {
 		}
 	}
 	pw.Write([]byte("run it\r"))
-	wait("danger")
+	wait("Permission requested")
 	if ran.Load() != 0 {
 		t.Fatal("the tool ran before approval")
 	}
