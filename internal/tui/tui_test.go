@@ -273,3 +273,19 @@ func TestDrainWaitsForTheRunsControlCall(t *testing.T) {
 		t.Fatal("Drain did not see the run end")
 	}
 }
+
+func TestInterruptFromOutsideActsLikeCtrlC(t *testing.T) {
+	g := newGates()
+	a := newApp(t, cfgWith(say(g, map[int]string{0: "mid"}, "partial", "never")))
+	t.Cleanup(func() { g.release("mid") })
+	a.submit("start")
+	g.arrive(t, "mid")
+	a.waitFor("running", has("partial"+cursor, "running"))
+	a.send(tui.InterruptMsg{})
+	a.waitFor("the run aborted", has("idle"))
+	if a.quitted() {
+		t.Fatal("an interrupt quit a running program instead of aborting")
+	}
+	a.send(tui.InterruptMsg{})
+	a.waitQuit()
+}
