@@ -9,15 +9,25 @@ committed, and live events carry only what is not committed yet.
 
 - Module path: `github.com/ChristopherDavenport/agentconsole`.
 - Go 1.25 is the floor.
-- Everything is under `internal/` until a second consumer needs the
-  contract (plan, order of work step 5).
-  - `internal/client`: the contract. `Backend`, `Control`, `Record`,
+- The library surface is `client`, `client/native`, `client/kitbackend`,
+  `view` and `console`; `tui` and `inspect` stay under `internal/`. An
+  embedder (dex) imports the public ones and calls `console.Run`. Adding
+  an exported name is a decision for the plan's "Decided in
+  implementation", since embedders pin it.
+  - `client`: the contract. `Backend`, `Control`, `Record`,
     `LiveEvent`. It knows the stack's types and no backend.
-  - `internal/client/native`: the in-process backend over an
-    `agentturn.Agent` and the `session.Recorder` writing its store.
-  - `internal/view`: the reconciler. A pure model: record `Change`s and
+  - `client/native`: the in-process backend over an `agentturn.Agent`
+    and the `session.Recorder` writing its store. It does not import
+    agentkit.
+  - `client/kitbackend`: the native backend over an `agentkit.Kit`: the
+    agent built from the kit, the kit's recorder attached, the run
+    context and grant scope the kit expects, `Answer` through the
+    engine's `Release`, skill grants moved with `ContinueFrom`.
+  - `view`: the reconciler. A pure model: record `Change`s and
     `LiveEvent`s in, what a client renders out. No goroutines, no I/O,
     no terminal.
+  - `console`: `Run(ctx, backend, ...Option)`, the program, the feeds,
+    signals and the drain at exit.
   - `internal/inspect`: the record-detail panes, computed on demand from
     a snapshot of the session (`Record.Read`), never from the follower's
     session. It decodes the records other products write (policy
@@ -26,7 +36,9 @@ committed, and live events carry only what is not committed yet.
     permissions, input, the tree, the row cursor and the panes) and
     `Attach`, which feeds the view from the record and live streams and
     sends each `view.Model` to the program.
-  - `cmd/agentconsole`: the binary, a native agent in process.
+  - `internal/scripted`: the scripted model the tests share.
+  - `cmd/agentconsole`: the binary, a native agent in process, a thin
+    user of `console.Run`.
 - No ACP backend yet. A later step.
 
 ## Rules
@@ -70,7 +82,19 @@ committed, and live events carry only what is not committed yet.
 
 ```sh
 make check      # fmt, tidy-check, vet, staticcheck, govulncheck, race tests
+make release VERSION=vX.Y.Z   # see below; pushes
 ```
+
+## Releases
+
+Annotated `v*` tags, as in the siblings: `CHANGELOG.md` keeps an
+`## Unreleased` section in Keep a Changelog form, and `make release
+VERSION=vX.Y.Z` dates it, runs `make check`, commits, runs
+`scripts/release-guard.sh` (clean tree, tag new locally and on origin,
+version above everything published, the first release being any vX.Y.Z),
+tags with the changelog section as the message and pushes the branch and
+tag atomically. `make release-guard TAG=vX.Y.Z` runs the guard alone.
+Never run `make release` from an agent session without being asked.
 
 Every sibling is required at a released version. To try an unreleased
 sibling, use a workspace file kept outside the repository

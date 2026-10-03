@@ -14,9 +14,9 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/internal/client"
-	"github.com/ChristopherDavenport/agentconsole/internal/client/native"
-	"github.com/ChristopherDavenport/agentconsole/internal/view"
+	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/client/native"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 const wait = 10 * time.Second
@@ -184,7 +184,7 @@ type rig struct {
 	runs    sync.WaitGroup
 }
 
-func newRig(t *testing.T, cfg agentturn.Config) *rig {
+func newRig(t *testing.T, cfg agentturn.Config, opts ...native.Option) *rig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	// A jsonl store, which the follower reads back from the file. The
@@ -201,7 +201,7 @@ func newRig(t *testing.T, cfg agentturn.Config) *rig {
 	}
 	a := agentturn.New(cfg)
 	detach := rec.Attach(a)
-	be, err := native.New(a, rec)
+	be, err := native.New(a, rec, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
