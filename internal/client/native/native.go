@@ -31,6 +31,9 @@ type Backend struct {
 
 	mu     sync.Mutex
 	models agentturn.ReasoningModels // of the branch the head was moved to
+
+	// afterRebase is a test seam: it runs after the recorder moved.
+	afterRebase func() error
 }
 
 var _ client.Backend = (*Backend)(nil)
@@ -98,44 +101,122 @@ func (c control) State() agentturn.State { return c.b.agent.State() }
 // head move of its own (the cas store keeps a head, and nothing on the
 // Store interface sets it), so the label is how a follower, and a session
 // reopened later, learn where the head is.
-func (c control) ContinueFrom(ctx context.Context, entryID string) error {
+//
+// The target is checked before anything changes, and a failure after the
+// recorder was rebased puts back the leaf, the transcript and the pending
+// calls it had, so the session stays usable:
+//   - a leaf label, and an entry on a fork's prefix above its base, are
+//     refused: agentsession would not let the leaf rest there (its
+//     mayRestOn is not exported, so the rule is repeated here);
+//
+// The run check and the move are not atomic: agentturn exposes no lock to
+// hold across Rebase and SetTranscript, so a run that starts in between
+// (nothing in this client does: the TUI is busy for the whole move) finds
+// the recorder moved under it. Rebase itself refuses once the recorder has
+// seen a run start (ErrRunActive), and SetTranscript refuses while one
+// goes; both failures take the undo path.
+func (c control) ContinueFrom(ctx context.Context, entryID string) (err error) {
 	b := c.b
 	if entryID == "" {
 		return errors.New("native: continue from: no entry")
 	}
+	fail := func(err error) error { return fmt.Errorf("native: continue from %s: %w", entryID, err) }
 	if b.agent.State().Running {
 		return agentturn.ErrRunning
 	}
 	s, err := b.rec.Store().Open(ctx, b.rec.SessionID())
 	if err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
 	}
+	if err := mayRestOn(s, entryID); err != nil {
+		return fail(err)
+	}
+
+	prevLeaf, prev := s.Leaf(), b.agent.State()
+	b.mu.Lock()
+	prevModels := b.models
+	b.mu.Unlock()
+	moved := false
+	defer func() {
+		if err == nil || !moved {
+			return
+		}
+		// Put back what the move changed. A Rebase into a run appends the
+		// run's interrupted end, which stays on the record; the label that
+		// follows says the head is back.
+		var errs []error
+		if rerr := b.rec.Rebase(s, prevLeaf); rerr != nil {
+			errs = append(errs, rerr)
+		} else if mark, rerr := s.MarkLeaf(); rerr != nil {
+			errs = append(errs, rerr)
+		} else if _, rerr := b.rec.Store().Append(ctx, b.rec.SessionID(), mark); rerr != nil {
+			// Rebase may have closed a run it moved into, which a follower
+			// takes as the head moving there; the label says it is back.
+			errs = append(errs, rerr)
+		}
+		if rerr := b.agent.SetTranscript(prev.Transcript); rerr != nil {
+			errs = append(errs, rerr)
+		}
+		if rerr := b.agent.SetPending(prev.Pending); rerr != nil {
+			errs = append(errs, rerr)
+		}
+		b.mu.Lock()
+		b.models = prevModels
+		b.mu.Unlock()
+		if len(errs) > 0 {
+			err = fmt.Errorf("%w (and putting the head back failed: %w)", err, errors.Join(errs...))
+		}
+	}()
+
 	if err := b.rec.Rebase(s, entryID); err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
+	}
+	moved = true
+	if b.afterRebase != nil {
+		if err := b.afterRebase(); err != nil {
+			return fail(err)
+		}
 	}
 	items, models, err := session.TranscriptModels(s)
 	if err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
 	}
 	pending, err := session.Pending(s, append(b.rec.ReadOptions(), session.WithContext(ctx))...)
 	if err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
 	}
 	if err := b.agent.SetTranscript(items); err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
 	}
 	if err := b.agent.SetPending(pending); err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
 	}
 	b.mu.Lock()
 	b.models = models
 	b.mu.Unlock()
 	mark, err := s.MarkLeaf()
 	if err != nil {
-		return fmt.Errorf("native: continue from %s: %w", entryID, err)
+		return fail(err)
 	}
 	if _, err := b.rec.Store().Append(ctx, b.rec.SessionID(), mark); err != nil {
-		return fmt.Errorf("native: continue from %s: mark the head: %w", entryID, err)
+		return fail(fmt.Errorf("mark the head: %w", err))
+	}
+	return nil
+}
+
+// mayRestOn repeats agentsession's rule for where the leaf may rest: an
+// entry the session holds that is not a leaf label, and, in a fork, not an
+// entry of the prefix above the base.
+func mayRestOn(s *agentsession.Session, id string) error {
+	e, ok := s.Entry(id)
+	if !ok {
+		return fmt.Errorf("%w: %s", agentsession.ErrNoEntry, id)
+	}
+	if l, ok := e.(*agentsession.LabelEntry); ok && l.Label != nil && *l.Label == agentsession.LeafLabel {
+		return errors.New("a leaf label is a bookmark, not a place to continue from")
+	}
+	if base := s.Header().Base; base != "" && id != base && s.Prefix(id) {
+		return errors.New("it is on the fork's prefix above the base; the fork can only continue from its base or its own entries")
 	}
 	return nil
 }
