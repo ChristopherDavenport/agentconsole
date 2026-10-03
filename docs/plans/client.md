@@ -280,6 +280,31 @@ headless) changed the sketch in these places.
   checks the view after each step. `AGENTCONSOLE_SEEDS` and
   `AGENTCONSOLE_SEED0` run more seeds or replay one.
 
+- **Known limit: a reused ID, an unnamed stream and a snapshot attach.** A
+  live item with no response yet is matched to an entry by ID and text. A
+  view attached from a snapshot that holds an earlier response the stream
+  never saw, with a new item that reuses its ID on an unnamed stream whose
+  text starts like the old one, shows nothing until the text diverges, and
+  drops a completed row equal to the old text until its own entry lands.
+  All four conditions are needed, and it ends when the response is named or
+  its entry lands. It is cosmetic and transient, and the fix would be a
+  turn number on the record's response entries, which the format does not
+  carry.
+- **Live rows belong to their run's line.** The view follows each run's
+  own line through the entries that land and shows the run's overlay rows
+  only while the viewed line extends the run's newest entry, so a head
+  moved back does not show another branch's streaming row under the path,
+  and the row returns with the view.
+- **The property test sees liveness and call state.** Every item the
+  stream opened whose entry has not landed must be shown, on the line it
+  belongs to and no other; call rows are checked for state, output,
+  progress and children; the turn's number, model and attempt are checked.
+  The generator plays what the recorder does: reasoning ended when the
+  loop commits, a stream that names its response part-way, a cut stream
+  whose response has no ID, a failed response, marked and hidden items,
+  bookmarks, head records without an entry, progress, child calls and
+  steered input, and a recorder that settles the config late.
+
 ## Open questions
 
 - **The terminal toolkit.** The likely choice is Bubble Tea. It needs

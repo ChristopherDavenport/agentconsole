@@ -1,22 +1,35 @@
 package view
 
 // The generator of the property test: a script is a small program of runs,
-// and sim plays it as the agent and its recorder would, producing one
+// and sim plays it as the agent and its recorder would (agentturn v0.0.16
+// and its session package: run.go's stream handling and session.go's
+// handle, runStart, turnStart, response, endInFlight), producing one
 // reference timeline: the entries in log order, and the live events in
-// emission order. The recorder's behaviour that matters to a view is
-// reproduced here, and nowhere else: an item with a named response is
-// written at its item_end; one whose stream has not named the response is
-// held until response_end; a config entry is written by the next
-// entry-writing event; a dispatch is written before the tool runs; a run
-// end lists the calls left without an output.
+// emission order. What matters to a view is reproduced here and nowhere
+// else:
+//   - the loop holds a reasoning item's item_end until a message or a call
+//     opens (or the response ends), and drops it with a failed attempt;
+//   - a message or a call is ended at once, carrying the response ID the
+//     stream has named by then, "" before;
+//   - the recorder writes an item at its item_end when that carries a
+//     response ID, holds one that does not, and writes what it holds, named
+//     with the response, as soon as any later item event carries the ID,
+//     at response_end, or, for a stream cut off, at the run's end;
+//   - a config entry is written by the next entry-writing event, or at the
+//     run's start for a recorder that knows the agent's configuration;
+//   - a dispatch is written before the tool runs, a run end lists the
+//     calls left without an output, and a cut stream's response entry
+//     names the response the stream named, if any.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
+	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/client"
@@ -26,41 +39,54 @@ type pItem struct {
 	Reuse  int  // 0: a fresh ID; k: the pooled ID k, reused across responses
 	Reason bool // a reasoning item rather than a message
 	Anon   bool // no ID at all
+	Marked bool // a reasoning item the filter keeps from the model
 }
 
 type pCall struct {
-	Defer bool // deferred to the caller: the run ends input_required
-	Hang  bool // the run is aborted while the tool runs
+	Defer    bool // deferred to the caller: the run ends input_required
+	Hang     bool // the run is aborted while the tool runs
+	Progress bool // the tool reports progress
+	Children int  // calls its tool makes
 }
 
 type pTurn struct {
-	Model    string // moves this turn to another model
-	Named    bool   // the stream names its response before its items
-	Items    []pItem
-	Calls    []pCall
-	Retries  int  // failed attempts before the one that answers
-	Withheld bool // the last message is withheld by a guard
-	Cut      bool // the stream is cut after its completed items
+	Model     string // moves this turn to another model
+	Named     bool   // the stream names its response before its items
+	NameAfter int    // else, from this stream item on; 0 never
+	Items     []pItem
+	Calls     []pCall
+	Retries   int  // failed attempts before the one that answers
+	Withheld  bool // the last message is withheld by a guard
+	Cut       bool // the stream is cut after its completed items
+	Failed    bool // the response fails: response_end with a failed response
+	Steer     bool // an input is steered in after this turn's tools
 }
 
 type pElem struct {
-	Kind    string // "run" or "rewind"
-	Model   string // run: another model from this run on
-	Turns   []pTurn
-	Approve bool // a run that answers pending calls approves them
-	To      int  // rewind: which item of the line to move the head to
+	Kind         string // "run", "rewind", "headrec" or "bookmark"
+	Model        string // run: another model from this run on
+	Turns        []pTurn
+	Approve      bool // a run that answers pending calls approves them
+	To           int  // rewind and bookmark: which item or entry
+	HiddenPrompt bool // a hidden input follows the prompt
 }
 
-type pScript struct{ Elems []pElem }
+type pScript struct {
+	Elems []pElem
+	// LateCfg is a recorder that does not know the agent's configuration:
+	// a config entry waits for the first entry-writing event of a turn.
+	LateCfg bool
+}
 
 func (s pScript) String() string {
-	out := ""
+	out := fmt.Sprintf("  lateCfg=%v\n", s.LateCfg)
 	for i, e := range s.Elems {
-		if e.Kind == "rewind" {
-			out += fmt.Sprintf("  %d: rewind to item %d\n", i, e.To)
+		switch e.Kind {
+		case "rewind", "headrec", "bookmark":
+			out += fmt.Sprintf("  %d: %s %d\n", i, e.Kind, e.To)
 			continue
 		}
-		out += fmt.Sprintf("  %d: run model=%q approve=%v\n", i, e.Model, e.Approve)
+		out += fmt.Sprintf("  %d: run model=%q approve=%v hidden=%v\n", i, e.Model, e.Approve, e.HiddenPrompt)
 		for j, t := range e.Turns {
 			out += fmt.Sprintf("       turn %d: %+v\n", j, t)
 		}
@@ -73,12 +99,28 @@ type liveStep struct {
 	after int // entries written before the event was queued
 }
 
+// recOp is one thing the record's follower yields in log order: an entry,
+// or a head the store records without an entry (a head record, as the cas
+// store keeps one).
+type recOp struct {
+	entry  int    // index into entries
+	isHead bool   // a recorded head
+	target string // its leaf
+}
+
 type timeline struct {
 	entries   []agentsession.Entry
+	ops       []recOp
 	lives     []liveStep
-	deferred  map[string]bool // call IDs ever deferred
-	ephemeral map[string]bool // item uids no entry will ever hold
+	deferred  map[string]bool   // call IDs ever deferred
+	ephemeral map[string]bool   // item uids no entry will ever hold
+	entryRun  map[string]string // entry ID to the run that wrote it, "" between runs
 	header    agentsession.Header
+}
+
+type heldItem struct {
+	item   openresponses.Item
+	marked bool
 }
 
 type sim struct {
@@ -89,12 +131,22 @@ type sim struct {
 	model    string
 	pendCfg  string
 	recModel string
+	lateCfg  bool
+	curRun   string
 	// The stream of the turn in flight.
-	held         []openresponses.Item // completed before the stream named its response
+	held         []heldItem // the recorder's: ended before the stream named its response
+	loopHeld     []loopReasoning
 	inFlight     bool
 	respID       string // the ID the stream names, "" while it does not
 	respName     string // the response's own ID
 	lastHadCalls bool
+}
+
+// loopReasoning is a reasoning item the loop has not ended yet.
+type loopReasoning struct {
+	item   openresponses.Item
+	marked bool
+	resp   string // the response ID the stream had named when it completed
 }
 
 func (s *sim) fail(err error) {
@@ -117,7 +169,9 @@ func (s *sim) write(e agentsession.Entry) string {
 		s.fail(fmt.Errorf("append %s: %w", e.EntryType(), err))
 		return ""
 	}
+	s.tl.ops = append(s.tl.ops, recOp{entry: len(s.tl.entries)})
 	s.tl.entries = append(s.tl.entries, e)
+	s.tl.entryRun[id] = s.curRun
 	return id
 }
 
@@ -138,6 +192,21 @@ func (s *sim) itemEntry(item openresponses.Item, resp string) *agentsession.Item
 	e := agentsession.NewItemEntry(item)
 	e.ResponseID = resp
 	return e
+}
+
+// entryFor is the entry the recorder writes for an item: an item entry, or,
+// for one the filter keeps from the model, the custom entry that names it.
+func (s *sim) entryFor(h heldItem, resp string) agentsession.Entry {
+	if !h.marked {
+		return s.itemEntry(h.item, resp)
+	}
+	data, err := json.Marshal(h.item)
+	if err != nil {
+		s.fail(err)
+	}
+	id, _ := json.Marshal(resp)
+	return &agentsession.CustomEntry{NS: h.item.ItemType(), Data: data,
+		EntryBase: agentsession.EntryBase{Unknown: map[string]json.RawMessage{session.ResponseIDMember: id}}}
 }
 
 func (s *sim) pending() []*agentsession.Call {
@@ -186,9 +255,10 @@ const (
 
 // play runs the script.
 func (tl *timeline) play(script pScript) error {
-	s := &sim{tl: tl, ws: agentsession.New(tl.header)}
+	s := &sim{tl: tl, ws: agentsession.New(tl.header), lateCfg: script.LateCfg}
 	tl.deferred = map[string]bool{}
 	tl.ephemeral = map[string]bool{}
+	tl.entryRun = map[string]string{}
 	runs := 0
 	for _, el := range script.Elems {
 		if s.err != nil {
@@ -196,7 +266,11 @@ func (tl *timeline) play(script pScript) error {
 		}
 		switch el.Kind {
 		case "rewind":
-			s.rewind(el.To)
+			s.rewind(el.To, false)
+		case "headrec":
+			s.rewind(el.To, true)
+		case "bookmark":
+			s.bookmark(el.To)
 		default:
 			runs++
 			s.run(el, runs)
@@ -205,7 +279,7 @@ func (tl *timeline) play(script pScript) error {
 	return s.err
 }
 
-func (s *sim) rewind(to int) {
+func (s *sim) rewind(to int, record bool) {
 	// The head moves back to an item of the line: the writer branches
 	// there and records it with a leaf label.
 	var items []string
@@ -223,12 +297,26 @@ func (s *sim) rewind(to int) {
 		s.fail(err)
 		return
 	}
+	if record {
+		s.tl.ops = append(s.tl.ops, recOp{isHead: true, target: target})
+		return
+	}
 	mark, err := s.ws.MarkLeaf()
 	if err != nil {
 		s.fail(err)
 		return
 	}
 	s.write(mark)
+}
+
+// bookmark labels an entry of the line without moving the head.
+func (s *sim) bookmark(to int) {
+	path := s.ws.Path(s.ws.Leaf())
+	if len(path) == 0 {
+		s.fail(fmt.Errorf("bookmark: empty line"))
+		return
+	}
+	s.write(agentsession.NewLabelEntry(path[to%len(path)].Base().ID, "bookmark"))
 }
 
 func (s *sim) run(el pElem, n int) {
@@ -239,12 +327,15 @@ func (s *sim) run(el pElem, n int) {
 	if resume {
 		src = agentsession.SourceResume
 	}
+	s.curRun = runID
 	s.write(agentsession.NewRunStart(runID, src, ""))
 	s.live(&client.RunStarted{RunID: runID, Resume: resume})
 	if el.Model != "" {
 		s.model = el.Model
 	}
-	if s.model != "" && s.model != s.recModel {
+	// A recorder that knows the configuration settles it at the run's
+	// start; one that does not, at the turn's first writing event.
+	if !s.lateCfg && s.model != "" && s.model != s.recModel {
 		s.pendCfg = s.model
 		s.flush()
 	}
@@ -256,6 +347,14 @@ func (s *sim) run(el pElem, n int) {
 		s.live(&client.ItemOpened{RunID: runID, Item: client.CloneItem(item)})
 		s.write(s.itemEntry(item, ""))
 		s.live(&client.ItemCompleted{RunID: runID, Item: client.CloneItem(item)})
+	}
+	if el.HiddenPrompt {
+		// An item the caller marked hidden: in the context, written with
+		// visible false, and the stream does not carry it.
+		e := s.itemEntry(openresponses.UserText(s.uid("h")), "")
+		no := false
+		e.Visible = &no
+		s.write(e)
 	}
 	turns := el.Turns
 	if len(turns) == 0 {
@@ -278,6 +377,7 @@ func (s *sim) run(el pElem, n int) {
 		}
 	}
 	s.finish(runID, end)
+	s.curRun = ""
 }
 
 func (s *sim) answer(runID string, pend []*agentsession.Call, approve bool) {
@@ -289,7 +389,6 @@ func (s *sim) answer(runID string, pend []*agentsession.Call, approve bool) {
 		case held && approve:
 			s.write(agentsession.NewDecision(callID, c.Entry.ID, agentsession.VerdictProceed, "user"))
 			s.live(&client.ToolOpened{RunID: runID, CallID: callID, Name: c.Call.Name, Args: c.Call.Arguments})
-			s.flush()
 			s.write(agentsession.NewDispatch(callID, c.Entry.ID))
 			s.live(&client.ToolDispatched{RunID: runID, CallID: callID, Name: c.Call.Name})
 			s.live(&client.ToolFinished{RunID: runID, CallID: callID, Name: c.Call.Name, Result: "ran"})
@@ -338,10 +437,12 @@ func (s *sim) finish(runID string, end endKind) {
 	}
 	s.flush()
 	if s.inFlight {
-		// A stream cut off: what it completed before the cut is written,
-		// then the failed response.
+		// A stream cut off before its response ended: what the recorder
+		// holds is written as the stream left it, naming the response
+		// only if the stream did, then the failed response, which names
+		// the same.
 		s.flushHeld(s.respID)
-		s.write(&agentsession.ResponseEntry{ResponseID: s.respName, Status: openresponses.ResponseStatusFailed})
+		s.write(&agentsession.ResponseEntry{ResponseID: s.respID, Status: openresponses.ResponseStatusFailed})
 		s.inFlight = false
 	}
 	s.write(agentsession.NewRunEnd(runID, reason, "", ids))
@@ -351,7 +452,7 @@ func (s *sim) finish(runID string, end endKind) {
 func textItem(item openresponses.Item, text string) openresponses.Item {
 	switch v := client.CloneItem(item).(type) {
 	case *openresponses.Message:
-		return openresponses.Items{&openresponses.Message{ID: v.ID, Role: v.Role, Content: openresponses.Contents{&openresponses.OutputText{Text: text}}}}[0]
+		return &openresponses.Message{ID: v.ID, Role: v.Role, Content: openresponses.Contents{&openresponses.OutputText{Text: text}}}
 	case *openresponses.ReasoningItem:
 		v.Summary = openresponses.Contents{&openresponses.SummaryText{Text: text}}
 		return v
@@ -371,37 +472,51 @@ func itemText(item openresponses.Item) string {
 	return ""
 }
 
-// stream plays one model item: opened, updated and, unless it is cut off,
-// completed, with its entry written at its end when the stream has named
-// its response and held until the response's end when it has not. It
-// returns the ID of the entry, "" while the item is held or cut off.
-func (s *sim) stream(runID string, item openresponses.Item, complete bool) string {
-	partial := item
-	if _, isCall := item.(*openresponses.FunctionCall); !isCall {
-		partial = textItem(item, strings.TrimSuffix(itemText(item), "ne"))
+func partialOf(item openresponses.Item) openresponses.Item {
+	if _, isCall := item.(*openresponses.FunctionCall); isCall {
+		return item
 	}
-	s.live(&client.ItemOpened{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(partial)})
-	s.live(&client.ItemUpdated{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(partial)})
-	if !complete {
-		return ""
-	}
-	if s.respID != "" {
-		s.flush()
-		id := s.write(s.itemEntry(item, s.respID))
-		s.live(&client.ItemCompleted{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(item)})
-		return id
-	}
-	s.live(&client.ItemCompleted{RunID: runID, Item: client.CloneItem(item)})
-	s.held = append(s.held, item)
-	return ""
+	return textItem(item, strings.TrimSuffix(itemText(item), "ne"))
 }
 
-// flushHeld writes the items held for the response.
+// flushHeld writes the items the recorder holds, named with resp.
 func (s *sim) flushHeld(resp string) {
-	for _, it := range s.held {
-		s.write(s.itemEntry(it, resp))
+	for _, h := range s.held {
+		s.write(s.entryFor(h, resp))
 	}
 	s.held = nil
+}
+
+// endItem delivers an item_end: the recorder writes the item when the event
+// carries a response ID, after naming what it holds, and holds it when it
+// does not.
+func (s *sim) endItem(runID string, h heldItem, resp string) {
+	s.flush()
+	if resp != "" {
+		s.flushHeld(resp)
+		s.write(s.entryFor(h, resp))
+	} else {
+		s.held = append(s.held, h)
+	}
+	s.live(&client.ItemCompleted{RunID: runID, ResponseID: resp, Item: client.CloneItem(h.item)})
+}
+
+// commit ends the reasoning items the loop held, as a message or a call
+// opens, or the response ends.
+func (s *sim) commit(runID string) {
+	held := s.loopHeld
+	s.loopHeld = nil
+	for _, r := range held {
+		s.endItem(runID, heldItem{item: r.item, marked: r.marked}, r.resp)
+	}
+}
+
+// openItem plays an item's item_start and one item_update, with the
+// response ID the stream carries by now.
+func (s *sim) openItem(runID string, item openresponses.Item) {
+	p := partialOf(item)
+	s.live(&client.ItemOpened{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(p)})
+	s.live(&client.ItemUpdated{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(p)})
 }
 
 type callRec struct {
@@ -416,9 +531,9 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 	}
 	if t.Model != "" {
 		s.model = t.Model
-		if s.model != s.recModel {
-			s.pendCfg = s.model
-		}
+	}
+	if s.model != "" && s.model != s.recModel && (s.lateCfg || t.Model != "") {
+		s.pendCfg = s.model
 	}
 	s.live(&client.TurnStarted{RunID: runID, Turn: n, Model: s.model})
 	s.respName = s.uid("resp")
@@ -436,34 +551,81 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 		s.live(&client.ModelRetrying{RunID: runID, Turn: n, Attempt: a + 1})
 	}
 	s.inFlight = true
-	s.held = nil
+	s.held, s.loopHeld = nil, nil
 	used := map[string]bool{}
-	for _, it := range t.Items {
-		item := s.mkItem(it, used, s.uid("m")+" done")
-		s.stream(runID, item, true)
+
+	// The stream's items in the order a model makes them: reasoning, then
+	// messages, then calls.
+	type streamItem struct {
+		item   openresponses.Item
+		marked bool
+		call   *callRec
 	}
-	var calls []callRec
+	var items []streamItem
+	for _, it := range t.Items {
+		if it.Reason {
+			items = append(items, streamItem{item: s.mkItem(it, used, s.uid("m")+" done"), marked: it.Marked})
+		}
+	}
+	for _, it := range t.Items {
+		if !it.Reason {
+			items = append(items, streamItem{item: s.mkItem(it, used, s.uid("m")+" done")})
+		}
+	}
+	var calls []*callRec
 	for _, c := range t.Calls {
 		callID := s.uid("call")
 		fc := &openresponses.FunctionCall{ID: "fc_" + callID, CallID: callID, Name: "tool", Arguments: "{}"}
-		s.stream(runID, fc, true)
-		calls = append(calls, callRec{spec: c})
+		rec := &callRec{id: callID, spec: c}
+		calls = append(calls, rec)
+		items = append(items, streamItem{item: fc, call: rec})
 		if c.Defer {
 			s.tl.deferred[callID] = true
 		}
-		calls[len(calls)-1].id = callID
 	}
-	if t.Cut || t.Withheld {
+	// Whatever never completes has no entry coming.
+	dropLoopHeld := func() {
+		for _, r := range s.loopHeld {
+			s.tl.ephemeral[firstToken(itemText(r.item))] = true
+		}
+		s.loopHeld = nil
+	}
+	for i, si := range items {
+		if !t.Named && t.NameAfter > 0 && i >= t.NameAfter && s.respID == "" {
+			// The stream names its response from here: the recorder
+			// names what it holds before this event.
+			s.respID = s.respName
+			s.flushHeld(s.respID)
+		}
+		_, reasoning := si.item.(*openresponses.ReasoningItem)
+		if reasoning {
+			s.openItem(runID, si.item)
+			s.loopHeld = append(s.loopHeld, loopReasoning{item: si.item, marked: si.marked, resp: s.respID})
+			continue
+		}
+		// A message or a call opening commits the attempt: the reasoning
+		// the loop held is ended first.
+		s.commit(runID)
+		s.openItem(runID, si.item)
+		s.endItem(runID, heldItem{item: si.item}, s.respID)
+	}
+	if t.Cut || t.Withheld || t.Failed {
 		x := s.uid("x")
 		s.tl.ephemeral[x] = true
 		extra := s.mkItem(pItem{}, used, x+" done")
-		s.stream(runID, extra, false)
+		s.openItem(runID, extra)
 	}
 	if t.Cut {
+		dropLoopHeld()
 		if n%2 == 0 {
 			return endFail
 		}
 		return endAbort
+	}
+	if t.Withheld || t.Failed {
+		dropLoopHeld()
+	} else {
+		s.commit(runID)
 	}
 	s.flush()
 	s.flushHeld(s.respName) // the response's end names it, whatever the stream did
@@ -471,12 +633,19 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 	if t.Withheld {
 		status = openresponses.ResponseStatusIncomplete
 	}
+	if t.Failed {
+		status = openresponses.ResponseStatusFailed
+	}
 	s.write(&agentsession.ResponseEntry{ResponseID: s.respName, Status: status})
 	s.inFlight = false
 	s.live(&client.ResponseCompleted{RunID: runID, ResponseID: s.respName, Withheld: t.Withheld})
 	if t.Withheld {
 		return endWithheld
 	}
+	if t.Failed {
+		return endFail
+	}
+
 	end := endNone
 	var done []string
 	for _, c := range calls {
@@ -490,16 +659,25 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 			if end == endNone {
 				end = endInput
 			}
-		case c.spec.Hang:
-			s.write(agentsession.NewDispatch(c.id, call))
-			s.live(&client.ToolDispatched{RunID: runID, CallID: c.id, Name: "tool"})
-			s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Err: errors.New("aborted")})
-			end = endAbort
 		default:
 			s.write(agentsession.NewDispatch(c.id, call))
 			s.live(&client.ToolDispatched{RunID: runID, CallID: c.id, Name: "tool"})
-			s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Result: "R-" + c.id})
-			done = append(done, c.id)
+			if c.spec.Progress {
+				s.live(&client.ToolProgress{RunID: runID, CallID: c.id, Name: "tool", Partial: "p-" + c.id})
+			}
+			for k := 0; k < c.spec.Children; k++ {
+				child := fmt.Sprintf("%s.%d", c.id, k)
+				s.live(&client.ToolOpened{RunID: runID, CallID: child, Name: "child", Args: "{}", Parent: c.id})
+				s.write(&agentsession.CustomEntry{NS: "agentturn.nested", Data: json.RawMessage(`{}`), CallID: c.id})
+				s.live(&client.ToolFinished{RunID: runID, CallID: child, Name: "child", Result: "C-" + child, Parent: c.id})
+			}
+			if c.spec.Hang {
+				s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Err: errors.New("aborted")})
+				end = endAbort
+			} else {
+				s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Result: "R-" + c.id})
+				done = append(done, c.id)
+			}
 		}
 		if end == endAbort {
 			break
@@ -509,6 +687,18 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 		s.output(runID, id, "R-"+id)
 	}
 	s.lastHadCalls = len(calls) > 0 && end == endNone
+	if t.Steer && s.lastHadCalls {
+		// An input steered in while the tools ran: the recorder writes
+		// the queued entry when it is accepted, and the loop appends the
+		// message before the next model call.
+		item := openresponses.UserText(s.uid("u"))
+		q := s.write(agentsession.NewQueued(client.CloneItem(item), agentsession.ModeSteer))
+		s.live(&client.ItemOpened{RunID: runID, Item: client.CloneItem(item)})
+		e := s.itemEntry(item, "")
+		e.QueuedFrom = q
+		s.write(e)
+		s.live(&client.ItemCompleted{RunID: runID, Item: client.CloneItem(item)})
+	}
 	return end
 }
 

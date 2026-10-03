@@ -271,7 +271,8 @@ func TestPermissionsLifecycle(t *testing.T) {
 	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}
 	l.v.Live(&client.RunStarted{RunID: "run1"})
 	l.stream("run1", "resp1", call, true)
-	l.append(itemEntry(call, "resp1"))
+	callEntry := l.append(itemEntry(call, "resp1"))
+	l.append(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete files?"))
 	l.v.Live(&client.ToolOpened{RunID: "run1", CallID: "c1", Name: "rm", Args: `{}`})
 	l.v.Live(&client.ToolFinished{RunID: "run1", CallID: "c1", Name: "rm", Deferred: true, Reason: "delete files?"})
 	if m := l.v.Model(); len(m.Permissions) != 1 || m.Permissions[0].Question != "delete files?" || m.Rows[0].Call.State != CallDeferred {
@@ -1095,5 +1096,30 @@ func TestLiveRowsAreOnlyShownUnderTheirOwnLine(t *testing.T) {
 	l.v.Record(agentsession.Change{Kind: agentsession.Head, Session: l.s, Leaf: u2})
 	if m := l.v.Model(); len(m.Rows) != 4 || !m.Rows[3].Live || text(m.Rows[3].Item) != "streaming now" {
 		t.Fatalf("the live row did not come back: %+v", m.Rows)
+	}
+}
+
+// Reading history in settles no run, even a replayed start entry of a run the
+// stream saw begin later. (A log whose earlier run has no end entry, which
+// a crash leaves, is the only way to hold both; the property test cannot
+// build one, since every run it plays writes its end.)
+func TestReplayedStartOfALaterRunSettlesNothing(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.stream("run1", "resp1", msg("m1", "assistant", "pending"), true)
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.v.Live(&client.RunStarted{RunID: "run2"})
+	crashed := agentsession.New(agentsession.Header{})
+	for _, e := range []agentsession.Entry{
+		agentsession.NewRunStart("run1", agentsession.SourceInput, ""), // no end entry
+		agentsession.NewRunStart("run2", agentsession.SourceInput, ""),
+	} {
+		if _, err := crashed.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Reset, Session: crashed})
+	if liveRows(l.v.Model()) != 1 {
+		t.Fatal("the replayed start of run2 settled run1 before its entries could land")
 	}
 }

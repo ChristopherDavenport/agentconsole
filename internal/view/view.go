@@ -426,11 +426,7 @@ func (v *View) reconcilePending() {
 			continue
 		}
 		p := Permission{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments}
-		known := false
-		for _, o := range old {
-			known = known || o.CallID == p.CallID
-		}
-		if last.Reason == agentsession.ReasonInputRequired && (c.Held() || known) {
+		if last.Reason == agentsession.ReasonInputRequired && c.Held() {
 			p.Reason = string(agentturn.PendingDeferred)
 			if n := len(c.Decisions); n > 0 {
 				p.Question = c.Decisions[n-1].Reason
@@ -659,6 +655,15 @@ func (v *View) match(liveResp string, live openresponses.Item, entryResp string,
 	return !v.closed.has(entryResp) && startOf(live, entry)
 }
 
+// Known limit: a view attached from a snapshot that holds an earlier
+// response the live stream never saw (so it is never in closed), reusing an
+// item ID with an unnamed stream whose text starts the same way, takes the
+// new item for the old one while it is a prefix of it: the row is hidden
+// until the text diverges, and a completed row whose text equals the old
+// one is dropped, as landed, until its own entry arrives. It needs a
+// snapshot attach, a reused ID, an unnamed stream and prefix text at once,
+// and ends when the response is named or its entry lands.
+//
 // startOf reports whether live can be the item entry so far: for text, a
 // prefix of it; for an item that has none, any.
 func startOf(live, entry openresponses.Item) bool {
