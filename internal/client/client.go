@@ -1,0 +1,58 @@
+// Package client is the contract between a terminal client and the agent
+// it drives. A backend gives the client three things over one vocabulary,
+// the stack's own types: Control to act on the agent, Live for what is not
+// committed yet, and Record for what is.
+//
+// The rule behind the split is that the record is the truth for everything
+// committed and live events carry only what is not. The package
+// internal/view turns the two streams into what a client renders.
+package client
+
+import (
+	"context"
+	"iter"
+
+	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn"
+	"github.com/ChristopherDavenport/openresponses"
+)
+
+// Backend is one agent the client drives.
+type Backend interface {
+	Control() Control
+	// Live streams the uncommitted part of the agent's activity: deltas,
+	// open tool calls, turn state, permission requests. It runs until ctx
+	// is done. Events that happen while nobody ranges over it are not
+	// replayed: a client ranges before it starts a run, and reads the
+	// state of a run already going from Control.State.
+	Live(ctx context.Context) iter.Seq2[LiveEvent, error]
+	// Record follows the agent's session.
+	Record() Record
+}
+
+// Control acts on the agent.
+//
+// Prompt and Answer block until the run they start ends, as the agent's
+// own do, and return the error that kept it from starting or that ended
+// it. A client calls them from a goroutine of its own and learns how the
+// run went from Live's [RunEnded]. Steer and Abort return at once.
+type Control interface {
+	Prompt(ctx context.Context, items ...openresponses.Item) error
+	Steer(items ...openresponses.Item)
+	Abort()
+	// Answer answers the calls a run left pending and continues it: the
+	// reply to a permission request.
+	Answer(ctx context.Context, answers ...agentturn.Answer) error
+	State() agentturn.State
+}
+
+// Record is the agent's session as a client follows it.
+type Record interface {
+	// Follow yields a Snapshot first, or with a cursor the changes after
+	// it, and then each change as the store accepts it, as
+	// agentsession's Follower does.
+	Follow(ctx context.Context, from agentsession.Cursor) iter.Seq2[agentsession.Change, error]
+	// Verified reports whether the record is the agent's own, hashed and
+	// checkable, or one the backend synthesized from what it was told.
+	Verified() bool
+}
