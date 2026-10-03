@@ -549,9 +549,7 @@ func (m *Model) View() string {
 	}
 	parts := []string{statusStyle.Render(padTo(status, m.width)), m.vp.View()}
 	if m.screen == screenConversation {
-		for _, l := range m.paneLines() {
-			parts = append(parts, l)
-		}
+		parts = append(parts, m.paneLines()...)
 	}
 	if p := m.panel(); p != "" {
 		parts = append(parts, p)

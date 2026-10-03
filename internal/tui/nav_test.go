@@ -116,7 +116,7 @@ func TestBranchThenSwitchBetweenTheConversationAndTheTree(t *testing.T) {
 
 	// Select the other branch and view it: a read-only look at its line.
 	a.press(tea.KeyDown, tea.KeyEnter)
-	s = a.waitFor("the abandoned branch", all(has("VIEWING branch", "two", "r2", "read only"), lacks("three", "branches of session")))
+	a.waitFor("the abandoned branch", all(has("VIEWING branch", "two", "r2", "read only"), lacks("three", "branches of session")))
 	a.typeText("zzz")
 	if s2 := a.screen(); strings.Contains(s2, "zzz") {
 		t.Errorf("typed into a read-only view:\n%s", s2)
@@ -184,13 +184,13 @@ func TestContinueFromHereIsRefusedWhileARunGoes(t *testing.T) {
 }
 
 func TestAForksOriginOpensReadOnly(t *testing.T) {
-	var originID, base string
+	var base string
 	start := func(ctx context.Context, store agentsession.Store) (*session.Recorder, error) {
 		origin, err := store.Create(ctx, agentsession.Header{Records: agentsession.AllRecords})
 		if err != nil {
 			return nil, err
 		}
-		originID = origin.ID()
+		originID := origin.ID()
 		add := func(role, text, resp string) string {
 			m := openresponses.UserText(text)
 			if role == "assistant" {
@@ -217,7 +217,7 @@ func TestAForksOriginOpensReadOnly(t *testing.T) {
 	}
 
 	a.key(tea.KeyCtrlT)
-	s = a.waitFor("the origin in the tree", has("origin: session", "forked at entry"))
+	a.waitFor("the origin in the tree", has("origin: session", "forked at entry"))
 	a.press(tea.KeyDown, tea.KeyEnter) // the branch first, then the origin
 	s = a.waitFor("the origin opened", all(has("VIEWING origin", "origin later", "read only"), lacks("branches of session")))
 	// The cursor starts on the entry the fork was made at.
@@ -234,8 +234,7 @@ func TestAForksOriginOpensReadOnly(t *testing.T) {
 		t.Errorf("typed into the origin:\n%s", s)
 	}
 	a.key(tea.KeyEsc)
-	s = a.waitFor("back on the fork", all(has("origin answer", "idle"), lacks("VIEWING", "origin later")))
-	_ = originID
+	a.waitFor("back on the fork", all(has("origin answer", "idle"), lacks("VIEWING", "origin later")))
 }
 
 // callApp is an app whose model calls upper and whose policy defers the
