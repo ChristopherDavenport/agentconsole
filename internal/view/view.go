@@ -512,7 +512,11 @@ func (v *View) land(e agentsession.Entry) {
 		}
 		// A run's start lands behind everything the runs before it
 		// wrote, so a run that ended live and wrote no end entry is
-		// settled by it.
+		// settled by it. Not while history is read in: a snapshot or
+		// reset replays starts that precede a run it may not hold yet.
+		if v.replaying {
+			return
+		}
 		for id := range v.liveEnded {
 			if id != x.RunID {
 				v.flush(id)

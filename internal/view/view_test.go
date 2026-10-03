@@ -798,3 +798,35 @@ func TestResponseEntryAheadOfTheLiveStreamLeavesNoGhost(t *testing.T) {
 		t.Fatalf("after the stream moved on: %+v", m.Rows)
 	}
 }
+
+// A reset replays history, including run starts that come before a run
+// the stream ended and whose entries the reset session lacks. Reading the
+// history in must not settle that run.
+func TestResetReplayDoesNotSettleALiveEndedRun(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.stream("run1", "resp1", msg("m1", "assistant", "pending"), true)
+	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
+
+	old := agentsession.New(agentsession.Header{})
+	for _, e := range []agentsession.Entry{
+		agentsession.NewRunStart("run0", agentsession.SourceInput, ""),
+		agentsession.NewRunEnd("run0", "done", "", nil),
+	} {
+		if _, err := old.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.v.Record(agentsession.Change{Kind: agentsession.Reset, Session: old})
+	if m := l.v.Model(); liveRows(m) != 1 {
+		t.Fatalf("the replayed start settled run1: %+v", m.Rows)
+	}
+	// Its own entries still settle it, once they arrive.
+	l.s = old
+	l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	l.append(itemEntry(msg("m1", "assistant", "pending"), "resp1"))
+	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
+	if m := l.v.Model(); liveRows(m) != 0 || len(m.Rows) != 1 {
+		t.Fatalf("after run1's entries: %+v", m.Rows)
+	}
+}
