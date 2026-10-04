@@ -387,6 +387,29 @@ func TestHomeEndAndArrowsMoveTheInputCursor(t *testing.T) {
 	a.waitFor("Z two from the end", has("> XabZcY"))
 }
 
+func TestLongPromptWrapsInsteadOfScrollingSideways(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	a.exchange("hello", "hi")
+	a.typeText(strings.Repeat("wordy ", 200))
+	s := a.screen()
+	lines := strings.Split(s, "\n")
+	if len(lines) != 30 {
+		t.Fatalf("the screen is %d lines on a 30-line terminal:\n%s", len(lines), s)
+	}
+	wrapped := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > 100 {
+			t.Errorf("a line is %d wide:\n%s", w, s)
+		}
+		if strings.Contains(l, "> ") && strings.Contains(l, "wordy") {
+			wrapped++
+		}
+	}
+	if wrapped < 2 {
+		t.Fatalf("the long prompt did not wrap to more than one line:\n%s", s)
+	}
+}
+
 func TestTheInputSitsBetweenTwoBarsAndTheScreenStillFits(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hi")))
 	a.exchange("hello", "hi")

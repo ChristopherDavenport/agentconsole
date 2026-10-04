@@ -26,6 +26,7 @@ import (
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn/session"
+	"github.com/ChristopherDavenport/openresponses"
 )
 
 // Source is where a snapshot of a session and its refs come from; it is
@@ -40,6 +41,10 @@ type Source interface {
 type Inspector struct {
 	src Source
 
+	// cost prices one model call, when a host gave one. It is asked for
+	// each call on a viewed line whose session pane is computed.
+	cost func(model string, usage openresponses.Usage) (float64, bool)
+
 	// readMu serializes reading, so two panes asked for at once read the
 	// session once.
 	readMu sync.Mutex
@@ -49,9 +54,22 @@ type Inspector struct {
 	reads  int
 }
 
+// Option configures an [Inspector].
+type Option func(*Inspector)
+
+// WithCost sets the function that prices one model call, in US dollars.
+// A call it does not price leaves the session pane's cost unpriced.
+func WithCost(fn func(model string, usage openresponses.Usage) (float64, bool)) Option {
+	return func(in *Inspector) { in.cost = fn }
+}
+
 // New returns an inspector over src.
-func New(src Source) *Inspector {
-	return &Inspector{src: src, snaps: map[string]*agentsession.Session{}, verify: map[string]Verify{}}
+func New(src Source, opts ...Option) *Inspector {
+	in := &Inspector{src: src, snaps: map[string]*agentsession.Session{}, verify: map[string]Verify{}}
+	for _, o := range opts {
+		o(in)
+	}
+	return in
 }
 
 // Reads is how many times the source was read, for a test of the cache.

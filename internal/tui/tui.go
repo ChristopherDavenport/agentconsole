@@ -19,11 +19,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
@@ -35,6 +38,11 @@ import (
 
 // who is what the record says answered a permission.
 const who = "human"
+
+// inputMaxRows is how tall the prompt grows before it scrolls: a wrap
+// with room to read what is typed, instead of one line that scrolls
+// sideways.
+const inputMaxRows = 5
 
 // runDoneMsg says a Prompt or Answer returned: the run ended, or never
 // started.
@@ -54,7 +62,7 @@ type Model struct {
 
 	view view.Model // the latest the feed sent
 	vp   viewport.Model
-	in   textinput.Model
+	in   textarea.Model
 	o    opts
 	// flips are the rows shown the other way round from o, by entry: what
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
@@ -95,6 +103,9 @@ type Model struct {
 
 	rec  client.Record
 	insp *inspect.Inspector
+	// cost prices one model call for the session pane; nil shows no
+	// cost.
+	cost func(model string, usage openresponses.Usage) (float64, bool)
 
 	// screen is the conversation or the tree; pane the detail under the
 	// conversation; frozen a read-only look at another line, nil when the
@@ -117,29 +128,51 @@ type Model struct {
 
 var _ tea.Model = (*Model)(nil)
 
+// Option configures [New].
+type Option func(*Model)
+
+// WithCost sets the function that prices one model call, in US dollars;
+// it feeds the session pane's total. Without it the pane shows tokens
+// but no cost.
+func WithCost(fn func(model string, usage openresponses.Usage) (float64, bool)) Option {
+	return func(m *Model) { m.cost = fn }
+}
+
 // New returns the model for a backend. The caller starts [Attach] with
 // the program's Send; ctx ends the runs the model starts.
-func New(ctx context.Context, be client.Backend) *Model {
-	in := textinput.New()
+func New(ctx context.Context, be client.Backend, options ...Option) *Model {
+	in := textarea.New()
 	in.Prompt = "> "
 	in.Placeholder = "say something (ctrl+/ for keys)"
+	in.ShowLineNumbers = false
+	in.MaxHeight = inputMaxRows
+	in.KeyMap.InsertNewline.SetEnabled(false)
+	in.CharLimit = 0
 	in.Focus()
-	return &Model{
+	m := &Model{
 		ctx:      ctx,
 		ctl:      be.Control(),
 		verified: be.Record().Verified(),
 		rec:      be.Record(),
-		insp:     inspect.New(be.Record()),
 		vp:       viewport.New(0, 0),
 		in:       in,
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 		replied:  map[string]bool{},
 	}
+	for _, o := range options {
+		o(m)
+	}
+	inspOpts := []inspect.Option{}
+	if m.cost != nil {
+		inspOpts = append(inspOpts, inspect.WithCost(m.cost))
+	}
+	m.insp = inspect.New(be.Record(), inspOpts...)
+	return m
 }
 
 // Init implements tea.Model.
-func (m *Model) Init() tea.Cmd { return textinput.Blink }
+func (m *Model) Init() tea.Cmd { return textarea.Blink }
 
 func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
 
@@ -177,7 +210,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height, m.ready = msg.Width, msg.Height, true
-		m.in.Width = max(msg.Width-4, 1)
+		m.in.SetWidth(max(msg.Width-4, 1))
 		m.relayout()
 		return m, nil
 	case ModelMsg:
@@ -261,6 +294,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.in, cmd = m.in.Update(msg)
+	m.relayout()
 	return m, cmd
 }
 
@@ -452,6 +486,7 @@ func (m *Model) permissionKey(msg tea.KeyMsg, p view.Permission) (tea.Model, tea
 		}
 		var cmd tea.Cmd
 		m.in, cmd = m.in.Update(msg)
+		m.relayout()
 		return m, cmd
 	}
 	switch msg.String() {
@@ -484,6 +519,7 @@ func (m *Model) questionKey(msg tea.KeyMsg, q client.Question) (tea.Model, tea.C
 		}
 		var cmd tea.Cmd
 		m.in, cmd = m.in.Update(msg)
+		m.relayout()
 		return m, cmd
 	}
 	switch msg.String() {
@@ -574,9 +610,12 @@ func (m *Model) relayout() {
 	atBottom := m.vp.AtBottom() || m.drawn != m.screen
 	panel := m.panel()
 	pane := m.paneLines()
-	used := 2 // status line and input
+	rows := inputRowsUsed(m.in.Value(), m.in.Width())
+	visible := min(rows, inputMaxRows)
+	m.in.SetHeight(visible)
+	used := 2 // status line and the space the input would take
 	if m.typing() {
-		used += 2 // the bars around the input
+		used = 1 + visible + 2 // status, the input's rows, and its bars
 	}
 	if panel != "" {
 		used += lipgloss.Height(panel)
@@ -741,6 +780,78 @@ func (m *Model) View() string {
 func (m *Model) typing() bool {
 	return m.screen == screenConversation && m.frozen == nil
 }
+
+// inputRowsUsed is how many screen rows the input needs for value at
+// width columns: one per line plus its soft wraps. The textarea's own
+// separator for a prompt is Enter, which we turn into a send, so newlines
+// in the value come from the placeholder and blank state rather than the
+// user; they are counted all the same.
+func inputRowsUsed(value string, width int) int {
+	rows := 1
+	for line := range strings.Lines(value) {
+		rows += wrapRows([]rune(line), width) - 1
+	}
+	return max(rows, 1)
+}
+
+// wrapRows counts the rows wrap admits for one logical line, with the
+// same algorithm the textarea applies.
+func wrapRows(runes []rune, width int) int {
+	var (
+		lines  = [][]rune{{}}
+		word   []rune
+		row    int
+		spaces int
+	)
+	for _, r := range runes {
+		if unicode.IsSpace(r) {
+			spaces++
+		} else {
+			word = append(word, r)
+		}
+
+		if spaces > 0 {
+			if uniseg.StringWidth(string(lines[row]))+uniseg.StringWidth(string(word))+spaces > width {
+				row++
+				lines = append(lines, []rune{})
+				lines[row] = append(lines[row], word...)
+				lines[row] = append(lines[row], repeatSpaces(spaces)...)
+				spaces = 0
+				word = nil
+			} else {
+				lines[row] = append(lines[row], word...)
+				lines[row] = append(lines[row], repeatSpaces(spaces)...)
+				spaces = 0
+				word = nil
+			}
+		} else {
+			lastCharLen := runewidth.RuneWidth(word[len(word)-1])
+			if uniseg.StringWidth(string(word))+lastCharLen > width {
+				if len(lines[row]) > 0 {
+					row++
+					lines = append(lines, []rune{})
+				}
+				lines[row] = append(lines[row], word...)
+				word = nil
+			}
+		}
+	}
+
+	if uniseg.StringWidth(string(lines[row]))+uniseg.StringWidth(string(word))+spaces >= width {
+		lines = append(lines, []rune{})
+		lines[row+1] = append(lines[row+1], word...)
+		spaces++
+		lines[row+1] = append(lines[row+1], repeatSpaces(spaces)...)
+	} else {
+		lines[row] = append(lines[row], word...)
+		spaces++
+		lines[row] = append(lines[row], repeatSpaces(spaces)...)
+	}
+
+	return len(lines)
+}
+
+func repeatSpaces(n int) []rune { return []rune(strings.Repeat(" ", n)) }
 
 func padTo(s string, w int) string {
 	if n := lipgloss.Width(s); n < w {

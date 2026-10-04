@@ -5,6 +5,15 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: the session pane totals token usage over the viewed line, split
+  by model when more than one model was called. With a cost source
+  (`console.WithCost`, `tui.WithCost`) it also shows the line's cost in
+  US dollars when every call was priced.
+- Changed: the prompt is a wrapping text area that grows to five rows,
+  then scrolls, instead of one line that scrolled sideways.
+
 ## v0.0.3 - 2026-10-04
 
 - Added: questions a running call puts to the user. A host asks with

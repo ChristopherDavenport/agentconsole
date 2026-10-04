@@ -2,11 +2,14 @@ package inspect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn/session"
+	"github.com/ChristopherDavenport/openresponses"
 )
 
 // Session is the session-level summary pane.
@@ -27,6 +30,15 @@ type Session struct {
 
 	// Verify is the tally over the responses on the viewed line.
 	Verify PathVerify
+	// Usage is the token usage of the model calls on the viewed line,
+	// responses and folds.
+	Usage openresponses.Usage
+	// UsageByModel is Usage split by the model each call was made under.
+	UsageByModel map[string]openresponses.Usage
+	// Cost is the viewed line's cost in US dollars under the cost source,
+	// and Priced says every call was priced (false with no source).
+	Cost   float64
+	Priced bool
 	// Config is what the record has in force at the end of the line.
 	Config Config
 	// Refs are the refs that point at the session, RefsErr why they could
@@ -158,5 +170,85 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 	out.ManifestRefused = refused
 	all, _, _ := grants(path)
 	out.Grants = all
+	in.usage(&out, path)
 	return out, nil
+}
+
+// usage sums the token usage of every model call on the path, and prices
+// it when a cost source was given and every call was priced.
+func (in *Inspector) usage(out *Session, path []agentsession.Entry) {
+	var u openresponses.Usage
+	byModel := map[string]openresponses.Usage{}
+	cost, priced := 0.0, in.cost != nil
+	model := ""
+	for _, e := range path {
+		var eu *openresponses.Usage
+		m := model
+		switch v := e.(type) {
+		case *agentsession.ConfigEntry:
+			if v.Replace {
+				model = ""
+			}
+			if v.Model != "" {
+				model = v.Model
+			}
+			continue
+		case *agentsession.ResponseEntry:
+			eu = v.Usage
+			if v.Model != "" {
+				m = v.Model
+			}
+		case *agentsession.CompactionEntry:
+			model = v.Config.Model
+			eu, m = v.Usage, v.Config.Model
+		case *agentsession.BranchSummaryEntry:
+			eu = v.Usage
+		case *agentsession.CustomEntry:
+			// A fold that failed still made its summary calls, and paid
+			// for them; the entry holds their usage summed. It leaves the
+			// model in force as it was.
+			if v.NS != session.FailedFoldNS {
+				continue
+			}
+			var f session.FailedFold
+			if json.Unmarshal(v.Data, &f) != nil {
+				continue
+			}
+			eu = f.Usage
+			if f.Model != "" {
+				m = f.Model
+			}
+		default:
+			continue
+		}
+		if eu == nil {
+			continue
+		}
+		addUsage(&u, eu)
+		b := byModel[m]
+		addUsage(&b, eu)
+		byModel[m] = b
+		if priced {
+			usd, ok := in.cost(m, *eu)
+			if !ok {
+				priced = false
+			} else {
+				cost += usd
+			}
+		}
+	}
+	out.Usage = u
+	out.UsageByModel = byModel
+	if priced {
+		out.Cost, out.Priced = cost, true
+	}
+}
+
+// addUsage adds src's counts into dst.
+func addUsage(dst *openresponses.Usage, src *openresponses.Usage) {
+	dst.InputTokens += src.InputTokens
+	dst.OutputTokens += src.OutputTokens
+	dst.TotalTokens += src.TotalTokens
+	dst.InputTokensDetails.CachedTokens += src.InputTokensDetails.CachedTokens
+	dst.OutputTokensDetails.ReasoningTokens += src.OutputTokensDetails.ReasoningTokens
 }
