@@ -70,7 +70,8 @@ Ctrl-C (or SIGINT) aborts a run, and quits when idle; PgUp, PgDn, Ctrl-Up,
 Ctrl-Down, Ctrl-Home, Ctrl-End and the mouse wheel scroll the conversation,
 while the arrows, Home and End edit the input line; Ctrl-R shows reasoning; Ctrl-O shows tool
 arguments and output in full. When a tool call needs permission, y
-approves and n refuses, with an optional reason.
+approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
+key; Esc, q or Ctrl-/ again goes back.
 
 The tree and the record detail:
 
@@ -81,7 +82,10 @@ The tree and the record detail:
   `c` continues from the selected branch: the agent's head moves there and
   the next prompt continues from it.
 - `ctrl+p` and `ctrl+n` move a cursor over the conversation's rows, and
-  `ctrl+b` continues from the selected row. Esc clears the cursor.
+  `ctrl+b` continues from the selected row. Esc clears the cursor. A left
+  click selects the row under it; a click on the row already selected
+  expands or collapses it. With a row selected, Ctrl-R and Ctrl-O show or
+  hide that row's reasoning or tool output alone; with none, every row's.
 - `tab` opens the detail of the selected row (its entry, whether its
   request verifies and why not, the response's model and usage, a call's
   policy decision, who decided, dispatch, output and skill grants, what a

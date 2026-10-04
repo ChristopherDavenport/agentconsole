@@ -50,6 +50,13 @@ type Model struct {
 	vp   viewport.Model
 	in   textinput.Model
 	o    opts
+	// flips are the rows shown the other way round from o, by entry: what
+	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
+	// for every row drops the rows' own flips of it.
+	flips map[string]opts
+	// spans are where the rows sit in the viewport's content, from the
+	// last layout, for a click to find the row under it.
+	spans []rowSpan
 
 	width, height int
 	ready         bool
@@ -104,7 +111,7 @@ var _ tea.Model = (*Model)(nil)
 func New(ctx context.Context, be client.Backend) *Model {
 	in := textinput.New()
 	in.Prompt = "> "
-	in.Placeholder = "say something"
+	in.Placeholder = "say something (ctrl+/ for keys)"
 	in.Focus()
 	return &Model{
 		ctx:      ctx,
@@ -114,6 +121,7 @@ func New(ctx context.Context, be client.Backend) *Model {
 		insp:     inspect.New(be.Record()),
 		vp:       viewport.New(0, 0),
 		in:       in,
+		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 	}
 }
@@ -205,6 +213,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			return m, m.click(msg.Y)
+		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
@@ -270,6 +281,15 @@ func (m *Model) Drain(timeout time.Duration) bool {
 }
 
 func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if isKeysKey(msg) {
+		if m.screen == screenKeys {
+			m.screen = screenConversation
+		} else {
+			m.screen = screenKeys
+		}
+		m.relayout()
+		return m, nil
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		return m.interrupt()
@@ -305,16 +325,17 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 		return m, nil
 	case "ctrl+r":
-		m.o.reasoning = !m.o.reasoning
-		m.relayout()
+		m.toggle(opts{reasoning: true})
 		return m, nil
 	case "ctrl+o":
-		m.o.output = !m.o.output
-		m.relayout()
+		m.toggle(opts{output: true})
 		return m, nil
 	}
-	if m.screen == screenTree {
+	switch m.screen {
+	case screenTree:
 		return m.treeKey(msg)
+	case screenKeys:
+		return m.keysKey(msg)
 	}
 	switch msg.String() {
 	case "tab":
@@ -456,6 +477,9 @@ func (m *Model) relayout() {
 	panel := m.panel()
 	pane := m.paneLines()
 	used := 2 // status line and input
+	if m.typing() {
+		used += 2 // the bars around the input
+	}
 	if panel != "" {
 		used += lipgloss.Height(panel)
 	}
@@ -467,6 +491,14 @@ func (m *Model) relayout() {
 	}
 	m.vp.Width = m.width
 	m.vp.Height = max(m.height-used, 1)
+	if m.screen == screenKeys {
+		m.vp.SetContent(wrap(renderKeys(), max(m.width, 10)))
+		if m.drawn != m.screen {
+			m.vp.GotoTop()
+		}
+		m.drawn = m.screen
+		return
+	}
 	if m.screen == screenTree {
 		content, line := m.renderTree()
 		m.vp.SetContent(content)
@@ -475,11 +507,16 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, line, height := renderRows(m.shown(), m.o, m.width, m.curEntry)
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry)
 	m.vp.SetContent(content)
+	m.spans = spans
 	switch {
 	case m.reveal && m.curEntry != "":
-		m.showLine(line, height)
+		for _, sp := range spans {
+			if sp.entry == m.curEntry {
+				m.showLine(sp.start, sp.height)
+			}
+		}
 	case atBottom:
 		m.vp.GotoBottom()
 	}
@@ -560,12 +597,22 @@ func (m *Model) View() string {
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))
+	case m.screen == screenKeys:
+		parts = append(parts, dimStyle.Render(truncate("keys: esc, q or ctrl+/ back; pgup/pgdn scroll", m.width)))
 	case m.frozen != nil:
 		parts = append(parts, dimStyle.Render(truncate("read only: esc back to the live session, c continue from here, tab detail", m.width)))
 	default:
-		parts = append(parts, m.in.View())
+		bar := dimStyle.Render(strings.Repeat("─", max(m.width, 1)))
+		parts = append(parts, bar, m.in.View(), bar)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// typing is whether the input line is shown, between its bars: not on the
+// tree or the keys, nor on a read-only view, whose last line is a hint
+// instead.
+func (m *Model) typing() bool {
+	return m.screen == screenConversation && m.frozen == nil
 }
 
 func padTo(s string, w int) string {
