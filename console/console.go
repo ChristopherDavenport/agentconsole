@@ -29,6 +29,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/ChristopherDavenport/openresponses"
+
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -45,6 +47,7 @@ type config struct {
 	width   int
 	height  int
 	warn    func(string)
+	cost    func(string, openresponses.Usage) (float64, bool)
 }
 
 // Option configures [Run].
@@ -84,6 +87,13 @@ func WithoutSignalHandler() Option { return func(c *config) { c.signals = false 
 // to standard error.
 func WithWarn(fn func(string)) Option { return func(c *config) { c.warn = fn } }
 
+// WithCost prices one model call, showing the followed session's cost in
+// the session pane. fn returns a call's cost in US dollars; it receives
+// the model the call was made under and that call's usage.
+func WithCost(fn func(model string, usage openresponses.Usage) (float64, bool)) Option {
+	return func(c *config) { c.cost = fn }
+}
+
 // Run runs the terminal client over be until the user quits, ctx is
 // done, or the program fails, and returns the program's error.
 //
@@ -105,7 +115,7 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
-	m := tui.New(ctx, be)
+	m := tui.New(ctx, be, tui.WithCost(cfg.cost))
 	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
 	// ctrl+c) is made the same thing: the program's own handling would
 	// end it with an error, without aborting the run.
