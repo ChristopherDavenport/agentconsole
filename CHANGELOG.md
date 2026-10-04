@@ -12,6 +12,7 @@ versions may break the API.
   the rows' own toggles.
 - Added: a left click selects the row under it, as Ctrl-P and Ctrl-N do;
   a click on the row already selected expands or collapses it.
+- Changed: a bar above and below the input line marks where you type.
 
 ## v0.0.1 - 2026-10-03
 

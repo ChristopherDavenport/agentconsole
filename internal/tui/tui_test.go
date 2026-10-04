@@ -386,3 +386,23 @@ func TestHomeEndAndArrowsMoveTheInputCursor(t *testing.T) {
 	a.typeText("Z")
 	a.waitFor("Z two from the end", has("> XabZcY"))
 }
+
+func TestTheInputSitsBetweenTwoBarsAndTheScreenStillFits(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	a.exchange("hello", "hi")
+	bar := strings.Repeat("─", 100)
+	s := a.screen()
+	lines := strings.Split(s, "\n")
+	if len(lines) != 30 {
+		t.Fatalf("the screen is %d lines on a 30-line terminal:\n%s", len(lines), s)
+	}
+	n := len(lines)
+	if !strings.Contains(lines[n-2], "> ") || !strings.Contains(lines[n-3], bar) || !strings.Contains(lines[n-1], bar) {
+		t.Fatalf("the input is not between two bars:\n%s", s)
+	}
+	// The tree has no input, so no bars.
+	a.key(tea.KeyCtrlT)
+	if s := a.screen(); strings.Contains(s, bar) {
+		t.Fatalf("the tree shows the input's bars:\n%s", s)
+	}
+}

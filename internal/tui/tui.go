@@ -465,6 +465,9 @@ func (m *Model) relayout() {
 	panel := m.panel()
 	pane := m.paneLines()
 	used := 2 // status line and input
+	if m.typing() {
+		used += 2 // the bars around the input
+	}
 	if panel != "" {
 		used += lipgloss.Height(panel)
 	}
@@ -577,9 +580,16 @@ func (m *Model) View() string {
 	case m.frozen != nil:
 		parts = append(parts, dimStyle.Render(truncate("read only: esc back to the live session, c continue from here, tab detail", m.width)))
 	default:
-		parts = append(parts, m.in.View())
+		bar := dimStyle.Render(strings.Repeat("─", max(m.width, 1)))
+		parts = append(parts, bar, m.in.View(), bar)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// typing is whether the input line is shown, between its bars: not on the
+// tree, nor on a read-only view, whose last line is the keys' hint instead.
+func (m *Model) typing() bool {
+	return m.screen != screenTree && m.frozen == nil
 }
 
 func padTo(s string, w int) string {
