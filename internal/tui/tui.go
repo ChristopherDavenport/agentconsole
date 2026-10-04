@@ -50,6 +50,13 @@ type Model struct {
 	vp   viewport.Model
 	in   textinput.Model
 	o    opts
+	// flips are the rows shown the other way round from o, by entry: what
+	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
+	// for every row drops the rows' own flips of it.
+	flips map[string]opts
+	// spans are where the rows sit in the viewport's content, from the
+	// last layout, for a click to find the row under it.
+	spans []rowSpan
 
 	width, height int
 	ready         bool
@@ -114,6 +121,7 @@ func New(ctx context.Context, be client.Backend) *Model {
 		insp:     inspect.New(be.Record()),
 		vp:       viewport.New(0, 0),
 		in:       in,
+		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 	}
 }
@@ -205,6 +213,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			return m, m.click(msg.Y)
+		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
@@ -305,12 +316,10 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 		return m, nil
 	case "ctrl+r":
-		m.o.reasoning = !m.o.reasoning
-		m.relayout()
+		m.toggle(opts{reasoning: true})
 		return m, nil
 	case "ctrl+o":
-		m.o.output = !m.o.output
-		m.relayout()
+		m.toggle(opts{output: true})
 		return m, nil
 	}
 	if m.screen == screenTree {
@@ -475,11 +484,16 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, line, height := renderRows(m.shown(), m.o, m.width, m.curEntry)
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry)
 	m.vp.SetContent(content)
+	m.spans = spans
 	switch {
 	case m.reveal && m.curEntry != "":
-		m.showLine(line, height)
+		for _, sp := range spans {
+			if sp.entry == m.curEntry {
+				m.showLine(sp.start, sp.height)
+			}
+		}
 	case atBottom:
 		m.vp.GotoBottom()
 	}

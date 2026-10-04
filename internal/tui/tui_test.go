@@ -96,6 +96,88 @@ func TestLongToolOutputCollapsesUntilToggled(t *testing.T) {
 	a.waitFor("the output expanded", has("l4", "l5"))
 }
 
+// twoCallsApp is an app whose model calls lines twice, with "p" and then
+// "q", each answered with five lines named after its text.
+func twoCallsApp(t *testing.T) *app {
+	t.Helper()
+	long := agenttool.New("lines", "many lines", func(_ context.Context, a textArgs) (string, error) {
+		return a.Text + "1\n" + a.Text + "2\n" + a.Text + "3\n" + a.Text + "4\n" + a.Text + "5", nil
+	})
+	cfg := cfgWith(callTool("c1", "lines", `{"text":"p"}`), callTool("c2", "lines", `{"text":"q"}`), say(nil, nil, "ok"))
+	cfg.Tools = []agenttool.Tool{long}
+	a := newApp(t, cfg)
+	a.resize(110, 50)
+	a.submit("go")
+	a.waitFor("both calls ended", all(has("p3", "q3", "ok", "idle"), lacks("p4", "q4")))
+	return a
+}
+
+func TestCtrlOOnASelectedRowExpandsThatRowAlone(t *testing.T) {
+	a := twoCallsApp(t)
+	a.press(tea.KeyCtrlP, tea.KeyCtrlP, tea.KeyCtrlP) // the answer, the second call, the first
+	a.key(tea.KeyCtrlO)
+	a.waitFor("the first call expanded", all(has("p4", "p5"), lacks("q4")))
+	a.key(tea.KeyCtrlO)
+	a.waitFor("the first call collapsed", lacks("p4", "q4"))
+	// With no row selected, ctrl+o is for every row again.
+	a.key(tea.KeyCtrlO)
+	a.key(tea.KeyEsc)
+	a.key(tea.KeyCtrlO)
+	a.waitFor("every call expanded", has("p4", "q4"))
+	// A row's own flip goes when every row is toggled.
+	a.key(tea.KeyCtrlO)
+	a.waitFor("every call collapsed", lacks("p4", "q4"))
+}
+
+// click left-clicks the screen line holding sub.
+func (a *app) click(sub string) {
+	a.t.Helper()
+	for y, l := range strings.Split(a.screen(), "\n") {
+		if strings.Contains(l, sub) {
+			a.send(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+			return
+		}
+	}
+	a.t.Fatalf("no line holds %q:\n%s", sub, a.screen())
+}
+
+// underCursor is the line after the cursor's marker: a call's arguments
+// when the cursor is on a call.
+func underCursor(screen string) string {
+	lines := strings.Split(screen, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "▶") && i+1 < len(lines) {
+			return lines[i+1]
+		}
+	}
+	return ""
+}
+
+func TestClickingARowSelectsItAndClickingAgainExpandsIt(t *testing.T) {
+	a := twoCallsApp(t)
+	a.click(`"text":"p"`)
+	if s := a.screen(); !strings.Contains(underCursor(s), `"text":"p"`) || strings.Contains(s, "p4") {
+		t.Fatalf("the click did not just select the first call:\n%s", s)
+	}
+	a.click("p2")
+	a.waitFor("the first call expanded", all(has("p4", "p5"), lacks("q4")))
+	// Clicking another row moves the cursor and expands nothing.
+	a.click(`"text":"q"`)
+	if s := a.screen(); !strings.Contains(underCursor(s), `"text":"q"`) || strings.Contains(s, "q4") {
+		t.Fatalf("the click on the second call did not just select it:\n%s", s)
+	}
+	a.key(tea.KeyTab)
+	a.waitFor("the second call's detail", has("record detail", "call c2 lines"))
+}
+
+func TestClickingTheStatusLineSelectsNothing(t *testing.T) {
+	a := twoCallsApp(t)
+	a.send(tea.MouseMsg{X: 4, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if s := a.screen(); strings.Contains(s, "▶") {
+		t.Fatalf("a row was selected:\n%s", s)
+	}
+}
+
 func TestApprovingAPermissionResumesTheRun(t *testing.T) {
 	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
 	cfg.Tools = []agenttool.Tool{upperTool(nil)}
