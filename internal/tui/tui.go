@@ -290,10 +290,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.key(msg)
 	}
-	var cmd tea.Cmd
-	m.in, cmd = m.in.Update(msg)
-	m.relayout()
-	return m, cmd
+	return m, m.updateInput(msg)
 }
 
 // syncQuestions forgets replies to questions the view no longer lists,
@@ -460,9 +457,7 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEnter {
 		return m.send()
 	}
-	var cmd tea.Cmd
-	m.in, cmd = m.in.Update(msg)
-	return m, cmd
+	return m, m.updateInput(msg)
 }
 
 // permissionKey handles a key while a permission is asked: y approves, n
@@ -482,10 +477,7 @@ func (m *Model) permissionKey(msg tea.KeyMsg, p view.Permission) (tea.Model, tea
 			m.relayout()
 			return m, nil
 		}
-		var cmd tea.Cmd
-		m.in, cmd = m.in.Update(msg)
-		m.relayout()
-		return m, cmd
+		return m, m.updateInput(msg)
 	}
 	switch msg.String() {
 	case "y", "Y":
@@ -515,10 +507,7 @@ func (m *Model) questionKey(msg tea.KeyMsg, q client.Question) (tea.Model, tea.C
 			m.relayout()
 			return m, nil
 		}
-		var cmd tea.Cmd
-		m.in, cmd = m.in.Update(msg)
-		m.relayout()
-		return m, cmd
+		return m, m.updateInput(msg)
 	}
 	switch msg.String() {
 	case "y", "Y":
@@ -777,6 +766,18 @@ func (m *Model) View() string {
 // instead.
 func (m *Model) typing() bool {
 	return m.screen == screenConversation && m.frozen == nil
+}
+
+// updateInput edits the input and then lays the screen out again. The
+// textarea is given its full height first, so its own scroll follows the
+// cursor while the key is applied; relayout shrinks the box to what the
+// value actually needs.
+func (m *Model) updateInput(msg tea.Msg) tea.Cmd {
+	m.in.SetHeight(inputMaxRows)
+	var cmd tea.Cmd
+	m.in, cmd = m.in.Update(msg)
+	m.relayout()
+	return cmd
 }
 
 // inputRowsUsed is how many screen rows the input needs for value at

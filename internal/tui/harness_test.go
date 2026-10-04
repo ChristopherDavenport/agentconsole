@@ -319,6 +319,12 @@ func (a *app) quitted() bool {
 	return a.quit
 }
 
+// paste sends value as the terminal sends a paste: one key message
+// holding every rune, over bracketed paste, that the model sees whole.
+func (a *app) paste(value string) {
+	a.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value), Paste: true})
+}
+
 // typeText types text, one key per rune.
 func (a *app) typeText(text string) {
 	for _, r := range text {
