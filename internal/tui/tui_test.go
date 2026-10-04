@@ -135,16 +135,39 @@ func TestCtrlOOnASelectedRowExpandsThatRowAlone(t *testing.T) {
 	a.waitFor("every call collapsed", lacks("p4", "q4"))
 }
 
-// click left-clicks the screen line holding sub.
+// click left-clicks the screen line holding sub: a press and a release
+// with no motion between, which is what selects a row.
 func (a *app) click(sub string) {
 	a.t.Helper()
 	for y, l := range strings.Split(a.screen(), "\n") {
 		if strings.Contains(l, sub) {
 			a.send(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+			a.send(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
 			return
 		}
 	}
 	a.t.Fatalf("no line holds %q:\n%s", sub, a.screen())
+}
+
+// drag presses at x0 on the line holding sub, moves to x1 on it, and
+// releases: a selection of the columns x0..x1 of that line.
+func (a *app) drag(sub string, x0, x1 int) string {
+	a.t.Helper()
+	for y, l := range strings.Split(a.screen(), "\n") {
+		if strings.Contains(l, sub) {
+			return a.dragCells(x0, y, x1, y)
+		}
+	}
+	a.t.Fatalf("no line holds %q:\n%s", sub, a.screen())
+	return ""
+}
+
+// dragCells presses at (x0, y0), moves to (x1, y1), and releases.
+func (a *app) dragCells(x0, y0, x1, y1 int) string {
+	a.send(tea.MouseMsg{X: x0, Y: y0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	a.send(tea.MouseMsg{X: x1, Y: y1, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
+	a.send(tea.MouseMsg{X: x1, Y: y1, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	return a.screen()
 }
 
 // underCursor is the line after the cursor's marker: a call's arguments
@@ -179,6 +202,7 @@ func TestClickingARowSelectsItAndClickingAgainExpandsIt(t *testing.T) {
 func TestClickingTheStatusLineSelectsNothing(t *testing.T) {
 	a := twoCallsApp(t)
 	a.send(tea.MouseMsg{X: 4, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	a.send(tea.MouseMsg{X: 4, Y: 0, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
 	if s := a.screen(); strings.Contains(s, "▶") {
 		t.Fatalf("a row was selected:\n%s", s)
 	}

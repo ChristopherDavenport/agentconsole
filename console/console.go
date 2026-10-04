@@ -111,7 +111,14 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
-	m := tui.New(ctx, be, tui.WithCost(cfg.cost))
+	// A copied selection goes to the terminal's clipboard (OSC 52), written
+	// to the same writer the program renders to: the sequence is a command
+	// the terminal executes, not output, so it cannot corrupt a frame.
+	out := io.Writer(os.Stdout)
+	if cfg.out != nil {
+		out = cfg.out
+	}
+	m := tui.New(ctx, be, tui.WithCost(cfg.cost), tui.WithCopier(tui.Clipboard(out)))
 	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
 	// ctrl+c) is made the same thing: the program's own handling would
 	// end it with an error, without aborting the run.

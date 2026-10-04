@@ -624,6 +624,57 @@ imports agentconsole and runs the client over its own agentkit kit.
   Releases are cut with `make release`; the guard accepts any `vX.Y.Z` as
   the first release.
 
+## Decided in implementation, step 7 (selection and copy)
+
+The client took the whole screen and the mouse with it (cell motion
+tracking, for the wheel and the row click), so nothing on the screen was
+selectable: the terminal's own selection cannot reach a program that has
+the mouse, and which modifier bypasses mouse reporting (shift in xterm,
+option in iTerm2) is the terminal's choice, not the client's. The client
+selects itself.
+
+- **A left drag is the client's own selection.** The press anchors a
+  cell; motion with the button down extends the region, in reading
+  order (whole lines between the first and the last, columns on those
+  two, the topmost cell first whatever way the drag went); the release
+  copies it. A click, a press and a release with no motion between,
+  still selects the row under it and a second click on that row expands
+  it, as before: only the release acts, so a drag never selects a row.
+- **The region is of the frame, not the model.** The selection is cut
+  from the lines the last `View` rendered, so it covers anything on the
+  screen — the conversation, the panes, the tree, the status line — and
+  not the conversation's rows alone. Cutting a rendered line at display
+  columns keeps the escape sequences where they sit (they carry no
+  width), and a wide rune or a combining mark cut at its boundary stays
+  whole.
+- **Copy is OSC 52**, the one channel a program in the alternate screen
+  has to the clipboard; it works over ssh too. The copied text is the
+  region's plain text, escape codes stripped and each line trimmed of
+  the padding the layout adds, so a dragged status line copies its
+  words, not its spaces. The release puts it on the clipboard and the
+  status line says "copied". A terminal that does not take OSC 52 (iTerm2
+  needs "Applications in terminal may access clipboard" on) silently
+  copies nothing; the note is still "copied", since the client cannot
+  ask a terminal whether it took the sequence.
+- **The selection stays drawn**, reversed like a terminal's own, until
+  the next key or the next press. It is not cleared by the frames under
+  it: a streaming conversation reflows under the selection, as a
+  terminal's own does.
+- **Where a copy goes is the host's.** `tui.WithCopier` sets it
+  (without it a selection is drawn but nothing is copied, which is what
+  a test wants) and `tui.Clipboard(w)` is the copier over the writer the
+  program renders to: the OSC 52 sequence is a command the terminal
+  executes, not output, so writing it beside a frame cannot corrupt the
+  frame. `console.Run` passes the program's own output writer, or
+  standard output, so an embedder's test sees the sequence in the buffer
+  it reads.
+- **Not done.** Copying without the mouse (a key that copies the
+  selected row, or the session's id) is not there: the drag reaches
+  everything on the screen, and a key that copied the row cursor's row
+  would copy one thing where the drag copies any. A selection that
+  scrolls the viewport when the drag reaches the screen's edge is not
+  there either.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

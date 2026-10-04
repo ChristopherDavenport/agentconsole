@@ -70,7 +70,12 @@ Ctrl-C (or SIGINT) aborts a run, and quits when idle; PgUp, PgDn, Ctrl-Up,
 Ctrl-Down, Ctrl-Home, Ctrl-End and the mouse wheel scroll the conversation,
 while the prompt wraps over up to five lines, then scrolls, and the
 arrows, Home and End move the cursor within it; Ctrl-R shows reasoning; Ctrl-O shows tool
-arguments and output in full. The status line keeps a running total of
+arguments and output in full. A mouse drag selects text anywhere on the
+screen (the client has the mouse, so the terminal's own selection cannot
+reach it) and the release copies it to the terminal's clipboard with OSC
+52, which works over ssh too; a terminal that does not take it (iTerm2
+needs "Applications in terminal may access clipboard" on) copies nothing.
+The status line keeps a running total of
 tokens used and, when the host supplies a price source, what the session
 has cost. When a tool call needs permission, y
 approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every

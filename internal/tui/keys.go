@@ -26,6 +26,7 @@ var keyGroups = []keyGroup{
 		{"Ctrl-Up Ctrl-Down", "scroll a line"},
 		{"Ctrl-Home Ctrl-End", "scroll to the top or the bottom"},
 		{"mouse wheel", "scroll"},
+		{"mouse drag", "select text; the release copies it to the terminal's clipboard"},
 		{"Ctrl-R", "show or hide reasoning: the selected row's, or every row's"},
 		{"Ctrl-O", "show tool arguments and output in full: the selected row's, or every row's"},
 		{"Ctrl-/  F1", "this list"},
