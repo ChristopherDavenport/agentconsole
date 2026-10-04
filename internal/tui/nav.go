@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
 	"github.com/ChristopherDavenport/agentconsole/view"
@@ -35,6 +36,7 @@ type screen int
 const (
 	screenConversation screen = iota
 	screenTree
+	screenKeys // the list of keys (keys.go)
 )
 
 type pane int
@@ -104,6 +106,71 @@ func (m *Model) moveCursor(delta int) tea.Cmd {
 	m.reveal = true
 	m.relayout()
 	return m.wantPane()
+}
+
+// toggle is ctrl+r or ctrl+o, the switch set in sw: on the selected row
+// alone when one is, otherwise on every row, which also drops the rows'
+// own flips of it.
+func (m *Model) toggle(sw opts) {
+	if m.screen == screenConversation && m.curEntry != "" {
+		m.flipRow(m.curEntry, sw)
+		return
+	}
+	m.o = m.o.flipped(sw)
+	for id, f := range m.flips {
+		f = opts{reasoning: f.reasoning && !sw.reasoning, output: f.output && !sw.output}
+		if f == (opts{}) {
+			delete(m.flips, id)
+		} else {
+			m.flips[id] = f
+		}
+	}
+	m.relayout()
+}
+
+// flipRow shows the entry's row with the switches in sw the other way
+// round, keeping it in view.
+func (m *Model) flipRow(entry string, sw opts) {
+	f := m.flips[entry].flipped(sw)
+	if f == (opts{}) {
+		delete(m.flips, entry)
+	} else {
+		m.flips[entry] = f
+	}
+	m.reveal = true
+	m.relayout()
+}
+
+// click is a left click on screen line y. On a row of the conversation it
+// selects the row, as ctrl+p and ctrl+n would; on the row already
+// selected it expands or collapses it: the reasoning of a reasoning row,
+// the arguments and output of any other.
+func (m *Model) click(y int) tea.Cmd {
+	// The status line is line 0; the viewport starts under it.
+	if m.screen != screenConversation || y < 1 || y > m.vp.Height {
+		return nil
+	}
+	line := m.vp.YOffset + y - 1
+	for _, sp := range m.spans {
+		if line < sp.start || line >= sp.start+sp.height {
+			continue
+		}
+		if sp.entry != m.curEntry {
+			m.curEntry = sp.entry
+			m.reveal = true
+			m.relayout()
+			return m.wantPane()
+		}
+		sw := opts{output: true}
+		for _, row := range m.shown().Rows {
+			if _, ok := row.Item.(*openresponses.ReasoningItem); ok && row.EntryID == sp.entry {
+				sw = opts{reasoning: true}
+			}
+		}
+		m.flipRow(sp.entry, sw)
+		return nil
+	}
+	return nil
 }
 
 // keepCursor drops a cursor whose row is gone from the shown line.

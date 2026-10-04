@@ -346,9 +346,12 @@ headless) changed the sketch in these places.
 - **Quitting waits for the run's write.** After the program ends, main
   aborts and waits up to three seconds for the in-flight Prompt or Answer
   (`Model.Drain`) before cancelling and closing the store.
-- **Collapsing is global.** Ctrl-R shows or hides all reasoning, Ctrl-O
-  shows tool arguments and output in full (three lines and 120 columns
-  otherwise). No per-row cursor yet.
+- **Collapsing is global, or the selected row's.** Ctrl-R shows or hides
+  all reasoning, Ctrl-O shows tool arguments and output in full (three
+  lines and 120 columns otherwise). With a row selected they flip that
+  row alone: a row keeps which switches it has the other way round from
+  the global ones, by entry, and toggling a switch with no row selected
+  drops every row's flip of it, so a global toggle leaves the rows alike.
 - **The binary.** `cmd/agentconsole` runs an `agentturn.Agent` in
   process. `--session ID` or `--session ref:NAME` resumes,
   `--conversation NAME` resolves or creates the ref with
@@ -454,11 +457,19 @@ headless) changed the sketch in these places.
   names the writer only in the headers of child sessions; the binary now
   puts the harness and the working directory in the header of a session it
   starts (the summary pane showed neither).
-- **Keys.** `ctrl+t` switches between the conversation and the tree (in
+- **Keys.** `ctrl+/` (or `f1`) shows the list of keys and takes no input
+  until `esc`, `q` or `ctrl+/` closes it. A terminal sends Ctrl-/ as the
+  unit separator, which bubbletea names `ctrl+_`; Ctrl-? (Ctrl-Shift-/)
+  comes the same way in most terminals and as DEL in the rest, where it
+  cannot be told from backspace, so F1 opens it too. `ctrl+t` switches
+  between the conversation and the tree (in
   the tree: up/down or k/j, `enter` views the branch or opens the origin,
   `c` continues from the branch, `esc` goes back). In the conversation
   `ctrl+p` and `ctrl+n` move a row cursor (a marker in the gutter; `esc`
-  clears it), `tab` cycles the pane under the conversation: the selected
+  clears it), a left click puts it on the row under the pointer and a
+  click on the row it is on expands or collapses that row (the rows'
+  places come from the last layout, so the click lands on what was
+  drawn), `tab` cycles the pane under the conversation: the selected
   row's detail, the session summary, none; `ctrl+b` continues from the
   selected row; in a read-only view `esc` returns to the live session, `c`
   continues from the cursor row or the viewed branch's tip, and the input

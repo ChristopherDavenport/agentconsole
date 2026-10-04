@@ -5,6 +5,17 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: with a row selected, Ctrl-O and Ctrl-R expand or collapse that
+  row alone; with none they still apply to every row, and doing so drops
+  the rows' own toggles.
+- Added: a left click selects the row under it, as Ctrl-P and Ctrl-N do;
+  a click on the row already selected expands or collapses it.
+- Changed: a bar above and below the input line marks where you type.
+- Added: Ctrl-/ (or F1) shows every key the client takes; the input's
+  placeholder says so.
+
 ## v0.0.1 - 2026-10-03
 
 First release. agentconsole is a terminal client for agents on the
