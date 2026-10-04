@@ -232,6 +232,13 @@ func (s Session) Lines() []string {
 		}
 		add("          %s: %s", label, usageLine(&u))
 	}
+	for _, model := range s.Unpriced {
+		label := model
+		if label == "" {
+			label = "(unknown)"
+		}
+		add("unpriced: %s", label)
+	}
 	if s.Priced {
 		add("cost:     $%.4f", s.Cost)
 	}

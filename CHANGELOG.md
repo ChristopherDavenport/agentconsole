@@ -7,12 +7,13 @@ versions may break the API.
 
 ## Unreleased
 
-- Added: the session pane totals token usage over the viewed line, split
-  by model when more than one model was called. With a cost source
-  (`console.WithCost`, `tui.WithCost`) it also shows the line's cost in
-  US dollars when every call was priced.
+- Added: `client.Cost` names the price hook, and `console.WithCost` /
+  `tui.WithCost` feed it to the client. The status line shows a running
+  total of token usage and the session's cost, and the session pane shows
+  usage split by model; a model without a price is named as unpriced.
 - Changed: the prompt is a wrapping text area that grows to five rows,
-  then scrolls, instead of one line that scrolled sideways.
+  then scrolls, instead of one line that scrolled sideways, and a pasted
+  value keeps its newlines.
 
 ## v0.0.3 - 2026-10-04
 

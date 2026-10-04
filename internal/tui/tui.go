@@ -105,7 +105,7 @@ type Model struct {
 	insp *inspect.Inspector
 	// cost prices one model call for the session pane; nil shows no
 	// cost.
-	cost func(model string, usage openresponses.Usage) (float64, bool)
+	cost client.Cost
 
 	// screen is the conversation or the tree; pane the detail under the
 	// conversation; frozen a read-only look at another line, nil when the
@@ -134,9 +134,7 @@ type Option func(*Model)
 // WithCost sets the function that prices one model call, in US dollars;
 // it feeds the session pane's total. Without it the pane shows tokens
 // but no cost.
-func WithCost(fn func(model string, usage openresponses.Usage) (float64, bool)) Option {
-	return func(m *Model) { m.cost = fn }
-}
+func WithCost(fn client.Cost) Option { return func(m *Model) { m.cost = fn } }
 
 // New returns the model for a backend. The caller starts [Attach] with
 // the program's Send; ctx ends the runs the model starts.
@@ -743,7 +741,7 @@ func (m *Model) View() string {
 	if !m.ready {
 		return "starting..."
 	}
-	status := feedNote(m.feedErr) + statusText(m.view, m.busy, m.aborting, m.verified)
+	status := feedNote(m.feedErr) + statusText(m.view, m.busy, m.aborting, m.verified, m.cost)
 	if m.note != "" {
 		status += " | " + m.note
 	}
@@ -782,20 +780,22 @@ func (m *Model) typing() bool {
 }
 
 // inputRowsUsed is how many screen rows the input needs for value at
-// width columns: one per line plus its soft wraps. The textarea's own
-// separator for a prompt is Enter, which we turn into a send, so newlines
-// in the value come from the placeholder and blank state rather than the
-// user; they are counted all the same.
+// width columns: each logical line contributes its soft-wrapped rows. A
+// pasted value keeps its newlines, so blank input is one row and a
+// four-line paste is four rows (more when a line wraps).
 func inputRowsUsed(value string, width int) int {
-	rows := 1
+	rows := 0
 	for line := range strings.Lines(value) {
-		rows += wrapRows([]rune(line), width) - 1
+		rows += wrapRows([]rune(line), width)
 	}
 	return max(rows, 1)
 }
 
 // wrapRows counts the rows wrap admits for one logical line, with the
-// same algorithm the textarea applies.
+// same algorithm the textarea applies. It is a copy of the unexported
+// wrap function in charmbracelet/bubbles@v1.0.0's textarea package;
+// bubbles exposes nothing better, so keep this in step when bubbles is
+// upgraded.
 func wrapRows(runes []rune, width int) int {
 	var (
 		lines  = [][]rune{{}}

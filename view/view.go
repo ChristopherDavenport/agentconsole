@@ -238,6 +238,10 @@ type Model struct {
 	Origin Origin
 	// Config is the model in force at the leaf, by the record.
 	Config string
+	// Usage is the token usage of the viewed line's model calls, and
+	// UsageByModel the same split by the model each call was made under.
+	Usage        openresponses.Usage
+	UsageByModel map[string]openresponses.Usage
 	// Rows is the path's visible items, then the live rows.
 	Rows        []Row
 	Turn        Turn
@@ -1055,6 +1059,7 @@ func (v *View) Model() Model {
 		Links:   append([]Link(nil), v.links...),
 	}
 	m.Branches = append([]Branch(nil), v.branches...)
+	m.Usage, m.UsageByModel = pathUsage(v.path)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c
