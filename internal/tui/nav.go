@@ -36,6 +36,7 @@ type screen int
 const (
 	screenConversation screen = iota
 	screenTree
+	screenKeys // the list of keys (keys.go)
 )
 
 type pane int

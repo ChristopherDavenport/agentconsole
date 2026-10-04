@@ -13,6 +13,8 @@ versions may break the API.
 - Added: a left click selects the row under it, as Ctrl-P and Ctrl-N do;
   a click on the row already selected expands or collapses it.
 - Changed: a bar above and below the input line marks where you type.
+- Added: Ctrl-/ (or F1) shows every key the client takes; the input's
+  placeholder says so.
 
 ## v0.0.1 - 2026-10-03
 
