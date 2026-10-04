@@ -40,6 +40,12 @@ const who = "human"
 // started.
 type runDoneMsg struct{ err error }
 
+// replyDoneMsg is a reply to a question sent, or the error sending it.
+type replyDoneMsg struct {
+	id  string
+	err error
+}
+
 // Model is the Bubble Tea model.
 type Model struct {
 	ctx      context.Context
@@ -81,6 +87,11 @@ type Model struct {
 	decided map[string]agentturn.Answer
 	// refusing is set while the reason for a refusal is typed.
 	refusing bool
+	// replied are the questions answered whose close the view has not
+	// shown yet, by ID; refusingQ is set while a question's refusal
+	// reason is typed.
+	replied   map[string]bool
+	refusingQ bool
 
 	rec  client.Record
 	insp *inspect.Inspector
@@ -123,6 +134,7 @@ func New(ctx context.Context, be client.Backend) *Model {
 		in:       in,
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
+		replied:  map[string]bool{},
 	}
 }
 
@@ -130,6 +142,21 @@ func New(ctx context.Context, be client.Backend) *Model {
 func (m *Model) Init() tea.Cmd { return textinput.Blink }
 
 func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
+
+// question is the question being asked: the first a running call waits
+// on that has no reply yet. It is asked while the run goes, on the
+// conversation, ahead of any permission.
+func (m *Model) question() (client.Question, int, bool) {
+	if m.frozen != nil || m.screen != screenConversation {
+		return client.Question{}, 0, false
+	}
+	for i, q := range m.view.Questions {
+		if !m.replied[q.ID] {
+			return q, i, true
+		}
+	}
+	return client.Question{}, 0, false
+}
 
 // pending is the permission being asked about: the first of the ones out
 // that has no answer yet.
@@ -156,6 +183,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ModelMsg:
 		m.view = msg.Model
 		m.syncPermissions()
+		m.syncQuestions()
 		m.keepCursor()
 		m.relayout()
 		return m, m.wantPane()
@@ -191,6 +219,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.in.Focus()
 		m.relayout()
 		return m, m.wantPane()
+	case replyDoneMsg:
+		if msg.err != nil {
+			delete(m.replied, msg.id)
+			m.err = "reply: " + msg.err.Error()
+		}
+		m.relayout()
+		return m, nil
 	case FeedErrMsg:
 		m.feedErr = msg.Stream + " stream: " + msg.Err.Error()
 		m.relayout()
@@ -227,6 +262,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.in, cmd = m.in.Update(msg)
 	return m, cmd
+}
+
+// syncQuestions forgets replies to questions the view no longer lists,
+// and leaves a refusal being typed for one that closed without it.
+func (m *Model) syncQuestions() {
+	open := map[string]bool{}
+	for _, q := range m.view.Questions {
+		open[q.ID] = true
+	}
+	for id := range m.replied {
+		if !open[id] {
+			delete(m.replied, id)
+		}
+	}
+	if _, _, ok := m.question(); !ok && m.refusingQ {
+		m.refusingQ = false
+		m.in.Reset()
+	}
 }
 
 // syncPermissions forgets answers for calls no longer out: the permission
@@ -366,6 +419,9 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	}
+	if q, _, ok := m.question(); ok {
+		return m.questionKey(msg, q)
+	}
 	if p, _, ok := m.pending(); ok {
 		return m.permissionKey(msg, p)
 	}
@@ -407,6 +463,48 @@ func (m *Model) permissionKey(msg tea.KeyMsg, p view.Permission) (tea.Model, tea
 		m.relayout()
 	}
 	return m, nil
+}
+
+// questionKey handles a key while a question is asked, as permissionKey
+// does a permission's: y allows, n starts a refusal whose optional
+// reason is typed, Enter sends it and Esc goes back.
+func (m *Model) questionKey(msg tea.KeyMsg, q client.Question) (tea.Model, tea.Cmd) {
+	if m.refusingQ {
+		switch msg.Type {
+		case tea.KeyEnter:
+			note := strings.TrimSpace(m.in.Value())
+			m.in.Reset()
+			m.refusingQ = false
+			return m.reply(q, client.Reply{Note: note})
+		case tea.KeyEsc:
+			m.in.Reset()
+			m.refusingQ = false
+			m.relayout()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.in, cmd = m.in.Update(msg)
+		return m, cmd
+	}
+	switch msg.String() {
+	case "y", "Y":
+		return m.reply(q, client.Reply{Accept: true})
+	case "n", "N":
+		m.refusingQ = true
+		m.in.Reset()
+		m.relayout()
+	}
+	return m, nil
+}
+
+// reply sends the answer to q. The call that asked goes on at once, so
+// nothing waits on it here; the panel moves to the next question.
+func (m *Model) reply(q client.Question, r client.Reply) (tea.Model, tea.Cmd) {
+	m.replied[q.ID] = true
+	m.err = ""
+	m.relayout()
+	ctl := m.ctl
+	return m, func() tea.Msg { return replyDoneMsg{id: q.ID, err: ctl.Reply(q.ID, r)} }
 }
 
 func refusal(p view.Permission, reason string) agentturn.Answer {
@@ -522,7 +620,9 @@ func (m *Model) relayout() {
 	}
 	m.reveal = false
 	m.drawn = m.screen
-	if _, _, ok := m.pending(); ok && !m.refusing {
+	_, _, asking := m.question()
+	_, _, permitting := m.pending()
+	if (asking && !m.refusingQ) || (!asking && permitting && !m.refusing) {
 		m.in.Blur()
 	} else {
 		m.in.Focus()
@@ -540,8 +640,11 @@ func (m *Model) showLine(line, height int) {
 	}
 }
 
-// panel is the permission being asked about, if one is.
+// panel is the question or the permission being asked about, if one is.
 func (m *Model) panel() string {
+	if q, i, ok := m.question(); ok {
+		return m.questionPanel(q, i)
+	}
 	p, i, ok := m.pending()
 	if !ok {
 		return ""
@@ -558,6 +661,30 @@ func (m *Model) panel() string {
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
 	} else {
 		b.WriteString("\n  [y] approve   [n] refuse")
+	}
+	return wrap(b.String(), max(m.width, 10))
+}
+
+// questionPanel is the panel for a question a running call asked.
+func (m *Model) questionPanel(q client.Question, i int) string {
+	var b strings.Builder
+	b.WriteString(warnStyle.Render("Question") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Questions)) + ")")
+	if q.Call != nil {
+		b.WriteString(": " + q.Call.Name)
+		if q.Call.Arguments != "" {
+			b.WriteString(" " + clipLine(q.Call.Arguments, false))
+		}
+	}
+	if q.Text != "" {
+		b.WriteString("\n  " + q.Text)
+	}
+	switch {
+	case m.refusingQ:
+		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
+	case q.Call != nil:
+		b.WriteString("\n  [y] allow   [n] refuse")
+	default:
+		b.WriteString("\n  [y] yes   [n] no")
 	}
 	return wrap(b.String(), max(m.width, 10))
 }

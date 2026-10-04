@@ -177,6 +177,7 @@ func deferAll(reason string) func(context.Context, agentturn.ToolCallInfo) (*age
 // and the commands the model returns run on goroutines whose results come
 // back as messages, as the program does.
 type app struct {
+	be     *native.Backend
 	t      *testing.T
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -225,7 +226,7 @@ func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{t: t, ctx: ctx, cancel: cancel, m: tui.New(ctx, be), store: store, rec: rec}
+	a := &app{t: t, ctx: ctx, cancel: cancel, m: tui.New(ctx, be), store: store, rec: rec, be: be}
 	a.wait = tui.Attach(ctx, be, func(msg tea.Msg) {
 		if _, ok := msg.(tui.ModelMsg); ok {
 			time.Sleep(time.Duration(a.feedDelay.Load()))
