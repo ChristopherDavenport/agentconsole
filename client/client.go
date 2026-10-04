@@ -20,6 +20,10 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 )
 
+// Cost prices one model call in US dollars. It reports false for a model
+// it has no price for.
+type Cost func(model string, usage openresponses.Usage) (float64, bool)
+
 // Backend is one agent the client drives.
 type Backend interface {
 	Control() Control

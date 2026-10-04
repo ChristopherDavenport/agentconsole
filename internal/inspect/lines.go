@@ -2,6 +2,7 @@ package inspect
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,15 @@ func clip(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+func sortedUsageModels(m map[string]openresponses.Usage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func usageLine(u *openresponses.Usage) string {
@@ -211,6 +221,27 @@ func (s Session) Lines() []string {
 		add("created:  %s", s.Created.Local().Format(time.DateTime))
 	}
 	add("entries:  %d, %d on the viewed line", s.Entries, s.Path)
+	if s.Usage.TotalTokens > 0 || s.Usage.InputTokens > 0 || s.Usage.OutputTokens > 0 {
+		add("tokens:   %s", usageLine(&s.Usage))
+	}
+	for _, model := range sortedUsageModels(s.UsageByModel) {
+		u := s.UsageByModel[model]
+		label := model
+		if label == "" {
+			label = "(unknown)"
+		}
+		add("          %s: %s", label, usageLine(&u))
+	}
+	for _, model := range s.Unpriced {
+		label := model
+		if label == "" {
+			label = "(unknown)"
+		}
+		add("unpriced: %s", label)
+	}
+	if s.Priced {
+		add("cost:     $%.4f", s.Cost)
+	}
 	if s.ParentSession != "" {
 		o := "from " + s.ParentSession
 		if s.Base != "" {

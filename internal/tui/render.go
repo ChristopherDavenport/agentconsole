@@ -8,6 +8,7 @@ import (
 
 	"github.com/ChristopherDavenport/openresponses"
 
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -253,8 +254,8 @@ func indent(s, pad string) string {
 }
 
 // statusText is the turn view: the run's state, the model and attempt,
-// the turn number.
-func statusText(m view.Model, busy, aborting, verified bool) string {
+// the turn number, and the session's running token use and cost.
+func statusText(m view.Model, busy, aborting, verified bool, cost client.Cost) string {
 	state := "idle"
 	switch {
 	case aborting:
@@ -265,6 +266,19 @@ func statusText(m view.Model, busy, aborting, verified bool) string {
 		state = "requires action"
 	}
 	parts := []string{state}
+	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
+		usage := fmt.Sprintf("tokens %s in, %s out", compactTokens(m.Usage.InputTokens), compactTokens(m.Usage.OutputTokens))
+		if cost != nil {
+			p := view.Price(m.UsageByModel, cost)
+			switch {
+			case p.Priced:
+				usage += fmt.Sprintf(", $%.4f", p.Total)
+			case len(p.Unpriced) > 0:
+				usage += fmt.Sprintf(", unpriced: %s", strings.Join(p.Unpriced, ", "))
+			}
+		}
+		parts = append(parts, usage)
+	}
 	model := m.Turn.Model
 	if model == "" {
 		model = m.Config
@@ -292,4 +306,16 @@ func statusText(m view.Model, busy, aborting, verified bool) string {
 		parts = append(parts, "last reply withheld")
 	}
 	return strings.Join(parts, " | ")
+}
+
+// compactTokens shortens a token count for the status line: the full count
+// in the panes would push the dollar figure past the terminal's edge.
+func compactTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprint(n)
 }

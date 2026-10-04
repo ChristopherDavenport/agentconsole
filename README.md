@@ -68,8 +68,11 @@ and the API key from the environment variable named by `--api-key-env`
 In the terminal: Enter sends a prompt, or steers while a run is going;
 Ctrl-C (or SIGINT) aborts a run, and quits when idle; PgUp, PgDn, Ctrl-Up,
 Ctrl-Down, Ctrl-Home, Ctrl-End and the mouse wheel scroll the conversation,
-while the arrows, Home and End edit the input line; Ctrl-R shows reasoning; Ctrl-O shows tool
-arguments and output in full. When a tool call needs permission, y
+while the prompt wraps over up to five lines, then scrolls, and the
+arrows, Home and End move the cursor within it; Ctrl-R shows reasoning; Ctrl-O shows tool
+arguments and output in full. The status line keeps a running total of
+tokens used and, when the host supplies a price source, what the session
+has cost. When a tool call needs permission, y
 approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 
@@ -90,4 +93,5 @@ The tree and the record detail:
   request verifies and why not, the response's model and usage, a call's
   policy decision, who decided, dispatch, output and skill grants, what a
   compaction folded), then the session summary (header, verification over
-  the line, config, refs, memory manifest), then closes the pane.
+  the line, token usage by model, config, refs, memory manifest, and the
+  cost when a host supplies a price source), then closes the pane.

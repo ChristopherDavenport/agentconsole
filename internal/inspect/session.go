@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // Session is the session-level summary pane.
@@ -27,6 +30,18 @@ type Session struct {
 
 	// Verify is the tally over the responses on the viewed line.
 	Verify PathVerify
+	// Usage is the token usage of the model calls on the viewed line,
+	// responses and folds.
+	Usage openresponses.Usage
+	// UsageByModel is Usage split by the model each call was made under.
+	UsageByModel map[string]openresponses.Usage
+	// Cost is the viewed line's cost in US dollars under the cost source,
+	// and Priced says every call was priced (false with no source).
+	Cost   float64
+	Priced bool
+	// Unpriced lists the models that have usage on the viewed line but
+	// that the cost source has no price for, sorted.
+	Unpriced []string
 	// Config is what the record has in force at the end of the line.
 	Config Config
 	// Refs are the refs that point at the session, RefsErr why they could
@@ -158,5 +173,14 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 	out.ManifestRefused = refused
 	all, _, _ := grants(path)
 	out.Grants = all
+	in.usage(&out, path)
 	return out, nil
+}
+
+// usage fills the pane's token and cost summary from the shared view
+// usage walk, priced by the inspector's cost source when one was given.
+func (in *Inspector) usage(out *Session, path []agentsession.Entry) {
+	out.Usage, out.UsageByModel = view.Usage(path)
+	p := view.Price(out.UsageByModel, in.cost)
+	out.Cost, out.Priced, out.Unpriced = p.Total, p.Priced, p.Unpriced
 }

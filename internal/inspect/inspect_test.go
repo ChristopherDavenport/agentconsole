@@ -57,6 +57,24 @@ func say(text string) step {
 	}
 }
 
+func usageSay(in, out int, text string) step {
+	return func(_ context.Context, em *openresponses.Emitter) error {
+		em.Response().Usage = &openresponses.Usage{
+			InputTokens:  in,
+			OutputTokens: out,
+			TotalTokens:  in + out,
+		}
+		w, err := em.Message(openresponses.PhaseFinalAnswer)
+		if err != nil {
+			return err
+		}
+		if err := w.Text(text); err != nil {
+			return err
+		}
+		return w.Close()
+	}
+}
+
 func callTool(callID, name, args string) step {
 	return func(_ context.Context, em *openresponses.Emitter) error {
 		w, err := em.FunctionCall(callID, name)
@@ -178,6 +196,71 @@ func TestAResponseVerifiesAndShowsItsModel(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("the detail lacks %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestSessionUsageAndCost(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "priced", Model: &script{responses: []step{
+		usageSay(100, 20, "one"), usageSay(200, 30, "two"),
+	}}}
+	r := newRig(t, cfg)
+	r.in = inspect.New(r.be.Record(), inspect.WithCost(func(model string, u openresponses.Usage) (float64, bool) {
+		if model != "priced" {
+			return 0, false
+		}
+		return (float64(u.InputTokens) + 2*float64(u.OutputTokens)) / 1000, true
+	}))
+	r.prompt("one")
+	r.prompt("two")
+	m := r.model()
+	s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage.InputTokens != 300 || s.Usage.OutputTokens != 50 || s.Usage.TotalTokens != 350 {
+		t.Errorf("usage = %+v", s.Usage)
+	}
+	if len(s.UsageByModel) != 1 {
+		t.Fatalf("usage by model = %+v", s.UsageByModel)
+	}
+	if got := s.UsageByModel["priced"]; got.InputTokens != 300 || got.OutputTokens != 50 {
+		t.Errorf("priced model usage = %+v", got)
+	}
+	if !s.Priced || s.Cost != 0.4 {
+		t.Errorf("cost = %v priced %v, want $0.4000", s.Cost, s.Priced)
+	}
+	text := joined(s.Lines())
+	for _, want := range []string{"tokens:   300 in, 50 out, 350 total", "priced: 300 in, 50 out, 350 total", "cost:     $0.4000"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the session pane lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestSessionUsageNamesUnpricedModels(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "provider/model-name", Model: &script{responses: []step{usageSay(10, 5, "hi")}}}
+	r := newRig(t, cfg)
+	r.in = inspect.New(r.be.Record(), inspect.WithCost(func(string, openresponses.Usage) (float64, bool) {
+		return 0, false
+	}))
+	r.prompt("go")
+	m := r.model()
+	s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Priced {
+		t.Fatalf("the line was shown as priced with no priced model: %+v", s)
+	}
+	if len(s.Unpriced) != 1 || s.Unpriced[0] != "provider/model-name" {
+		t.Fatalf("unpriced = %v, want the full recorded model name", s.Unpriced)
+	}
+	text := joined(s.Lines())
+	if !strings.Contains(text, "unpriced: provider/model-name") {
+		t.Errorf("the session pane does not say which model was unpriced:\n%s", text)
+	}
+	if strings.Contains(text, "cost:") {
+		t.Errorf("cost was shown for an unpriced line:\n%s", text)
 	}
 }
 
