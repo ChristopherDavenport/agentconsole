@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.2 - 2026-10-03
 
 - Added: with a row selected, Ctrl-O and Ctrl-R expand or collapse that
   row alone; with none they still apply to every row, and doing so drops
