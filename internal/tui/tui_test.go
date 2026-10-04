@@ -419,15 +419,30 @@ func TestLongPromptWrapsInsteadOfScrollingSideways(t *testing.T) {
 func TestPastedNewlinesCountAsRows(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hi")))
 	a.exchange("hello", "hi")
-	a.m.PasteForTest("first line\nsecond line\nthird line\nfourth line")
+	a.paste("first line\nsecond line\nthird line\nfourth line")
 	s := a.screen()
 	lines := strings.Split(s, "\n")
 	if len(lines) != 30 {
 		t.Fatalf("the screen is %d lines on a 30-line terminal:\n%s", len(lines), s)
 	}
-	for _, want := range []string{"first line", "second line", "third line", "fourth line"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("the pasted line %q is not visible:\n%s", want, s)
+	// The paste keeps its newlines: each pasted line is its own screen
+	// row, one after the other, not one long row.
+	row := -1
+	for i, l := range lines {
+		if strings.Contains(l, "first line") {
+			row = i
+			break
+		}
+	}
+	if row == -1 {
+		t.Fatalf("the paste is not visible:\n%s", s)
+	}
+	if row+3 >= len(lines) {
+		t.Fatalf("the paste did not expand to four rows:\n%s", s)
+	}
+	for i, want := range []string{"second line", "third line", "fourth line"} {
+		if !strings.Contains(lines[row+1+i], want) {
+			t.Fatalf("the pasted lines share one row; %q is not the row after the last:\n%s", want, s)
 		}
 	}
 }

@@ -1059,7 +1059,7 @@ func (v *View) Model() Model {
 		Links:   append([]Link(nil), v.links...),
 	}
 	m.Branches = append([]Branch(nil), v.branches...)
-	m.Usage, m.UsageByModel = pathUsage(v.path)
+	m.Usage, m.UsageByModel = Usage(v.path)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -267,6 +266,19 @@ func statusText(m view.Model, busy, aborting, verified bool, cost client.Cost) s
 		state = "requires action"
 	}
 	parts := []string{state}
+	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
+		usage := fmt.Sprintf("tokens %s in, %s out", compactTokens(m.Usage.InputTokens), compactTokens(m.Usage.OutputTokens))
+		if cost != nil {
+			p := view.Price(m.UsageByModel, cost)
+			switch {
+			case p.Priced:
+				usage += fmt.Sprintf(", $%.4f", p.Total)
+			case len(p.Unpriced) > 0:
+				usage += fmt.Sprintf(", unpriced: %s", strings.Join(p.Unpriced, ", "))
+			}
+		}
+		parts = append(parts, usage)
+	}
 	model := m.Turn.Model
 	if model == "" {
 		model = m.Config
@@ -287,19 +299,6 @@ func statusText(m view.Model, busy, aborting, verified bool, cost client.Cost) s
 		}
 		parts = append(parts, "session "+s)
 	}
-	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
-		usage := fmt.Sprintf("tokens %d in, %d out", m.Usage.InputTokens, m.Usage.OutputTokens)
-		if cost != nil {
-			total, ok, unpriced := priceTotals(m.UsageByModel, cost)
-			switch {
-			case ok:
-				usage += fmt.Sprintf(", $%.4f", total)
-			case len(unpriced) > 0:
-				usage += fmt.Sprintf(", unpriced: %s", strings.Join(unpriced, ", "))
-			}
-		}
-		parts = append(parts, usage)
-	}
 	if !verified {
 		parts = append(parts, "unverified")
 	}
@@ -309,37 +308,14 @@ func statusText(m view.Model, busy, aborting, verified bool, cost client.Cost) s
 	return strings.Join(parts, " | ")
 }
 
-// priceTotals prices the viewed line's usage by model. Cost hooks are
-// linear over the usage they are given (the price table's are), so each
-// model's aggregate can be priced once. Unpriced lists the models the hook
-// has no price for, sorted.
-func priceTotals(byModel map[string]openresponses.Usage, cost client.Cost) (total float64, ok bool, unpriced []string) {
-	if cost == nil || len(byModel) == 0 {
-		return 0, false, nil
+// compactTokens shortens a token count for the status line: the full count
+// in the panes would push the dollar figure past the terminal's edge.
+func compactTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
-	models := make([]string, 0, len(byModel))
-	for m := range byModel {
-		models = append(models, m)
-	}
-	sort.Strings(models)
-	ok = true
-	for _, m := range models {
-		usd, priced := cost(m, byModel[m])
-		if !priced {
-			ok = false
-			unpriced = append(unpriced, labelModel(m))
-			continue
-		}
-		if ok {
-			total += usd
-		}
-	}
-	return total, ok, unpriced
-}
-
-func labelModel(m string) string {
-	if m == "" {
-		return "(unknown)"
-	}
-	return m
+	return fmt.Sprint(n)
 }

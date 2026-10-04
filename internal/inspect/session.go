@@ -2,14 +2,14 @@ package inspect
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
-	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // Session is the session-level summary pane.
@@ -177,95 +177,10 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 	return out, nil
 }
 
-// usage sums the token usage of every model call on the path, and prices
-// it when a cost source was given and every call was priced.
+// usage fills the pane's token and cost summary from the shared view
+// usage walk, priced by the inspector's cost source when one was given.
 func (in *Inspector) usage(out *Session, path []agentsession.Entry) {
-	var u openresponses.Usage
-	byModel := map[string]openresponses.Usage{}
-	cost := 0.0
-	priced := in.cost != nil
-	unpriced := map[string]bool{}
-	model := ""
-	for _, e := range path {
-		var eu *openresponses.Usage
-		m := model
-		switch v := e.(type) {
-		case *agentsession.ConfigEntry:
-			if v.Replace {
-				model = ""
-			}
-			if v.Model != "" {
-				model = v.Model
-			}
-			continue
-		case *agentsession.ResponseEntry:
-			eu = v.Usage
-			if v.Model != "" {
-				m = v.Model
-			}
-		case *agentsession.CompactionEntry:
-			model = v.Config.Model
-			eu, m = v.Usage, v.Config.Model
-		case *agentsession.BranchSummaryEntry:
-			eu = v.Usage
-		case *agentsession.CustomEntry:
-			// A fold that failed still made its summary calls, and paid
-			// for them; the entry holds their usage summed. It leaves the
-			// model in force as it was.
-			if v.NS != session.FailedFoldNS {
-				continue
-			}
-			var f session.FailedFold
-			if json.Unmarshal(v.Data, &f) != nil {
-				continue
-			}
-			eu = f.Usage
-			if f.Model != "" {
-				m = f.Model
-			}
-		default:
-			continue
-		}
-		if eu == nil {
-			continue
-		}
-		addUsage(&u, eu)
-		b := byModel[m]
-		addUsage(&b, eu)
-		byModel[m] = b
-		if in.cost != nil {
-			usd, ok := in.cost(m, *eu)
-			if !ok {
-				priced = false
-				unpriced[m] = true
-			} else if priced {
-				cost += usd
-			}
-		}
-	}
-	out.Usage = u
-	out.UsageByModel = byModel
-	out.Unpriced = sortedModelNames(unpriced)
-	if priced {
-		out.Cost, out.Priced = cost, true
-	}
-}
-
-// sortedModelNames returns the keys of set in order.
-func sortedModelNames(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for m := range set {
-		out = append(out, m)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// addUsage adds src's counts into dst.
-func addUsage(dst *openresponses.Usage, src *openresponses.Usage) {
-	dst.InputTokens += src.InputTokens
-	dst.OutputTokens += src.OutputTokens
-	dst.TotalTokens += src.TotalTokens
-	dst.InputTokensDetails.CachedTokens += src.InputTokensDetails.CachedTokens
-	dst.OutputTokensDetails.ReasoningTokens += src.OutputTokensDetails.ReasoningTokens
+	out.Usage, out.UsageByModel = view.Usage(path)
+	p := view.Price(out.UsageByModel, in.cost)
+	out.Cost, out.Priced, out.Unpriced = p.Total, p.Priced, p.Unpriced
 }
