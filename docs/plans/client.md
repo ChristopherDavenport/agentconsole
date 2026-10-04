@@ -439,9 +439,10 @@ headless) changed the sketch in these places.
   stay on the record, the summary's length and start, the pinned items, the
   tokens before, the fold's own model call). The session pane: id, name,
   cwd, harness, format, origin, the tally of `Verify` over the viewed line
-  with the responses that did not verify, the config in force (model,
-  instruction parts, tools), the refs that point at it and the memory
-  manifest in force.
+  with the responses that did not verify, the viewed line's token usage
+  (by model, and its cost when a price source is supplied), the config in
+  force (model, instruction parts, tools), the refs that point at it and
+  the memory manifest in force.
 - **Other products' records are decoded here, from their JSON.** The
   client depends on none of agentpolicy, agentkit or agentmemory. It reads
   `agentpolicy:verdict` (the shape in agentpolicy's `record.go`), takes a

@@ -5,6 +5,16 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: `client.Cost` names the price hook, and `console.WithCost` /
+  `tui.WithCost` feed it to the client. The status line shows a running
+  total of token usage and the session's cost, and the session pane shows
+  usage split by model; a model without a price is named as unpriced.
+- Changed: the prompt is a wrapping text area that grows to five rows,
+  then scrolls, instead of one line that scrolled sideways, and a pasted
+  value keeps its newlines.
+
 ## v0.0.3 - 2026-10-04
 
 - Added: questions a running call puts to the user. A host asks with
