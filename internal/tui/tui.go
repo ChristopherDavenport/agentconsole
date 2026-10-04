@@ -119,6 +119,15 @@ type Model struct {
 	reveal   bool
 	panes    paneState
 	treeCur  int
+	// The mouse selection (select.go): pressed is whether the left
+	// button is down, pressX and pressY where it went down, sel the region
+	// being dragged over, and lines the frame's lines, for the copy to
+	// read. copier is where a copy goes; nil draws but never copies.
+	pressed        bool
+	pressX, pressY int
+	sel            *selection
+	lines          []string
+	copier         func(string)
 	// drawn is the screen the viewport's content was last laid out for.
 	drawn screen
 	// note is the last thing a client action did, shown on the status line
@@ -279,15 +288,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	case tea.MouseMsg:
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			return m, m.click(msg.Y)
-		}
-		var cmd tea.Cmd
-		m.vp, cmd = m.vp.Update(msg)
-		return m, cmd
+		return m, m.mouse(msg)
 	case InterruptMsg:
 		return m.interrupt()
 	case tea.KeyMsg:
+		m.clearSelection()
 		return m.key(msg)
 	}
 	return m, m.updateInput(msg)
@@ -758,7 +763,14 @@ func (m *Model) View() string {
 		bar := dimStyle.Render(strings.Repeat("─", max(m.width, 1)))
 		parts = append(parts, bar, m.in.View(), bar)
 	}
-	return strings.Join(parts, "\n")
+	s := strings.Join(parts, "\n")
+	// The frame's lines, for a selection's copy to read; the selection is
+	// drawn over them without changing the text.
+	m.lines = strings.Split(s, "\n")
+	if m.sel != nil {
+		s = strings.Join(markSelection(m.lines, m.sel), "\n")
+	}
+	return s
 }
 
 // typing is whether the input line is shown, between its bars: not on the
