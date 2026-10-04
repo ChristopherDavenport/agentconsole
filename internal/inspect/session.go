@@ -39,6 +39,9 @@ type Session struct {
 	// and Priced says every call was priced (false with no source).
 	Cost   float64
 	Priced bool
+	// Unpriced lists the models that have usage on the viewed line but
+	// that the cost source has no price for, sorted.
+	Unpriced []string
 	// Config is what the record has in force at the end of the line.
 	Config Config
 	// Refs are the refs that point at the session, RefsErr why they could
@@ -179,7 +182,9 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 func (in *Inspector) usage(out *Session, path []agentsession.Entry) {
 	var u openresponses.Usage
 	byModel := map[string]openresponses.Usage{}
-	cost, priced := 0.0, in.cost != nil
+	cost := 0.0
+	priced := in.cost != nil
+	unpriced := map[string]bool{}
 	model := ""
 	for _, e := range path {
 		var eu *openresponses.Usage
@@ -228,20 +233,32 @@ func (in *Inspector) usage(out *Session, path []agentsession.Entry) {
 		b := byModel[m]
 		addUsage(&b, eu)
 		byModel[m] = b
-		if priced {
+		if in.cost != nil {
 			usd, ok := in.cost(m, *eu)
 			if !ok {
 				priced = false
-			} else {
+				unpriced[m] = true
+			} else if priced {
 				cost += usd
 			}
 		}
 	}
 	out.Usage = u
 	out.UsageByModel = byModel
+	out.Unpriced = sortedModelNames(unpriced)
 	if priced {
 		out.Cost, out.Priced = cost, true
 	}
+}
+
+// sortedModelNames returns the keys of set in order.
+func sortedModelNames(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for m := range set {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // addUsage adds src's counts into dst.

@@ -237,6 +237,33 @@ func TestSessionUsageAndCost(t *testing.T) {
 	}
 }
 
+func TestSessionUsageNamesUnpricedModels(t *testing.T) {
+	cfg := agentturn.Config{ModelName: "provider/model-name", Model: &script{responses: []step{usageSay(10, 5, "hi")}}}
+	r := newRig(t, cfg)
+	r.in = inspect.New(r.be.Record(), inspect.WithCost(func(string, openresponses.Usage) (float64, bool) {
+		return 0, false
+	}))
+	r.prompt("go")
+	m := r.model()
+	s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Priced {
+		t.Fatalf("the line was shown as priced with no priced model: %+v", s)
+	}
+	if len(s.Unpriced) != 1 || s.Unpriced[0] != "provider/model-name" {
+		t.Fatalf("unpriced = %v, want the full recorded model name", s.Unpriced)
+	}
+	text := joined(s.Lines())
+	if !strings.Contains(text, "unpriced: provider/model-name") {
+		t.Errorf("the session pane does not say which model was unpriced:\n%s", text)
+	}
+	if strings.Contains(text, "cost:") {
+		t.Errorf("cost was shown for an unpriced line:\n%s", text)
+	}
+}
+
 // A request a Transform edited is not the one the path rebuilds, so the
 // recorder writes the response with no hash and says why in an
 // agentturn:unhashed entry; the pane quotes the cause.

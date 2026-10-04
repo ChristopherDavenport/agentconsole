@@ -29,8 +29,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/ChristopherDavenport/openresponses"
-
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -47,7 +45,7 @@ type config struct {
 	width   int
 	height  int
 	warn    func(string)
-	cost    func(string, openresponses.Usage) (float64, bool)
+	cost    client.Cost
 }
 
 // Option configures [Run].
@@ -88,11 +86,9 @@ func WithoutSignalHandler() Option { return func(c *config) { c.signals = false 
 func WithWarn(fn func(string)) Option { return func(c *config) { c.warn = fn } }
 
 // WithCost prices one model call, showing the followed session's cost in
-// the session pane. fn returns a call's cost in US dollars; it receives
-// the model the call was made under and that call's usage.
-func WithCost(fn func(model string, usage openresponses.Usage) (float64, bool)) Option {
-	return func(c *config) { c.cost = fn }
-}
+// the session pane. fn returns a call's cost in US dollars, and reports
+// false for a model it has no price for.
+func WithCost(fn client.Cost) Option { return func(c *config) { c.cost = fn } }
 
 // Run runs the terminal client over be until the user quits, ctx is
 // done, or the program fails, and returns the program's error.

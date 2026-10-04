@@ -121,6 +121,24 @@ func say(g *gates, holds map[int]string, chunks ...string) step {
 	}
 }
 
+func usageSay(in, out int, text string) step {
+	return func(_ context.Context, em *openresponses.Emitter) error {
+		em.Response().Usage = &openresponses.Usage{
+			InputTokens:  in,
+			OutputTokens: out,
+			TotalTokens:  in + out,
+		}
+		w, err := em.Message(openresponses.PhaseFinalAnswer)
+		if err != nil {
+			return err
+		}
+		if err := w.Text(text); err != nil {
+			return err
+		}
+		return w.Close()
+	}
+}
+
 func think(text string, then step) step {
 	return func(ctx context.Context, em *openresponses.Emitter) error {
 		w, err := em.Reasoning()

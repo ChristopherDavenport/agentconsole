@@ -46,6 +46,12 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	}
 }
 
+func TestRunningTokenTotalShowsOnTheStatusLine(t *testing.T) {
+	a := newApp(t, cfgWith(usageSay(100, 20, "hi")))
+	a.submit("go")
+	a.waitFor("the running token total", all(has("tokens 100 in, 20 out", "hi", "idle")))
+}
+
 func TestReasoningIsCollapsedUntilToggled(t *testing.T) {
 	a := newApp(t, cfgWith(think("secret musings", say(nil, nil, "answer"))))
 	a.submit("q")
@@ -407,6 +413,22 @@ func TestLongPromptWrapsInsteadOfScrollingSideways(t *testing.T) {
 	}
 	if wrapped < 2 {
 		t.Fatalf("the long prompt did not wrap to more than one line:\n%s", s)
+	}
+}
+
+func TestPastedNewlinesCountAsRows(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	a.exchange("hello", "hi")
+	a.m.PasteForTest("first line\nsecond line\nthird line\nfourth line")
+	s := a.screen()
+	lines := strings.Split(s, "\n")
+	if len(lines) != 30 {
+		t.Fatalf("the screen is %d lines on a 30-line terminal:\n%s", len(lines), s)
+	}
+	for _, want := range []string{"first line", "second line", "third line", "fourth line"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("the pasted line %q is not visible:\n%s", want, s)
+		}
 	}
 }
 
