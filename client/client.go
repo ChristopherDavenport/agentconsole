@@ -48,6 +48,10 @@ type Control interface {
 	// reply to a permission request.
 	Answer(ctx context.Context, answers ...agentturn.Answer) error
 	State() agentturn.State
+	// Reply answers a question a running call asked ([QuestionAsked]).
+	// It returns at once; the call goes on. A question already closed is
+	// an error.
+	Reply(id string, r Reply) error
 	// ContinueFrom moves the agent's head to the entry: the next prompt
 	// continues the conversation from there, on a branch of the session.
 	// It is how a client acts on what it saw in the tree, and the one
