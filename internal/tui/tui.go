@@ -111,7 +111,7 @@ var _ tea.Model = (*Model)(nil)
 func New(ctx context.Context, be client.Backend) *Model {
 	in := textinput.New()
 	in.Prompt = "> "
-	in.Placeholder = "say something"
+	in.Placeholder = "say something (ctrl+/ for keys)"
 	in.Focus()
 	return &Model{
 		ctx:      ctx,
@@ -281,6 +281,15 @@ func (m *Model) Drain(timeout time.Duration) bool {
 }
 
 func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if isKeysKey(msg) {
+		if m.screen == screenKeys {
+			m.screen = screenConversation
+		} else {
+			m.screen = screenKeys
+		}
+		m.relayout()
+		return m, nil
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		return m.interrupt()
@@ -322,8 +331,11 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggle(opts{output: true})
 		return m, nil
 	}
-	if m.screen == screenTree {
+	switch m.screen {
+	case screenTree:
 		return m.treeKey(msg)
+	case screenKeys:
+		return m.keysKey(msg)
 	}
 	switch msg.String() {
 	case "tab":
@@ -479,6 +491,14 @@ func (m *Model) relayout() {
 	}
 	m.vp.Width = m.width
 	m.vp.Height = max(m.height-used, 1)
+	if m.screen == screenKeys {
+		m.vp.SetContent(wrap(renderKeys(), max(m.width, 10)))
+		if m.drawn != m.screen {
+			m.vp.GotoTop()
+		}
+		m.drawn = m.screen
+		return
+	}
 	if m.screen == screenTree {
 		content, line := m.renderTree()
 		m.vp.SetContent(content)
@@ -577,6 +597,8 @@ func (m *Model) View() string {
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))
+	case m.screen == screenKeys:
+		parts = append(parts, dimStyle.Render(truncate("keys: esc, q or ctrl+/ back; pgup/pgdn scroll", m.width)))
 	case m.frozen != nil:
 		parts = append(parts, dimStyle.Render(truncate("read only: esc back to the live session, c continue from here, tab detail", m.width)))
 	default:
@@ -587,9 +609,10 @@ func (m *Model) View() string {
 }
 
 // typing is whether the input line is shown, between its bars: not on the
-// tree, nor on a read-only view, whose last line is the keys' hint instead.
+// tree or the keys, nor on a read-only view, whose last line is a hint
+// instead.
 func (m *Model) typing() bool {
-	return m.screen != screenTree && m.frozen == nil
+	return m.screen == screenConversation && m.frozen == nil
 }
 
 func padTo(s string, w int) string {

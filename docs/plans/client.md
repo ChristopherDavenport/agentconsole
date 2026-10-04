@@ -457,7 +457,12 @@ headless) changed the sketch in these places.
   names the writer only in the headers of child sessions; the binary now
   puts the harness and the working directory in the header of a session it
   starts (the summary pane showed neither).
-- **Keys.** `ctrl+t` switches between the conversation and the tree (in
+- **Keys.** `ctrl+/` (or `f1`) shows the list of keys and takes no input
+  until `esc`, `q` or `ctrl+/` closes it. A terminal sends Ctrl-/ as the
+  unit separator, which bubbletea names `ctrl+_`; Ctrl-? (Ctrl-Shift-/)
+  comes the same way in most terminals and as DEL in the rest, where it
+  cannot be told from backspace, so F1 opens it too. `ctrl+t` switches
+  between the conversation and the tree (in
   the tree: up/down or k/j, `enter` views the branch or opens the origin,
   `c` continues from the branch, `esc` goes back). In the conversation
   `ctrl+p` and `ctrl+n` move a row cursor (a marker in the gutter; `esc`

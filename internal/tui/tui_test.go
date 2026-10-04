@@ -406,3 +406,35 @@ func TestTheInputSitsBetweenTwoBarsAndTheScreenStillFits(t *testing.T) {
 		t.Fatalf("the tree shows the input's bars:\n%s", s)
 	}
 }
+
+func TestCtrlSlashOrF1ShowsTheKeysAndTakesNoInput(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	a.exchange("hello", "hi")
+	if s := a.screen(); !strings.Contains(s, "ctrl+/ for keys") {
+		t.Fatalf("the input does not say how to get the keys:\n%s", s)
+	}
+	for _, open := range []tea.KeyType{tea.KeyCtrlUnderscore, tea.KeyF1} {
+		a.key(open)
+		s := a.screen()
+		for _, want := range []string{"Ctrl-P Ctrl-N", "Permissions", "Tree (Ctrl-T)", "esc, q or ctrl+/ back"} {
+			if !strings.Contains(s, want) {
+				t.Fatalf("%v: the keys screen lacks %q:\n%s", open, want, s)
+			}
+		}
+		if strings.Contains(s, "> ") || strings.Contains(s, "hello") {
+			t.Fatalf("%v: the keys screen shows the input or the conversation:\n%s", open, s)
+		}
+		a.typeText("x") // typed on the keys screen, it goes nowhere
+		a.key(open)
+		s = a.screen()
+		if !strings.Contains(s, "hello") || strings.Contains(s, "Permissions") {
+			t.Fatalf("%v: the keys screen did not close:\n%s", open, s)
+		}
+		if strings.Contains(lineWith(s, "> "), "x") {
+			t.Fatalf("%v: a key typed on the keys screen reached the input:\n%s", open, s)
+		}
+	}
+	a.key(tea.KeyF1)
+	a.rune('q')
+	a.waitFor("q closes the keys", all(has("hello"), lacks("Permissions")))
+}

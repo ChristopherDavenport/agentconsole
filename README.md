@@ -70,7 +70,8 @@ Ctrl-C (or SIGINT) aborts a run, and quits when idle; PgUp, PgDn, Ctrl-Up,
 Ctrl-Down, Ctrl-Home, Ctrl-End and the mouse wheel scroll the conversation,
 while the arrows, Home and End edit the input line; Ctrl-R shows reasoning; Ctrl-O shows tool
 arguments and output in full. When a tool call needs permission, y
-approves and n refuses, with an optional reason.
+approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
+key; Esc, q or Ctrl-/ again goes back.
 
 The tree and the record detail:
 
