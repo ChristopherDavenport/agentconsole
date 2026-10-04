@@ -572,9 +572,37 @@ imports agentconsole and runs the client over its own agentkit kit.
   takes the function that answers a tool's question; the kit files the
   question and answer under the call, in the recorder of the run's context,
   which the backend puts there, and the detail pane shows them. The
-  terminal client has no screen for a question yet, so `fn` answers (dex
-  already supplies one). A contract extension for a question, a live
-  event and an answer control, waits for a client that shows one.
+  embedder's `fn` puts the question to the client through `Ask` (below).
+
+## Decided in implementation, step 6 (questions)
+
+- **A question is asked while the run goes.** A sub-agent's call its
+  policy holds, or a tool's own question, waits inside a running call;
+  the run cannot end input-required and resume, as a permission does,
+  without cutting the call off. So a question is its own thing in the
+  contract: `client.Question` (an ID, the call it is about when there is
+  one, the text) and `client.Reply` (accept, and a note). The extension
+  the step 5 note left waiting is this one.
+- **The host asks through the backend.** `native.Backend.Ask(ctx, q)`
+  blocks until a client replies or ctx ends; `kitbackend` has it by
+  embedding. It is not on `Control`: the asking side is the host's code
+  (dex's sub-agent policy, its tool elicitor), not the client's. The
+  answer is: `Control.Reply(id, r)` returns at once, since the call goes
+  on by itself.
+- **Questions travel as live events and are not recorded here.**
+  `QuestionAsked` and `QuestionClosed` (with the reply, or nil when the
+  asking call gave up, an abort) reach every `Live` subscriber, and a
+  subscriber that attaches while one waits is sent it, unlike past agent
+  events: it still wants an answer. What the user decided is the asker's
+  to record, as a decision of the sub-agent's call or the kit's filed
+  elicitation; the client shows it from the record like any other.
+- **Their `Run` is empty.** The asker may not know the run, and a
+  question is answered by its ID; nothing filters live events by run.
+- **The TUI asks a question ahead of a permission**, on the conversation,
+  while the run goes: `y` allows (or says yes, for a tool's own question),
+  `n` refuses with an optional reason typed in the input, `Esc` goes back.
+  A reply hides its panel at once; the close event, when the view shows
+  it, drops the question.
 - **Resume is the kit's.** An embedder passes a kit built with
   `WithResumedSession`; `kit.AgentOptions()` seeds the agent with the
   transcript and the calls pending at the leaf, and `New` already granted

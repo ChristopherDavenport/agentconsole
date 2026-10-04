@@ -4,8 +4,9 @@
 // backends follow.
 //
 // Control is the agent's. Live is the agent's Subscribe, narrowed by
-// [client.FromEvent]. Record is the store's Follow, which wakes on each
-// append with no polling.
+// [client.FromEvent], with the questions [Backend.Ask] puts to the user.
+// Record is the store's Follow, which wakes on each append with no
+// polling.
 package native
 
 import (
@@ -41,6 +42,8 @@ type Backend struct {
 
 	// afterRebase is a test seam: it runs after the recorder moved.
 	afterRebase func() error
+
+	asks asks
 }
 
 var _ client.Backend = (*Backend)(nil)
@@ -434,11 +437,16 @@ func (b *Backend) Live(ctx context.Context) iter.Seq2[client.LiveEvent, error] {
 		}
 		return nil
 	})
+	// The questions already waiting are the subscriber's to see, unlike
+	// the agent's past events: one asked before the client attached is
+	// still waiting for it.
+	b.asks.subscribe(q)
 	stop := context.AfterFunc(ctx, unsub)
 	return func(yield func(client.LiveEvent, error) bool) {
 		defer func() {
 			stop()
 			unsub()
+			b.asks.unsubscribe(q)
 		}()
 		for {
 			batch := q.take()
@@ -485,4 +493,94 @@ func (q *queue) take() []client.LiveEvent {
 	out := q.evs
 	q.evs = nil
 	return out
+}
+
+// Ask puts q to the user and waits for the reply: the hook a host gives
+// the code that asks while a call runs, a sub-agent's policy or a tool's
+// elicitor. Every [Backend.Live] subscriber, and one that subscribes
+// while q waits, gets a [client.QuestionAsked]; [client.Control.Reply]
+// answers it. When ctx ends first, an abort of the run, the question is
+// closed unanswered and Ask returns ctx's error. q.ID is set by Ask.
+func (b *Backend) Ask(ctx context.Context, q client.Question) (client.Reply, error) {
+	a := b.asks.open(q)
+	select {
+	case r := <-a.reply:
+		return r, nil
+	case <-ctx.Done():
+		b.asks.close(a.q.ID, nil)
+		return client.Reply{}, ctx.Err()
+	}
+}
+
+func (c control) Reply(id string, r client.Reply) error {
+	if !c.b.asks.close(id, &r) {
+		return fmt.Errorf("native: no question %q is waiting", id)
+	}
+	return nil
+}
+
+// asks are the questions waiting for the user and the live subscribers
+// to tell of them.
+type asks struct {
+	mu      sync.Mutex
+	seq     int
+	waiting []*ask
+	queues  map[*queue]bool
+}
+
+type ask struct {
+	q     client.Question
+	reply chan client.Reply
+}
+
+func (s *asks) open(q client.Question) *ask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	q.ID = fmt.Sprintf("q%d", s.seq)
+	a := &ask{q: q, reply: make(chan client.Reply, 1)}
+	s.waiting = append(s.waiting, a)
+	for qu := range s.queues {
+		qu.push(&client.QuestionAsked{Question: q})
+	}
+	return a
+}
+
+// close ends the question id with r, nil when it was given up, and
+// reports whether it was waiting. The reply reaches Ask before the
+// subscribers hear the question closed.
+func (s *asks) close(id string, r *client.Reply) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.waiting, func(a *ask) bool { return a.q.ID == id })
+	if i < 0 {
+		return false
+	}
+	a := s.waiting[i]
+	s.waiting = slices.Delete(s.waiting, i, i+1)
+	if r != nil {
+		a.reply <- *r
+	}
+	for qu := range s.queues {
+		qu.push(&client.QuestionClosed{ID: id, Reply: r})
+	}
+	return true
+}
+
+func (s *asks) subscribe(q *queue) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.queues == nil {
+		s.queues = map[*queue]bool{}
+	}
+	s.queues[q] = true
+	for _, a := range s.waiting {
+		q.push(&client.QuestionAsked{Question: a.q})
+	}
+}
+
+func (s *asks) unsubscribe(q *queue) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.queues, q)
 }
