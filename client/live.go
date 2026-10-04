@@ -13,8 +13,8 @@ import (
 // shares nothing with the agent, so a client may keep it. Concrete types
 // are [RunStarted], [TurnStarted], [ModelRetrying], [ItemOpened],
 // [ItemUpdated], [ItemCompleted], [ResponseCompleted], [ToolOpened],
-// [ToolDispatched], [ToolProgress], [ToolFinished] and [RunEnded]; all
-// are pointers.
+// [ToolDispatched], [ToolProgress], [ToolFinished], [RunEnded],
+// [QuestionAsked] and [QuestionClosed]; all are pointers.
 type LiveEvent interface {
 	liveEvent()
 	// Run is the ID of the run the event belongs to.
@@ -147,6 +147,44 @@ type RunEnded struct {
 	Pending  []Pending
 }
 
+// Question is put to the user while a call runs, and the call waits
+// for the answer: a sub-agent's call its policy asks about, or a tool's
+// own question (an MCP elicitation). It is not a permission, which is a
+// call a run left pending after it ended; the run that asks a question
+// is still going.
+type Question struct {
+	// ID names the question for [Control.Reply].
+	ID string
+	// Call is the call the question is about, when there is one: the
+	// sub-agent's call, with its name and arguments. Nil for a tool's
+	// own question.
+	Call *openresponses.FunctionCall
+	// Text is the question.
+	Text string
+}
+
+// Reply answers a [Question]: Accept allows the call or says yes, and
+// Note is what the user typed with it, a refusal's reason.
+type Reply struct {
+	Accept bool
+	Note   string
+}
+
+// QuestionAsked says a question waits for the user.
+type QuestionAsked struct {
+	Question Question
+}
+
+// QuestionClosed says a question no longer waits: answered, or given up
+// by the call that asked it (an abort). Reply is nil when it was given
+// up.
+type QuestionClosed struct {
+	ID    string
+	Reply *Reply
+}
+
+func (*QuestionAsked) liveEvent()     {}
+func (*QuestionClosed) liveEvent()    {}
 func (*RunStarted) liveEvent()        {}
 func (*TurnStarted) liveEvent()       {}
 func (*ModelRetrying) liveEvent()     {}
@@ -161,7 +199,12 @@ func (*ToolFinished) liveEvent()      {}
 func (*RunEnded) liveEvent()          {}
 
 // Run implements [LiveEvent].
-func (e *RunStarted) Run() string        { return e.RunID }
+func (e *RunStarted) Run() string { return e.RunID }
+
+// Run is empty for a question: the code that asks it may not know the
+// run, and the question is answered by its ID.
+func (e *QuestionAsked) Run() string     { return "" }
+func (e *QuestionClosed) Run() string    { return "" }
 func (e *TurnStarted) Run() string       { return e.RunID }
 func (e *ModelRetrying) Run() string     { return e.RunID }
 func (e *ItemOpened) Run() string        { return e.RunID }

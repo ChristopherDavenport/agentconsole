@@ -72,8 +72,9 @@ import (
 //     new one, and the other way round.
 //
 // The questions a tool asks mid-call reach the elicitor the kit was built
-// with ([agentkit.WithToolElicitor]); the terminal client has no screen
-// for them yet, so the embedder's function answers them.
+// with ([agentkit.WithToolElicitor]); the embedder's function puts one to
+// the client with [native.Backend.Ask], which Backend has by embedding,
+// as it does a sub-agent's call its policy holds.
 type Backend struct {
 	*native.Backend
 	kit    *agentkit.Kit

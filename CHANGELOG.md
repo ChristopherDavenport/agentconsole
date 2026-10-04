@@ -5,6 +5,21 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: questions a running call puts to the user. A host asks with
+  `native.Backend.Ask` (and `kitbackend.Backend`, by embedding), which
+  blocks until the client replies or the call's context ends; live
+  subscribers get `client.QuestionAsked` and `client.QuestionClosed`, one
+  that attaches while a question waits included, and `Control.Reply`
+  answers. The view lists them as `Model.Questions`.
+- Added: the terminal client asks a question while the run goes, ahead
+  of a permission: `y` allows, `n` refuses with an optional reason, `Esc`
+  goes back. A sub-agent's call its policy holds and a tool's own yes/no
+  question are both asked this way.
+- Changed: `client.Control` has `Reply`; a backend of an embedder's own
+  implements it.
+
 ## v0.0.2 - 2026-10-03
 
 - Added: with a row selected, Ctrl-O and Ctrl-R expand or collapse that

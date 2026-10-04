@@ -245,6 +245,10 @@ type Model struct {
 	// CutOff lists the calls the last run left unanswered without asking
 	// anyone: it was aborted or failed. They are shown as cut off.
 	CutOff []Permission
+	// Questions are the questions running calls wait on the user for,
+	// in the order they were asked: a sub-agent's call its policy asks
+	// about, a tool's own question.
+	Questions []client.Question
 }
 
 type ovItem struct {
@@ -355,6 +359,7 @@ type View struct {
 	calls []*ovCall
 	perms []Permission
 	cut   []Permission
+	asked []client.Question
 	// liveEnded are the runs whose live end was seen and whose overlay
 	// waits for the record; endSeen the end entries the record has
 	// delivered, capped, since a run the live stream never mentions
@@ -863,6 +868,10 @@ func (v *View) flush(runID string) {
 // Live applies a live event.
 func (v *View) Live(ev client.LiveEvent) {
 	switch e := ev.(type) {
+	case *client.QuestionAsked:
+		v.asked = append(v.asked, e.Question)
+	case *client.QuestionClosed:
+		v.asked = slices.DeleteFunc(v.asked, func(q client.Question) bool { return q.ID == e.ID })
 	case *client.RunStarted:
 		v.seq++
 		v.runSeq[e.RunID] = v.seq
@@ -1090,6 +1099,7 @@ func (v *View) Model() Model {
 	}
 	m.Permissions = append([]Permission(nil), v.perms...)
 	m.CutOff = append([]Permission(nil), v.cut...)
+	m.Questions = append([]client.Question(nil), v.asked...)
 	return m
 }
 
