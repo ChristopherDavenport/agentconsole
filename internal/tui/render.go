@@ -29,10 +29,23 @@ const cursor = "▍"
 // outputLines is how much of a tool's output shows while it is collapsed.
 const outputLines = 3
 
-// opts are the rendering switches the user toggles.
+// opts are the rendering switches the user toggles: for every row, or, as
+// a row's flips, the switches that row has the other way round.
 type opts struct {
 	reasoning bool // reasoning rows expanded
 	output    bool // tool arguments and output in full
+}
+
+// flipped is o with the switches set in f the other way round.
+func (o opts) flipped(f opts) opts {
+	return opts{reasoning: o.reasoning != f.reasoning, output: o.output != f.output}
+}
+
+// rowSpan is where a selectable row's block sits in the rendered
+// conversation: the lines start..start+height-1.
+type rowSpan struct {
+	entry         string
+	start, height int
 }
 
 // hiddenOutputs are the rows whose call's row carries their output, by
@@ -56,11 +69,12 @@ func hiddenOutputs(m view.Model) map[int]bool {
 // gutter is the width of the cursor's column while a row is selected.
 const gutter = 2
 
-// renderRows renders the conversation, wrapped to width. With a row
-// selected (sel is its entry), every block gets a two-column gutter with
-// a marker on the selected one, and the line the selected block starts at
-// and its height are returned so the viewport can scroll to it.
-func renderRows(m view.Model, o opts, width int, sel string) (content string, line, height int) {
+// renderRows renders the conversation, wrapped to width, each row with o
+// flipped by its entry's flips. With a row selected (sel is its entry),
+// every block gets a two-column gutter with a marker on the selected one.
+// The spans say where each committed row's block sits, so the viewport can
+// scroll to the selected one and a click can find the row under it.
+func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel string) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -75,7 +89,7 @@ func renderRows(m view.Model, o opts, width int, sel string) (content string, li
 		if hidden[i] {
 			continue
 		}
-		b := renderRow(row, o)
+		b := renderRow(row, o.flipped(flips[row.EntryID]))
 		if b == "" {
 			continue
 		}
@@ -84,7 +98,6 @@ func renderRows(m view.Model, o opts, width int, sel string) (content string, li
 			mark := "  "
 			if row.EntryID == sel {
 				mark = warnStyle.Render("▶") + " "
-				line, height = at, lipgloss.Height(b)
 			}
 			ls := strings.Split(b, "\n")
 			for j := range ls {
@@ -96,10 +109,14 @@ func renderRows(m view.Model, o opts, width int, sel string) (content string, li
 			}
 			b = strings.Join(ls, "\n")
 		}
+		h := lipgloss.Height(b)
+		if row.EntryID != "" {
+			spans = append(spans, rowSpan{entry: row.EntryID, start: at, height: h})
+		}
 		blocks = append(blocks, b)
-		at += lipgloss.Height(b) + 1
+		at += h + 1
 	}
-	return strings.Join(blocks, "\n\n"), line, height
+	return strings.Join(blocks, "\n\n"), spans
 }
 
 func wrap(s string, width int) string {
