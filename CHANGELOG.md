@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.5 - 2026-10-04
 
 - Added: a mouse drag selects text on any part of the terminal client's
   screen — the conversation, the panes, the top bar — and the selection
