@@ -21,12 +21,12 @@ type keyGroup struct {
 var keyGroups = []keyGroup{
 	{"Conversation", [][2]string{
 		{"Enter", "send a prompt, or steer the run in flight"},
-		{"Ctrl-C", "abort the run; quit when idle (a second one quits at once)"},
+		{"Ctrl-C", "copy the selection when one is drawn; otherwise abort the run, quit when idle (a second one quits at once)"},
 		{"PgUp PgDn", "scroll a page"},
 		{"Ctrl-Up Ctrl-Down", "scroll a line"},
 		{"Ctrl-Home Ctrl-End", "scroll to the top or the bottom"},
 		{"mouse wheel", "scroll"},
-		{"mouse drag", "select text; the release copies it to the terminal's clipboard"},
+		{"mouse drag", "select text; it stays selected until the next key or press"},
 		{"Ctrl-R", "show or hide reasoning: the selected row's, or every row's"},
 		{"Ctrl-O", "show tool arguments and output in full: the selected row's, or every row's"},
 		{"Ctrl-/  F1", "this list"},

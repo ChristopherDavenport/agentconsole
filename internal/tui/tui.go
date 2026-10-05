@@ -292,6 +292,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InterruptMsg:
 		return m.interrupt()
 	case tea.KeyMsg:
+		// Ctrl+c with a selection drawn copies it, as a desktop's copy
+		// does, and drops it, so the next ctrl+c is the interrupt again.
+		// Any other key drops the selection.
+		if m.sel != nil && msg.Type == tea.KeyCtrlC {
+			m.copySelection()
+			m.clearSelection()
+			return m, nil
+		}
 		m.clearSelection()
 		return m.key(msg)
 	}
@@ -334,9 +342,11 @@ func (m *Model) syncPermissions() {
 }
 
 // InterruptMsg is an interrupt from outside the terminal, SIGINT or
-// SIGTERM: it does what Ctrl-C does. The host turns the program's own
-// signal handling off (tea.WithoutSignalHandler) and sends this instead,
-// since bubbletea's ends the program with an error and no abort.
+// SIGTERM: it does what Ctrl-C does with nothing selected — a signal
+// always interrupts, never copies. The host turns the program's own
+// signal handling off (tea.WithoutSignalHandler) and sends this
+// instead, since bubbletea's ends the program with an error and no
+// abort.
 type InterruptMsg struct{}
 
 // interrupt aborts a running run, and quits when idle or when an abort

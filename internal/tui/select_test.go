@@ -9,9 +9,10 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
 
-// The screen's own selection: a left drag marks a range and the release
-// copies it to the clipboard. The mouse owns the screen (cell motion
-// tracking), so the terminal's own selection cannot reach the client.
+// The screen's own selection: a left drag marks a range and draws it;
+// ctrl+c copies it to the clipboard, as a desktop's copy does, when the
+// user chooses. The mouse owns the screen (cell motion tracking), so the
+// terminal's own selection cannot reach the client.
 
 func TestCutLineSplitsAtColumns(t *testing.T) {
 	for _, tc := range []struct {
@@ -38,21 +39,63 @@ func TestCutLineSplitsAtColumns(t *testing.T) {
 	}
 }
 
-func TestDraggingCopiesTheSelectedText(t *testing.T) {
+func TestCtrlCCopiesTheSelectedText(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
 	a.waitFor("the answer", all(has("hello world", "idle")))
 
+	// The drag draws the selection and copies nothing on its own.
 	a.drag("hello world", 0, 11)
+	if !a.m.Selecting() {
+		t.Fatalf("the selection is not drawn after the release:\n%s", a.screen())
+	}
+	if got := a.copied(); len(got) != 0 {
+		t.Errorf("the drag copied %q by itself", got)
+	}
+	// Ctrl+c copies and drops the selection, so the next one would be
+	// the interrupt again.
+	a.key(tea.KeyCtrlC)
 	if got := a.copied(); len(got) != 1 || got[0] != "hello world" {
 		t.Errorf("copied %q, want [\"hello world\"]", got)
 	}
-	if !a.m.Selecting() {
-		t.Errorf("the selection is not drawn after the release")
+	if a.m.Selecting() {
+		t.Errorf("copying kept the selection drawn")
+	}
+	if !strings.Contains(a.screen(), "copied") {
+		t.Errorf("the copy is not noted on the status line:\n%s", a.screen())
+	}
+	if a.quitted() {
+		t.Errorf("ctrl+c with a selection drawn quit instead of copying")
 	}
 }
 
-func TestDraggingCopiesWholeLinesBetween(t *testing.T) {
+// Ctrl+c copies even while a run goes: without that, the copy would be
+// unreachable mid-run, since ctrl+c is also the abort.
+func TestCtrlCCopiesWhileARunGoes(t *testing.T) {
+	g := newGates()
+	a := newApp(t, cfgWith(say(g, map[int]string{0: "hold"}, "hel", "lo ", "world")))
+	t.Cleanup(func() { g.release("hold") })
+
+	a.submit("hi")
+	g.arrive(t, "hold")
+	a.waitFor("the first chunk streaming", all(has("hel"+cursor, "running")))
+	a.drag("hel", 0, 3)
+	a.key(tea.KeyCtrlC)
+	if got := a.copied(); len(got) != 1 || got[0] != "hel" {
+		t.Errorf("copied %q, want [\"hel\"]", got)
+	}
+	if s := a.screen(); strings.Contains(s, "aborting") || !strings.Contains(s, "running") {
+		t.Errorf("ctrl+c aborted the run instead of copying:\n%s", s)
+	}
+	if a.quitted() {
+		t.Errorf("ctrl+c with a selection drawn quit instead of copying")
+	}
+	// The run goes on to the end, un-aborted.
+	g.release("hold")
+	a.waitFor("the answer committed", all(has("hello world", "idle"), lacks("aborting")))
+}
+
+func TestCtrlCCopiesWholeLinesBetween(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
 	a.waitFor("the answer", all(has("hello world", "idle")))
@@ -61,28 +104,20 @@ func TestDraggingCopiesWholeLinesBetween(t *testing.T) {
 	// on the two ends.
 	ya, yw := lineOf(a.screen(), "assistant"), lineOf(a.screen(), "hello world")
 	a.dragCells(0, ya, 11, yw)
+	a.key(tea.KeyCtrlC)
 	want := "assistant\nhello world"
 	if got := a.copied(); len(got) != 1 || got[0] != want {
 		t.Errorf("copied %q, want [%q]", got, want)
 	}
 }
 
-// lineOf is the screen line holding sub.
-func lineOf(screen, sub string) int {
-	for y, l := range strings.Split(screen, "\n") {
-		if strings.Contains(l, sub) {
-			return y
-		}
-	}
-	return -1
-}
-
-func TestDraggingTheStatusLineCopiesIt(t *testing.T) {
+func TestCtrlCCopiesTheStatusLine(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
 	a.waitFor("the answer", all(has("hello world", "idle")))
 
 	a.dragCells(0, 0, 99, 0)
+	a.key(tea.KeyCtrlC)
 	got := a.copied()
 	if len(got) != 1 {
 		t.Fatalf("copied %q, want one selection", got)
@@ -97,18 +132,19 @@ func TestDraggingTheStatusLineCopiesIt(t *testing.T) {
 
 func TestADragDoesNotSelectARow(t *testing.T) {
 	a := twoCallsApp(t)
-	// A drag over a row's line copies text; it does not put the cursor on
-	// the row, which a click would.
+	// A drag over a row's line draws a selection; it does not put the
+	// cursor on the row, which a click would.
 	s := a.drag(`"text":"p"`, 0, 6)
 	if strings.Contains(s, "▶") {
 		t.Errorf("the drag selected a row:\n%s", s)
 	}
+	a.key(tea.KeyCtrlC)
 	if got := a.copied(); len(got) != 1 || got[0] == "" {
-		t.Errorf("the drag copied nothing: %q", got)
+		t.Errorf("ctrl+c copied nothing: %q", got)
 	}
 }
 
-func TestAKeyClearsTheSelection(t *testing.T) {
+func TestAKeyButCtrlCClearsTheSelection(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
 	a.waitFor("the answer", all(has("hello world", "idle")))
@@ -118,9 +154,12 @@ func TestAKeyClearsTheSelection(t *testing.T) {
 	if a.m.Selecting() {
 		t.Errorf("the selection is still drawn after a key:\n%s", a.screen())
 	}
+	if got := a.copied(); len(got) != 0 {
+		t.Errorf("a key that clears the selection copied %q", got)
+	}
 }
 
-func TestAClickWithoutMotionCopiesNothing(t *testing.T) {
+func TestAClickWithoutMotionSelectsTheRowAndCopiesNothing(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
 	a.waitFor("the answer", all(has("hello world", "idle")))
@@ -132,4 +171,27 @@ func TestAClickWithoutMotionCopiesNothing(t *testing.T) {
 	if s := a.screen(); !strings.Contains(s, "▶") {
 		t.Errorf("the click did not select the row:\n%s", s)
 	}
+}
+
+// With nothing selected, ctrl+c is the interrupt it always was.
+func TestCtrlCWithoutASelectionQuits(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
+	a.submit("hi")
+	a.waitFor("the answer", all(has("hello world", "idle")))
+
+	a.key(tea.KeyCtrlC)
+	a.waitQuit()
+	if got := a.copied(); len(got) != 0 {
+		t.Errorf("ctrl+c with nothing selected copied %q", got)
+	}
+}
+
+// lineOf is the screen line holding sub.
+func lineOf(screen, sub string) int {
+	for y, l := range strings.Split(screen, "\n") {
+		if strings.Contains(l, sub) {
+			return y
+		}
+	}
+	return -1
 }
