@@ -11,7 +11,7 @@ committed, and live events carry only what is not committed yet.
 - Go 1.25 is the floor.
 - The library surface is `client`, `client/native`, `client/kitbackend`,
   `view` and `console`; `tui` and `inspect` stay under `internal/`. An
-  embedder (dex) imports the public ones and calls `console.Run`. Adding
+  embedder (dax) imports the public ones and calls `console.Run`. Adding
   an exported name is a decision for the plan's "Decided in
   implementation", since embedders pin it.
   - `client`: the contract. `Backend`, `Control`, `Record`,

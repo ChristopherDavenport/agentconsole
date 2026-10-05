@@ -632,7 +632,7 @@ func TestScopeRevocationEndsEveryGrant(t *testing.T) {
 	}
 }
 
-// A product names its skill sources itself (dex: "skill:NAME"). The
+// A product names its skill sources itself (dax: "skill:NAME"). The
 // source is a skill's when the path holds a read of that skill, and a
 // settings file's source of another name is not.
 func TestAProductsOwnSkillSourceNamesAreGrants(t *testing.T) {
