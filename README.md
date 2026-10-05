@@ -104,3 +104,7 @@ The tree and the record detail:
   compaction folded), then the session summary (header, verification over
   the line, token usage by model, config, refs, memory manifest, and the
   cost when a host supplies a price source), then closes the pane.
+
+## License
+
+MIT. See `LICENSE`.
