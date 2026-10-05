@@ -141,16 +141,35 @@ func (m *Model) flipRow(entry string, sw opts) {
 	m.relayout()
 }
 
-// click is a left click on screen line y. On a row of the conversation it
-// selects the row, as ctrl+p and ctrl+n would; on the row already
-// selected it expands or collapses it: the reasoning of a reasoning row,
-// the arguments and output of any other.
-func (m *Model) click(y int) tea.Cmd {
+// click is a left click on screen cell (x, y), on what the last frame
+// showed there. On the input it leaves the rows for the input, as Esc
+// does, and puts the input's cursor where the click was (input.go). On a
+// row of the conversation it selects the row, as ctrl+p and ctrl+n
+// would; on the row already selected it expands or collapses it: the
+// reasoning of a reasoning row, the arguments and output of any other.
+// On an item of the tree it selects the item, as up and down would; on
+// the item already selected it opens it, as Enter does.
+func (m *Model) click(x, y int) tea.Cmd {
+	if m.inputY >= 0 && y >= m.inputY && y < m.inputY+m.in.Height() {
+		m.clickInput(x, y-m.inputY)
+		return nil
+	}
 	// The status line is line 0; the viewport starts under it.
-	if m.screen != screenConversation || y < 1 || y > m.vp.Height {
+	if y < 1 || y > m.vp.Height {
 		return nil
 	}
 	line := m.vp.YOffset + y - 1
+	switch m.screen {
+	case screenTree:
+		return m.clickTree(line)
+	case screenConversation:
+		return m.clickRow(line)
+	}
+	return nil
+}
+
+// clickRow is a click on line of the conversation's content.
+func (m *Model) clickRow(line int) tea.Cmd {
 	for _, sp := range m.spans {
 		if line < sp.start || line >= sp.start+sp.height {
 			continue
@@ -169,6 +188,22 @@ func (m *Model) click(y int) tea.Cmd {
 		}
 		m.flipRow(sp.entry, sw)
 		return nil
+	}
+	return nil
+}
+
+// clickTree is a click on line of the tree's content.
+func (m *Model) clickTree(line int) tea.Cmd {
+	for i, l := range m.treeLines {
+		if l != line {
+			continue
+		}
+		if i != m.treeCur {
+			m.treeCur = i
+			m.relayout()
+			return nil
+		}
+		return m.openTreeItem()
 	}
 	return nil
 }
@@ -462,14 +497,16 @@ func shortID(id string) string {
 	return id
 }
 
-// renderTree renders the tree screen and the line the cursor is on.
-func (m *Model) renderTree() (string, int) {
+// renderTree renders the tree screen, the line the cursor is on and the
+// line each item is on, for a click to find.
+func (m *Model) renderTree() (string, int, []int) {
 	items := m.treeItems()
 	var b strings.Builder
 	b.WriteString(dimStyle.Render("branches of session "+shortID(m.view.Session)+" (* is where the agent's head is)") + "\n")
 	line := 0
 	otherHeader := false
 	rows := 1
+	lines := make([]int, 0, len(items))
 	for i, it := range items {
 		if !it.branch && !otherHeader {
 			otherHeader = true
@@ -482,12 +519,13 @@ func (m *Model) renderTree() (string, int) {
 			line = rows
 		}
 		b.WriteString(cur + it.text + "\n")
+		lines = append(lines, rows)
 		rows++
 	}
 	if len(items) == 0 {
 		b.WriteString("  no branches yet\n")
 	}
-	return strings.TrimRight(b.String(), "\n"), line
+	return strings.TrimRight(b.String(), "\n"), line, lines
 }
 
 // treeKey handles a key on the tree screen.
@@ -501,21 +539,7 @@ func (m *Model) treeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "ctrl+t", "q":
 		m.screen = screenConversation
 	case "enter":
-		if m.treeCur >= len(items) {
-			return m, nil
-		}
-		it := items[m.treeCur]
-		m.screen = screenConversation
-		if it.branch && it.leaf == m.view.Leaf {
-			m.frozen = nil // the head's own line is the live view
-			m.keepCursor()
-			break
-		}
-		m.relayout()
-		if it.branch {
-			return m, m.open(it.title, m.view.Session, it.leaf, "")
-		}
-		return m, m.open(it.title, it.session, "", it.at)
+		return m, m.openTreeItem()
 	case "c":
 		if m.treeCur >= len(items) || !items[m.treeCur].branch {
 			return m, nil
@@ -524,6 +548,29 @@ func (m *Model) treeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.relayout()
 	return m, nil
+}
+
+// openTreeItem is Enter on the tree, or a click on the item selected:
+// the head's own branch is the live view, any other branch or session
+// opens read only.
+func (m *Model) openTreeItem() tea.Cmd {
+	items := m.treeItems()
+	if m.treeCur >= len(items) {
+		return nil
+	}
+	it := items[m.treeCur]
+	m.screen = screenConversation
+	if it.branch && it.leaf == m.view.Leaf {
+		m.frozen = nil // the head's own line is the live view
+		m.keepCursor()
+		m.relayout()
+		return nil
+	}
+	m.relayout()
+	if it.branch {
+		return m.open(it.title, m.view.Session, it.leaf, "")
+	}
+	return m.open(it.title, it.session, "", it.at)
 }
 
 // frozenBanner is the status line's note on a read-only view.

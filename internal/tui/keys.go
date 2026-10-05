@@ -26,7 +26,8 @@ var keyGroups = []keyGroup{
 		{"Ctrl-Up Ctrl-Down", "scroll a line"},
 		{"Ctrl-Home Ctrl-End", "scroll to the top or the bottom"},
 		{"mouse wheel", "scroll"},
-		{"mouse drag", "select text; it stays selected until the next key or press"},
+		{"mouse drag", "select text; it stays on the text as it scrolls, until the next key or press"},
+		{"click the input", "put the cursor there, and leave the selected row"},
 		{"Ctrl-R", "show or hide reasoning: the selected row's, or every row's"},
 		{"Ctrl-O", "show tool arguments and output in full: the selected row's, or every row's"},
 		{"Ctrl-/  F1", "this list"},
@@ -45,6 +46,7 @@ var keyGroups = []keyGroup{
 	{"Tree (Ctrl-T)", [][2]string{
 		{"Up Down  k j", "select"},
 		{"Enter", "view the branch, or open the session, read only"},
+		{"click", "select the item; click it again to open it"},
 		{"c", "continue from the branch"},
 		{"Esc  q  Ctrl-T", "back to the conversation"},
 	}},

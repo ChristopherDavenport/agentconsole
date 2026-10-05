@@ -14,10 +14,20 @@ package tui
 // clipboard (it works over ssh too), as a desktop's copy does — and
 // drops the selection, so the next ctrl+c is the interrupt again.
 //
-// A click, a press and a release with no motion between, still selects
-// the row under it (a second click on that row expands it), as it did.
+// A click, a press and a release with no motion between, still acts on
+// what is under it (nav.go's click): a row, an item of the tree, a
+// place in the input.
 // The selection is drawn reversed, like a terminal's own, and stays
 // until the next key or press.
+//
+// The selection is held on the text, not on the screen. An end on the
+// viewport is kept as a line of the viewport's content, so when the
+// content moves under it (a run streaming at the bottom scrolls the
+// conversation up, or the wheel scrolls it) the selection moves with
+// the text, and a copy takes the text that was selected, even the part
+// scrolled out of sight. An end anywhere else (the status line, the
+// panes, the input) is kept as a line of the screen, since nothing
+// scrolls there.
 
 import (
 	"fmt"
@@ -35,11 +45,41 @@ import (
 // own selection.
 var selStyle = lipgloss.NewStyle().Reverse(true)
 
-// selection is a range of the screen being copied: the cell the button
-// went down on and the cell the pointer is on.
+// selection is a range being copied: a, the cell the button went down
+// on, and b, the cell the pointer is on.
 type selection struct {
-	ax, ay, x, y int
+	a, b end
 }
+
+// end is one end of a selection: a column and a line. On the viewport
+// the line is the line of the viewport's content, so the end stays on its
+// text when the content scrolls; elsewhere it is the line of the screen.
+type end struct {
+	x, line   int
+	onContent bool
+}
+
+// endAt is the end at screen cell (x, y). The status line is line 0; the
+// viewport starts under it.
+func (m *Model) endAt(x, y int) end {
+	if y >= 1 && y <= m.vp.Height {
+		return end{x: x, line: m.vp.YOffset + y - 1, onContent: true}
+	}
+	return end{x: x, line: y}
+}
+
+// screenY is the screen line end e is on now: off the viewport, above or
+// below it, when its text is scrolled out of sight.
+func (m *Model) screenY(e end) int {
+	if e.onContent {
+		return e.line - m.vp.YOffset + 1
+	}
+	return e.line
+}
+
+// onContent is whether both ends of the selection are on the viewport's
+// content, so the whole of it moves with the text.
+func (s *selection) onContent() bool { return s.a.onContent && s.b.onContent }
 
 // Clipboard is a copier that puts text on the terminal's clipboard with
 // OSC 52, writing to the writer the program renders to. The sequence is
@@ -75,9 +115,9 @@ func (m *Model) mouse(msg tea.MouseMsg) tea.Cmd {
 				if msg.X == m.pressX && msg.Y == m.pressY {
 					return nil
 				}
-				m.sel = &selection{ax: m.pressX, ay: m.pressY}
+				m.sel = &selection{a: m.endAt(m.pressX, m.pressY)}
 			}
-			m.sel.x, m.sel.y = msg.X, msg.Y
+			m.sel.b = m.endAt(msg.X, msg.Y)
 			return nil
 		case tea.MouseActionRelease:
 			if !m.pressed {
@@ -87,7 +127,7 @@ func (m *Model) mouse(msg tea.MouseMsg) tea.Cmd {
 			if m.sel != nil {
 				return nil // a drag, not a click: the selection stays drawn
 			}
-			return m.click(msg.Y)
+			return m.click(msg.X, msg.Y)
 		}
 	}
 	var cmd tea.Cmd
@@ -101,7 +141,6 @@ func (m *Model) clearSelection() { m.sel = nil }
 
 // copySelection is ctrl+c with a selection drawn: it copies the
 // selected region's plain text and notes it on the status line. The
-// lines are the last frame's, which is what the pointer was over. The
 // caller drops the selection.
 func (m *Model) copySelection() {
 	if m.copier == nil {
@@ -113,59 +152,87 @@ func (m *Model) copySelection() {
 
 // selectedText is the plain text of the selected region: whole lines
 // between the first and the last, columns on those two, with the padding
-// the layout adds trimmed off the ends.
+// the layout adds trimmed off the ends. A selection on the viewport's
+// content reads the content, all of it, scrolled out of sight or not;
+// any other reads the last frame's lines, which is what the pointer was
+// over.
 func (m *Model) selectedText() string {
-	if len(m.lines) == 0 {
-		return ""
+	lines := m.lines
+	x0, y0, x1, y1 := m.selScreen()
+	if m.sel.onContent() {
+		lines = m.content
+		x0, y0, x1, y1 = selRange(m.sel)
 	}
-	x0, y0, x1, y1 := selRange(m.sel)
-	y0, y1 = max(y0, 0), min(y1, len(m.lines)-1)
 	var rows []string
-	for i := y0; i <= y1; i++ {
-		from, to := 0, 1<<30
-		if i == y0 {
-			from = x0
-		}
-		if i == y1 {
-			to = x1
-		}
-		_, mid, _ := cutLine(m.lines[i], from, to)
+	for _, r := range region(x0, y0, x1, y1, 0, len(lines)-1) {
+		_, mid, _ := cutLine(lines[r.line], r.from, r.to)
 		rows = append(rows, strings.TrimRight(ansi.Strip(mid), " "))
 	}
 	return strings.Join(rows, "\n")
 }
 
 // markSelection renders the frame's lines with the selected region
-// reversed. The region is in reading order: whole lines between the
-// first and the last, columns on those two.
-func markSelection(lines []string, sel *selection) []string {
-	if sel == nil || len(lines) == 0 {
+// reversed. A selection on the viewport's content is drawn where its
+// text is now, and only on the viewport: the part scrolled out of sight
+// is not drawn over the lines around it.
+func (m *Model) markSelection(lines []string) []string {
+	if m.sel == nil || len(lines) == 0 {
 		return lines
 	}
-	x0, y0, x1, y1 := selRange(sel)
+	x0, y0, x1, y1 := m.selScreen()
+	lo, hi := 0, len(lines)-1
+	if m.sel.onContent() {
+		lo, hi = 1, min(m.vp.Height, hi)
+	}
 	out := append([]string(nil), lines...)
-	y0, y1 = max(y0, 0), min(y1, len(out)-1)
-	for i := y0; i <= y1; i++ {
-		from, to := 0, 1<<30
-		if i == y0 {
-			from = x0
-		}
-		if i == y1 {
-			to = x1
-		}
-		before, mid, after := cutLine(out[i], from, to)
-		out[i] = before + selStyle.Render(ansi.Strip(mid)) + after
+	for _, r := range region(x0, y0, x1, y1, lo, hi) {
+		before, mid, after := cutLine(out[r.line], r.from, r.to)
+		out[r.line] = before + selStyle.Render(ansi.Strip(mid)) + after
 	}
 	return out
 }
 
-// selRange is the selection in reading order: the topmost cell first, or
-// the leftmost on the same line.
-func selRange(s *selection) (x0, y0, x1, y1 int) {
-	if s.y < s.ay || (s.y == s.ay && s.x < s.ax) {
-		return s.x, s.y, s.ax, s.ay
+// selScreen is the selection on the screen as it is now, in reading
+// order.
+func (m *Model) selScreen() (x0, y0, x1, y1 int) {
+	a, b := m.sel.a, m.sel.b
+	a.line, b.line = m.screenY(a), m.screenY(b)
+	return ordered(a, b)
+}
+
+// selRange is the selection in reading order, in the lines its ends are
+// held by.
+func selRange(s *selection) (x0, y0, x1, y1 int) { return ordered(s.a, s.b) }
+
+// ordered is two ends in reading order: the topmost first, or the
+// leftmost on the same line.
+func ordered(a, b end) (x0, y0, x1, y1 int) {
+	if b.line < a.line || (b.line == a.line && b.x < a.x) {
+		a, b = b, a
 	}
-	return s.ax, s.ay, s.x, s.y
+	return a.x, a.line, b.x, b.line
+}
+
+// lineCut is the part of one line a region covers: columns [from, to).
+type lineCut struct{ line, from, to int }
+
+// region is the region from (x0, y0) to (x1, y1), in reading order, cut
+// to lines lo..hi: whole lines between the first and the last, columns on
+// those two. A first or last line cut off by lo or hi leaves the line at
+// the edge whole.
+func region(x0, y0, x1, y1, lo, hi int) []lineCut {
+	var out []lineCut
+	for i := max(y0, lo); i <= min(y1, hi); i++ {
+		c := lineCut{line: i, from: 0, to: 1 << 30}
+		if i == y0 {
+			c.from = x0
+		}
+		if i == y1 {
+			c.to = x1
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // cutLine splits a rendered line at display columns [from, to): what

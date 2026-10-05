@@ -132,7 +132,7 @@ func twoCallsApp(t *testing.T) *app {
 	a := newApp(t, cfg)
 	a.resize(110, 50)
 	a.submit("go")
-	a.waitFor("both calls ended", all(has(`text="p"`, `text="q"`, "ok", "idle"), lacks("p3", "q3")))
+	a.waitFor("both calls ended", all(has(`text="p"`, `text="q"`, "ok", "idle"), lacks("p3", "q3", "(not committed yet)")))
 	return a
 }
 

@@ -8,6 +8,18 @@ versions may break the API.
 ## Unreleased
 
 - Added: the MIT license.
+- Fixed: a mouse selection on the conversation stays on the text it
+  covers. Before, it was fixed to the screen, so a run streaming below it
+  (or the wheel) moved the text out from under it and ctrl+c copied
+  whatever had scrolled into its place. Now it moves with the text, and
+  ctrl+c copies the selected text even when it has scrolled out of sight.
+  A selection on the status line, panes or input stays fixed to the
+  screen.
+- Added: a click on the input puts its cursor on the cell clicked (the
+  end of the row when past its text), and leaves the selected row and
+  its pane, as Esc does.
+- Added: a click on an item of the tree selects it, and a click on the
+  item already selected opens it, as Enter does.
 
 ## v0.0.6 - 2026-10-04
 

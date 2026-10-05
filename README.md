@@ -92,11 +92,13 @@ The tree and the record detail:
   tree, up/down select, Enter views a branch or opens the origin read-only
   (Esc returns to the live session; the agent's head does not move), and
   `c` continues from the selected branch: the agent's head moves there and
-  the next prompt continues from it.
+  the next prompt continues from it. A click selects an item of the tree,
+  and a click on the item already selected opens it, as Enter does.
 - `ctrl+p` and `ctrl+n` move a cursor over the conversation's rows, and
   `ctrl+b` continues from the selected row. Esc clears the cursor. A left
   click selects the row under it; a click on the row already selected
-  expands or collapses it. With a row selected, Ctrl-R and Ctrl-O show or
+  expands or collapses it. A click on the input clears the cursor, as Esc
+  does, and puts the input's cursor where the click was. With a row selected, Ctrl-R and Ctrl-O show or
   hide that row's reasoning or tool output alone; with none, every row's.
 - `tab` opens the detail of the selected row (its entry, whether its
   request verifies and why not, the response's model and usage, a call's

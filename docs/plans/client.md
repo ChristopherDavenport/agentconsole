@@ -682,6 +682,47 @@ selects itself.
 - **Not done.** A selection that scrolls the viewport when the drag
   reaches the screen's edge, and extending one with shift-click, are not
   there.
+- **Later: the selection is held on the text.** Held on the screen, a
+  selection on the conversation lost its text as soon as a run
+  streaming below scrolled the conversation up, and ctrl+c copied
+  whatever had come under it. An end of the selection on the viewport is
+  now kept as a line of the viewport's content, so the selection moves
+  with its text (a run streaming, the wheel), is drawn only where the
+  viewport shows it, and a selection with both ends there copies from
+  the content, the part scrolled out of sight too. An end anywhere else
+  (the status line, the panes, the input) stays a line of the screen,
+  and a selection with one there is cut from the frame as before. A
+  line number follows a scroll and text added below, not a row inserted
+  above (the prompt's row landing after the answer started streaming,
+  in the first moments of a run) nor a rewrap at a resize: those move
+  the text and leave the selection. Holding an end by its row and a line
+  within the row would cover them.
+
+## Decided in implementation, step 9 (clicking into things)
+
+- **A click acts on what the last frame showed under it**, as the row
+  click did: on a row it selects the row and again expands it; on an
+  item of the tree it selects the item (the tree records each item's
+  line as it renders) and again opens it, the same path as Enter; on the
+  input it leaves the rows, as Esc does (the cursor and its pane go),
+  and puts the input's cursor on the cell clicked. A drag is still a
+  selection and never any of these.
+- **The input's cursor goes to the rune under the pointer.** Past the
+  text of a row it goes to the row's end; past the end of a row that
+  soft-wraps it stops on the space the row wrapped at, since a cursor
+  after it is on the next row. On a permission or question waiting for
+  y or n the input is off and the click only leaves the rows.
+- **The textarea's scroll is read from the frame.** A value taller than
+  the input's five rows scrolls inside the textarea, which does not say
+  where; nor can the scroll be worked out from the keys, since the
+  textarea clamps it against the content it last rendered, and when it
+  renders is the program's frame rate (right after a paste it still
+  shows the first rows, with the cursor below them). So the click
+  matches the value's rows, wrapped with the textarea's own algorithm
+  (the copy `wrapLine`), against the input's rows on the frame clicked;
+  of two scrolls that both match (rows that repeat), the one showing
+  the cursor's row. The cursor moves by soft-wrapped rows to the row
+  clicked, which is shown, so the scroll does not move.
 
 ## Decided in implementation, step 8 (tool rows)
 

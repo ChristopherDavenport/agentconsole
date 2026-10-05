@@ -121,13 +121,20 @@ type Model struct {
 	treeCur  int
 	// The mouse selection (select.go): pressed is whether the left
 	// button is down, pressX and pressY where it went down, sel the region
-	// being dragged over, and lines the frame's lines, for the copy to
-	// read. copier is where a copy goes; nil draws but never copies.
+	// being dragged over, lines the frame's lines and content the
+	// viewport's content's, for the copy to read. copier is where a copy
+	// goes; nil draws but never copies.
 	pressed        bool
 	pressX, pressY int
 	sel            *selection
 	lines          []string
+	content        []string
 	copier         func(string)
+	// treeLines is the content line of each item of the tree, for a click.
+	treeLines []int
+	// inputY is the screen line the input's first row was last drawn on,
+	// -1 when it was not drawn.
+	inputY int
 	// drawn is the screen the viewport's content was last laid out for.
 	drawn screen
 	// note is the last thing a client action did, shown on the status line
@@ -166,6 +173,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 		replied:  map[string]bool{},
+		inputY:   -1,
 	}
 	for _, o := range options {
 		o(m)
@@ -635,7 +643,7 @@ func (m *Model) relayout() {
 	m.vp.Width = m.width
 	m.vp.Height = max(m.height-used, 1)
 	if m.screen == screenKeys {
-		m.vp.SetContent(wrap(renderKeys(), max(m.width, 10)))
+		m.setContent(wrap(renderKeys(), max(m.width, 10)))
 		if m.drawn != m.screen {
 			m.vp.GotoTop()
 		}
@@ -643,15 +651,16 @@ func (m *Model) relayout() {
 		return
 	}
 	if m.screen == screenTree {
-		content, line := m.renderTree()
-		m.vp.SetContent(content)
+		content, line, lines := m.renderTree()
+		m.setContent(content)
+		m.treeLines = lines
 		m.reveal = false
 		m.showLine(line, 1)
 		m.drawn = m.screen
 		return
 	}
 	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry)
-	m.vp.SetContent(content)
+	m.setContent(content)
 	m.spans = spans
 	switch {
 	case m.reveal && m.curEntry != "":
@@ -672,6 +681,13 @@ func (m *Model) relayout() {
 	} else {
 		m.in.Focus()
 	}
+}
+
+// setContent fills the viewport and keeps its lines, for a selection on
+// them to copy.
+func (m *Model) setContent(s string) {
+	m.vp.SetContent(s)
+	m.content = strings.Split(s, "\n")
 }
 
 // showLine scrolls the viewport so lines line..line+height-1 are visible,
@@ -757,6 +773,7 @@ func (m *Model) View() string {
 		status = b + " | " + status
 	}
 	parts := []string{statusStyle.Render(padTo(status, m.width)), m.vp.View()}
+	inputY := -1
 	if m.screen == screenConversation {
 		parts = append(parts, m.paneLines()...)
 	}
@@ -775,14 +792,17 @@ func (m *Model) View() string {
 		parts = append(parts, dimStyle.Render(truncate("read only: esc back to the live session, c continue from here, tab detail", m.width)))
 	default:
 		bar := dimStyle.Render(strings.Repeat("─", max(m.width, 1)))
+		// The input starts under the bar, below every line so far.
+		inputY = strings.Count(strings.Join(parts, "\n"), "\n") + 2
 		parts = append(parts, bar, m.in.View(), bar)
 	}
+	m.inputY = inputY
 	s := strings.Join(parts, "\n")
 	// The frame's lines, for a selection's copy to read; the selection is
 	// drawn over them without changing the text.
 	m.lines = strings.Split(s, "\n")
 	if m.sel != nil {
-		s = strings.Join(markSelection(m.lines, m.sel), "\n")
+		s = strings.Join(m.markSelection(m.lines), "\n")
 	}
 	return s
 }
@@ -818,12 +838,14 @@ func inputRowsUsed(value string, width int) int {
 	return max(rows, 1)
 }
 
-// wrapRows counts the rows wrap admits for one logical line, with the
-// same algorithm the textarea applies. It is a copy of the unexported
-// wrap function in charmbracelet/bubbles@v1.0.0's textarea package;
-// bubbles exposes nothing better, so keep this in step when bubbles is
-// upgraded.
-func wrapRows(runes []rune, width int) int {
+// wrapRows counts the rows wrap admits for one logical line.
+func wrapRows(runes []rune, width int) int { return len(wrapLine(runes, width)) }
+
+// wrapLine is the rows one logical line soft-wraps into, with the same
+// algorithm the textarea applies. It is a copy of the unexported wrap
+// function in charmbracelet/bubbles@v1.0.0's textarea package; bubbles
+// exposes nothing better, so keep this in step when bubbles is upgraded.
+func wrapLine(runes []rune, width int) [][]rune {
 	var (
 		lines  = [][]rune{{}}
 		word   []rune
@@ -875,7 +897,7 @@ func wrapRows(runes []rune, width int) int {
 		lines[row] = append(lines[row], repeatSpaces(spaces)...)
 	}
 
-	return len(lines)
+	return lines
 }
 
 func repeatSpaces(n int) []rune { return []rune(strings.Repeat(" ", n)) }
