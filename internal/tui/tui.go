@@ -286,7 +286,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.in.Focus()
 		m.relayout()
-		return m, nil
+		// The run's end unpins the session pane, which waits for it;
+		// ask for its data now, since the final ModelMsg may have been
+		// handled while the run's Prompt was still returning, with the
+		// pane still pinned.
+		return m, m.wantPane()
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
 	case InterruptMsg:

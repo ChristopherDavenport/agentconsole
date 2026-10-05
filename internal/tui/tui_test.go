@@ -74,7 +74,7 @@ func TestToolCallShowsItsStates(t *testing.T) {
 
 	a.submit("go")
 	g.arrive(t, "tool")
-	s := a.waitFor("the call running", has(`upper text="abc" [running]`, "... working"))
+	s := a.waitFor("the call running", has(`upper text="abc" [running]`, "...", "working"))
 	if strings.Contains(s, "ABC") {
 		t.Errorf("output shown before the tool returned:\n%s", s)
 	}

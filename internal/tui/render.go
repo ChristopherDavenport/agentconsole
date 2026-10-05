@@ -36,6 +36,12 @@ const outputLines = 3
 // value.
 const argRunes = 60
 
+// partialLines is how much of a running call's progress shows by
+// default: its last lines, the ones a live command is writing, while
+// the call goes. A call that has ended shows none of them, only their
+// count; Ctrl-O or a click on the row shows the whole window.
+const partialLines = 5
+
 // opts are the rendering switches the user toggles: for every row, or, as
 // a row's flips, the switches that row has the other way round.
 type opts struct {
@@ -226,7 +232,19 @@ func renderCall(c view.Call, o opts, tag string, depth int) string {
 		b.WriteString("\n" + pad + "  " + warnStyle.Render("? "+q))
 	case view.CallRunning:
 		if c.Partial != "" {
-			b.WriteString("\n" + pad + "  " + dimStyle.Render("... "+clipLine(c.Partial, o.output)))
+			// What a running call shows of its progress is its end:
+			// the lines it is writing now, not the ones it wrote at
+			// the start. Expanded, the whole window the tool last
+			// reported.
+			n := partialLines
+			if o.output {
+				n = 0
+			}
+			b.WriteString("\n" + pad + "  " + dimStyle.Render("..."))
+			for _, l := range lastLines(c.Partial, n) {
+				l = clipOne(l, o.output)
+				b.WriteString("\n" + pad + "    " + dimStyle.Render(l))
+			}
 		}
 	case view.CallBlocked:
 		b.WriteString("\n" + pad + "  " + errStyle.Render("blocked: ") + clip(c.Output, o.output))
@@ -286,6 +304,30 @@ func compactArgs(raw string) string {
 		parts = append(parts, fmt.Sprintf("%s=%q", k, v))
 	}
 	return strings.Join(parts, " ")
+}
+
+// lastLines is the last n lines of s, in the order they read, with the
+// trailing empty ones dropped; n of 0 is all of them. It is what a
+// running call shows of its progress, newest last.
+func lastLines(s string, n int) []string {
+	s = strings.TrimRight(s, "\n")
+	lines := strings.Split(s, "\n")
+	if n > 0 && len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
+// clipOne shortens one line of a running call's progress to 120 runes
+// unless the row is expanded.
+func clipOne(s string, full bool) string {
+	if full {
+		return s
+	}
+	if r := []rune(s); len(r) > 120 {
+		return string(r[:120]) + "…"
+	}
+	return s
 }
 
 // clip shortens s to a few lines unless full.

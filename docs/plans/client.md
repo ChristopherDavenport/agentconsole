@@ -695,8 +695,10 @@ selects itself.
   only while the call has not ended, and a hint of how many lines the
   output holds. The output is behind Ctrl-O or a second click on the
   row, which show the raw arguments and the whole output as before. A
-  running call keeps its progress line under the row's line, so a tool
-  that reports progress (a streaming bash, a sub-agent) reads live.
+  running call keeps a progress tail under the row's line — the last
+  lines of what the tool reported, five by default, and all of them
+  expanded — so a tool that streams its output (a running bash) reads
+  live; a call that has ended shows only the count.
 - **The arguments' key=value form is the client's, not the tool's.** The
   client knows no tool; it knows the arguments are a JSON object. A tool
   that wanted its own line (the command alone, say) would need a
