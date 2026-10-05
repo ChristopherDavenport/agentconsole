@@ -5,6 +5,22 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Changed: a function call's row is one line while it is collapsed. The
+  arguments show as their key=value pairs, each value clipped to 60
+  runes, instead of the raw JSON, and a call that has ended shows none
+  of its output, only a hint of how many lines it holds; Ctrl-O or a
+  second click on the row shows the raw arguments and the whole output
+  as before. The state suffix stays only while the call has not ended,
+  and a running call shows the last lines of the output a tool reports
+  as it goes, five by default, instead of only the first.
+- Fixed: the session pane did not refresh when a run ended: the final
+  update of the run's view could arrive while the prompt was still
+  returning, with the pane still held for the run, and nothing after
+  that asked for its data again. It is recomputed when the prompt
+  returns.
+
 ## v0.0.5 - 2026-10-04
 
 - Added: a mouse drag selects text on any part of the terminal client's

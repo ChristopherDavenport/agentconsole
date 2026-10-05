@@ -147,6 +147,13 @@ func TestRunCopiesASelectionToTheClipboard(t *testing.T) {
 	r := start(t, scripted.New(scripted.Say("po", "ng")))
 	r.type_("ping\r")
 	r.waitOutput("pong")
+	// The status line copied is the one at the copy, and the run that
+	// printed pong is still ending: wait for it to be over before the
+	// drag, or the copy races the relayout to idle.
+	for r.agent.State().Running {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
 	// A drag over the status line, always the first line of the screen.
 	r.type_("\x1b[<0;1;1M")    // press the left button at (0, 0)
 	r.type_("\x1b[<32;80;1M")  // drag to (79, 0)

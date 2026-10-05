@@ -347,11 +347,12 @@ headless) changed the sketch in these places.
   aborts and waits up to three seconds for the in-flight Prompt or Answer
   (`Model.Drain`) before cancelling and closing the store.
 - **Collapsing is global, or the selected row's.** Ctrl-R shows or hides
-  all reasoning, Ctrl-O shows tool arguments and output in full (three
-  lines and 120 columns otherwise). With a row selected they flip that
-  row alone: a row keeps which switches it has the other way round from
-  the global ones, by entry, and toggling a switch with no row selected
-  drops every row's flip of it, so a global toggle leaves the rows alike.
+  all reasoning, Ctrl-O shows tool arguments and output in full (one
+  line, the arguments compact, otherwise). With a row selected they flip
+  that row alone: a row keeps which switches it has the other way round
+  from the global ones, by entry, and toggling a switch with no row
+  selected drops every row's flip of it, so a global toggle leaves the
+  rows alike.
 - **The binary.** `cmd/agentconsole` runs an `agentturn.Agent` in
   process. `--session ID` or `--session ref:NAME` resumes,
   `--conversation NAME` resolves or creates the ref with
@@ -682,10 +683,38 @@ selects itself.
   reaches the screen's edge, and extending one with shift-click, are not
   there.
 
+## Decided in implementation, step 8 (tool rows)
+
+- **A collapsed call is one line.** The row of a function call showed the
+  raw JSON of its arguments and three lines of its output by default,
+  which for a coding session is the bulk of the screen: a read, a grep
+  and a bash are most of what a model does. Collapsed, the row is now
+  the tool's name and its arguments compact — the `key=value` pairs of
+  the arguments object, sorted by key, each value clipped to 60 runes so
+  the content of a write never takes the line — with the state suffix
+  only while the call has not ended, and a hint of how many lines the
+  output holds. The output is behind Ctrl-O or a second click on the
+  row, which show the raw arguments and the whole output as before. A
+  running call keeps a progress tail under the row's line — the last
+  lines of what the tool reported, five by default, and all of them
+  expanded — so a tool that streams its output (a running bash) reads
+  live; a call that has ended shows only the count.
+- **The arguments' key=value form is the client's, not the tool's.** The
+  client knows no tool; it knows the arguments are a JSON object. A tool
+  that wanted its own line (the command alone, say) would need a
+  per-tool renderer, which the client would then have to grow per tool,
+  and dex's print front has shown the generic form is readable enough.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
   once. A reviewer's argument edit, which agentpolicy supports, has no
   ACP shape. It shows only on native backends until ACP has one.
+- **A failed call on the record.** A tool that failed can be named on
+  the live row (`ToolFinished.Err`), but the call's entry carries only
+  the output the model saw, so once the entry lands the row cannot say
+  the call failed. Distinguishing failed calls after the fact needs a
+  field on the call's record, an `agentsession` change; until then a
+  collapsed failed call shows only its line count like any other.
 - **The repository's name.** `agentconsole` is a working name. It is
   fixed before the first push, since it is the module path.

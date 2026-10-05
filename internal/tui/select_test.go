@@ -134,7 +134,7 @@ func TestADragDoesNotSelectARow(t *testing.T) {
 	a := twoCallsApp(t)
 	// A drag over a row's line draws a selection; it does not put the
 	// cursor on the row, which a click would.
-	s := a.drag(`"text":"p"`, 0, 6)
+	s := a.drag(`text="p"`, 0, 6)
 	if strings.Contains(s, "▶") {
 		t.Errorf("the drag selected a row:\n%s", s)
 	}

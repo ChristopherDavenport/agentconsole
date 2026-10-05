@@ -74,13 +74,15 @@ func TestToolCallShowsItsStates(t *testing.T) {
 
 	a.submit("go")
 	g.arrive(t, "tool")
-	s := a.waitFor("the call running", has("upper [running]", `{"text":"abc"}`, "... working"))
+	s := a.waitFor("the call running", has(`upper text="abc" [running]`, "...", "working"))
 	if strings.Contains(s, "ABC") {
 		t.Errorf("output shown before the tool returned:\n%s", s)
 	}
 
 	g.release("tool")
-	s = a.waitFor("the call ended", all(has("upper [ended]", "ABC", "done", "idle"), lacks("(live)")))
+	a.waitFor("the call ended", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "done", "idle"), lacks("(live)", "ABC", "[running]")))
+	a.key(tea.KeyCtrlO)
+	s = a.waitFor("the output expanded", has("ABC"))
 	if n := strings.Count(s, "ABC"); n != 1 {
 		t.Errorf("output shown %d times, want 1 (the call row carries it):\n%s", n, s)
 	}
@@ -94,12 +96,28 @@ func TestLongToolOutputCollapsesUntilToggled(t *testing.T) {
 	cfg.Tools = []agenttool.Tool{long}
 	a := newApp(t, cfg)
 	a.submit("go")
-	s := a.waitFor("the call ended", has("lines [ended]", "idle", "ok"))
-	if strings.Contains(s, "l4") || !strings.Contains(s, "2 more lines") {
+	s := a.waitFor("the call ended", all(has(`lines text="x"`, `5 lines (ctrl+o)`, "idle", "ok")))
+	if strings.Contains(s, "l1") {
 		t.Errorf("output not collapsed:\n%s", s)
 	}
 	a.key(tea.KeyCtrlO)
 	a.waitFor("the output expanded", has("l4", "l5"))
+}
+
+// A long argument value is clipped on the row's line, so the content of
+// a write never pushes the conversation aside.
+func TestALongArgumentIsClippedOnTheRowLine(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	cfg := cfgWith(callTool("c", "write", `{"path":"a.txt","content":"`+long+`"}`), say(nil, nil, "ok"))
+	cfg.Tools = []agenttool.Tool{agenttool.New("write", "writes", func(_ context.Context, _ textArgs) (string, error) {
+		return "", nil
+	})}
+	a := newApp(t, cfg)
+	a.submit("go")
+	s := a.waitFor("the call ended", has(`write content="`+strings.Repeat("x", 60), "idle"))
+	if strings.Contains(s, strings.Repeat("x", 61)) {
+		t.Errorf("the argument value was not clipped:\n%s", s)
+	}
 }
 
 // twoCallsApp is an app whose model calls lines twice, with "p" and then
@@ -114,7 +132,7 @@ func twoCallsApp(t *testing.T) *app {
 	a := newApp(t, cfg)
 	a.resize(110, 50)
 	a.submit("go")
-	a.waitFor("both calls ended", all(has("p3", "q3", "ok", "idle"), lacks("p4", "q4")))
+	a.waitFor("both calls ended", all(has(`text="p"`, `text="q"`, "ok", "idle"), lacks("p3", "q3")))
 	return a
 }
 
@@ -170,13 +188,11 @@ func (a *app) dragCells(x0, y0, x1, y1 int) string {
 	return a.screen()
 }
 
-// underCursor is the line after the cursor's marker: a call's arguments
-// when the cursor is on a call.
-func underCursor(screen string) string {
-	lines := strings.Split(screen, "\n")
-	for i, l := range lines {
-		if strings.Contains(l, "▶") && i+1 < len(lines) {
-			return lines[i+1]
+// cursorLine is the line the row cursor rests on, marked with ▶.
+func cursorLine(screen string) string {
+	for _, l := range strings.Split(screen, "\n") {
+		if strings.Contains(l, "▶") {
+			return l
 		}
 	}
 	return ""
@@ -184,15 +200,15 @@ func underCursor(screen string) string {
 
 func TestClickingARowSelectsItAndClickingAgainExpandsIt(t *testing.T) {
 	a := twoCallsApp(t)
-	a.click(`"text":"p"`)
-	if s := a.screen(); !strings.Contains(underCursor(s), `"text":"p"`) || strings.Contains(s, "p4") {
+	a.click(`text="p"`)
+	if s := a.screen(); !strings.Contains(cursorLine(s), `text="p"`) || strings.Contains(s, "p4") {
 		t.Fatalf("the click did not just select the first call:\n%s", s)
 	}
-	a.click("p2")
+	a.click(`text="p"`)
 	a.waitFor("the first call expanded", all(has("p4", "p5"), lacks("q4")))
 	// Clicking another row moves the cursor and expands nothing.
-	a.click(`"text":"q"`)
-	if s := a.screen(); !strings.Contains(underCursor(s), `"text":"q"`) || strings.Contains(s, "q4") {
+	a.click(`text="q"`)
+	if s := a.screen(); !strings.Contains(cursorLine(s), `text="q"`) || strings.Contains(s, "q4") {
 		t.Fatalf("the click on the second call did not just select it:\n%s", s)
 	}
 	a.key(tea.KeyTab)
@@ -215,13 +231,13 @@ func TestApprovingAPermissionResumesTheRun(t *testing.T) {
 	a := newApp(t, cfg)
 
 	a.submit("go")
-	s := a.waitFor("the permission", has("Permission requested", "upper", "may I run upper?", "[y] approve", "[n] refuse", "requires action", "upper [deferred]"))
+	s := a.waitFor("the permission", has("Permission requested", "upper", "may I run upper?", "[y] approve", "[n] refuse", "requires action", `text="abc" [deferred]`))
 	if !strings.Contains(s, "(1/1)") {
 		t.Errorf("no count in the panel:\n%s", s)
 	}
 
 	a.typeText("y")
-	s = a.waitFor("the run finished", all(has("upper [ended]", "ABC", "done", "idle"), lacks("Permission requested")))
+	s = a.waitFor("the run finished", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "done", "idle"), lacks("Permission requested")))
 	_ = s
 }
 
@@ -237,10 +253,14 @@ func TestRefusingAPermissionRecordsTheReason(t *testing.T) {
 	a.waitFor("the reason prompt", has("Reason for refusing"))
 	a.typeText("too risky")
 	a.key(tea.KeyEnter)
-	s := a.waitFor("the refusal recorded", all(has("upper [ended]", "The user refused this call. Reason: too risky", "idle"), lacks("Permission requested")))
+	s := a.waitFor("the refusal recorded", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "idle"), lacks("Permission requested")))
 	if strings.Contains(s, "ABC") {
 		t.Errorf("the refused call ran:\n%s", s)
 	}
+	// The refusal's text is the call's output: hidden collapsed, and
+	// expanded by ctrl+o.
+	a.key(tea.KeyCtrlO)
+	a.waitFor("the refusal's text", has("The user refused this call. Reason: too risky"))
 }
 
 func TestRefusingWithNoReasonAndGoingBack(t *testing.T) {
@@ -256,7 +276,7 @@ func TestRefusingWithNoReasonAndGoingBack(t *testing.T) {
 	a.waitFor("back at the question", has("[y] approve"))
 	a.typeText("n")
 	a.key(tea.KeyEnter)
-	a.waitFor("the plain refusal", has("The user refused this call.", "idle"))
+	a.waitFor("the plain refusal", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "idle"), lacks("Permission requested")))
 }
 
 func TestEnterWhileRunningSteers(t *testing.T) {
@@ -365,7 +385,7 @@ func TestAnsweredPermissionIsNotOfferedAgainWhileTheViewLags(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	a.feedDelay.Store(0)
-	a.waitFor("the run finished", all(has("ABC", "done", "idle"), lacks("Permission requested")))
+	a.waitFor("the run finished", all(has(`1 line (ctrl+o)`, "done", "idle"), lacks("Permission requested")))
 }
 
 // TestDrainWaitsForTheRunsControlCall: after the program ends, a host
