@@ -5,6 +5,10 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: the MIT license.
+
 ## v0.0.6 - 2026-10-04
 
 - Changed: a function call's row is one line while it is collapsed. The
