@@ -249,7 +249,7 @@ func callApp(t *testing.T) *app {
 	a.submit("go")
 	a.waitFor("the permission", has("Permission requested"))
 	a.typeText("y")
-	a.waitFor("the call done", all(has("upper [ended]", "ABC", "done", "idle")))
+	a.waitFor("the call done", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "done", "idle")))
 	return a
 }
 
