@@ -140,8 +140,9 @@ func TestRunEndsARunItQuitsOver(t *testing.T) {
 }
 
 // TestRunCopiesASelectionToTheClipboard: a drag sent as a terminal sends
-// it in SGR mouse mode copies the selected text to the terminal's
-// clipboard with OSC 52, written to the output the program renders to.
+// it in SGR mouse mode draws the selection, and ctrl+c copies it to the
+// terminal's clipboard with OSC 52, written to the output the program
+// renders to.
 func TestRunCopiesASelectionToTheClipboard(t *testing.T) {
 	r := start(t, scripted.New(scripted.Say("po", "ng")))
 	r.type_("ping\r")
@@ -149,7 +150,8 @@ func TestRunCopiesASelectionToTheClipboard(t *testing.T) {
 	// A drag over the status line, always the first line of the screen.
 	r.type_("\x1b[<0;1;1M")    // press the left button at (0, 0)
 	r.type_("\x1b[<32;80;1M")  // drag to (79, 0)
-	r.type_("\x1b[<0;80;1m")   // release
+	r.type_("\x1b[<0;80;1m")   // release: the selection stays, nothing copied
+	r.type_("\x03")            // ctrl+c: the copy is a choice
 	r.waitOutput("\x1b]52;c;") // the clipboard was set
 	out := r.out.String()
 	i := strings.Index(out, "\x1b]52;c;")

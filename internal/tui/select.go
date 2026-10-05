@@ -7,9 +7,12 @@ package tui
 // selection cannot reach it: a drag is reported to the program, not to
 // the terminal, and which modifier bypasses mouse reporting is the
 // terminal's choice, not the client's. So the client selects itself. A
-// left drag marks a range of the screen, and the release copies it to
-// the terminal's clipboard with OSC 52, the one channel a program in the
-// alternate screen has to the clipboard (it works over ssh too).
+// left drag marks a range of the screen and draws it; copying is a
+// choice, not a side effect of the drag: ctrl+c with a selection drawn
+// sends the selection's plain text to the terminal's clipboard with
+// OSC 52, the one channel a program in the alternate screen has to the
+// clipboard (it works over ssh too), as a desktop's copy does — and
+// drops the selection, so the next ctrl+c is the interrupt again.
 //
 // A click, a press and a release with no motion between, still selects
 // the row under it (a second click on that row expands it), as it did.
@@ -53,9 +56,10 @@ func Clipboard(w io.Writer) func(string) {
 func WithCopier(fn func(string)) Option { return func(m *Model) { m.copier = fn } }
 
 // mouse is every mouse event. A left press anchors both a click and a
-// selection; motion with the button down selects, and the release either
-// copies what was selected or, when no motion came between, clicks the
-// row under it. Anything else goes to the viewport, which scrolls.
+// selection; motion with the button down selects, and the release ends
+// the drag, leaving the selection drawn — or, when no motion came
+// between, clicks the row under it. Anything else goes to the viewport,
+// which scrolls.
 func (m *Model) mouse(msg tea.MouseMsg) tea.Cmd {
 	if msg.Button == tea.MouseButtonLeft {
 		switch msg.Action {
@@ -81,8 +85,7 @@ func (m *Model) mouse(msg tea.MouseMsg) tea.Cmd {
 			}
 			m.pressed = false
 			if m.sel != nil {
-				m.copySelection()
-				return nil
+				return nil // a drag, not a click: the selection stays drawn
 			}
 			return m.click(msg.Y)
 		}
@@ -92,13 +95,14 @@ func (m *Model) mouse(msg tea.MouseMsg) tea.Cmd {
 	return cmd
 }
 
-// clearSelection drops a drawn selection: any key does, as a terminal's
-// own selection goes on typing.
+// clearSelection drops a drawn selection: any key but ctrl+y does, as a
+// terminal's own selection goes on typing.
 func (m *Model) clearSelection() { m.sel = nil }
 
-// copySelection copies the selected region's plain text and notes it on
-// the status line. The lines are the last frame's, which is what the
-// pointer was over.
+// copySelection is ctrl+c with a selection drawn: it copies the
+// selected region's plain text and notes it on the status line. The
+// lines are the last frame's, which is what the pointer was over. The
+// caller drops the selection.
 func (m *Model) copySelection() {
 	if m.copier == nil {
 		return

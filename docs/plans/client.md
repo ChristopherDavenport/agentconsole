@@ -637,9 +637,10 @@ selects itself.
   cell; motion with the button down extends the region, in reading
   order (whole lines between the first and the last, columns on those
   two, the topmost cell first whatever way the drag went); the release
-  copies it. A click, a press and a release with no motion between,
-  still selects the row under it and a second click on that row expands
-  it, as before: only the release acts, so a drag never selects a row.
+  ends the drag and leaves the selection drawn. A click, a press and a
+  release with no motion between, still selects the row under it and a
+  second click on that row expands it, as before: only the release acts,
+  so a drag never selects a row.
 - **The region is of the frame, not the model.** The selection is cut
   from the lines the last `View` rendered, so it covers anything on the
   screen — the conversation, the panes, the tree, the status line — and
@@ -647,15 +648,24 @@ selects itself.
   columns keeps the escape sequences where they sit (they carry no
   width), and a wide rune or a combining mark cut at its boundary stays
   whole.
-- **Copy is OSC 52**, the one channel a program in the alternate screen
-  has to the clipboard; it works over ssh too. The copied text is the
-  region's plain text, escape codes stripped and each line trimmed of
-  the padding the layout adds, so a dragged status line copies its
-  words, not its spaces. The release puts it on the clipboard and the
-  status line says "copied". A terminal that does not take OSC 52 (iTerm2
-  needs "Applications in terminal may access clipboard" on) silently
-  copies nothing; the note is still "copied", since the client cannot
-  ask a terminal whether it took the sequence.
+- **Copy is a choice, ctrl+c, as a desktop's copy.** The terminal's own
+  copy chords (Cmd-C, Ctrl-Shift-C) are the terminal's, for the
+  terminal's own selection, and never reach the client; ctrl+c is the
+  one copy key the client sees. With a selection drawn it sends the
+  region's plain text to the clipboard with OSC 52, the one channel a
+  program in the alternate screen has to the clipboard (it works over
+  ssh too), and drops the selection, so the next ctrl+c is the interrupt
+  again: a selection makes the first ctrl+c the copy and the second the
+  abort or the quit, the rhythm a second ctrl+c already had; while a run
+  goes the copy still comes first, or it would be unreachable mid-run.
+  A signal from outside (SIGINT, SIGTERM) always interrupts. The copied
+  text is the region's plain text, escape codes stripped and each line
+  trimmed of the padding the layout adds, so a dragged status line
+  copies its words, not its spaces, and the status line says "copied".
+  A terminal that does not take OSC 52 (iTerm2 needs "Applications in
+  terminal may access clipboard" on) silently copies nothing; the note
+  is still "copied", since the client cannot ask a terminal whether it
+  took the sequence.
 - **The selection stays drawn**, reversed like a terminal's own, until
   the next key or the next press. It is not cleared by the frames under
   it: a streaming conversation reflows under the selection, as a
@@ -668,12 +678,9 @@ selects itself.
   frame. `console.Run` passes the program's own output writer, or
   standard output, so an embedder's test sees the sequence in the buffer
   it reads.
-- **Not done.** Copying without the mouse (a key that copies the
-  selected row, or the session's id) is not there: the drag reaches
-  everything on the screen, and a key that copied the row cursor's row
-  would copy one thing where the drag copies any. A selection that
-  scrolls the viewport when the drag reaches the screen's edge is not
-  there either.
+- **Not done.** A selection that scrolls the viewport when the drag
+  reaches the screen's edge, and extending one with shift-click, are not
+  there.
 
 ## Open questions
 
