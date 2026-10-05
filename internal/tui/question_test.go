@@ -50,7 +50,7 @@ func TestASubagentsQuestionIsAskedWhileTheRunGoes(t *testing.T) {
 	a.submit("go")
 	a.waitFor("the question", has("Question (1/1): write", `notes.md`, "the task sub-agent asks: no rule allows write", "[y] allow", "[n] refuse", "running"))
 	a.typeText("y")
-	a.waitFor("the run finished", all(has("SUBAGENT WROTE", "done", "idle"), lacks("Question (1/1)")))
+	a.waitFor("the run finished", all(has(`task text="go"`, `1 line (ctrl+o)`, "done", "idle"), lacks("Question (1/1)")))
 }
 
 func TestRefusingASubagentsQuestionSendsTheReason(t *testing.T) {
@@ -64,7 +64,9 @@ func TestRefusingASubagentsQuestionSendsTheReason(t *testing.T) {
 	a.typeText("n")
 	a.typeText("wrong file")
 	a.key(tea.KeyEnter)
-	a.waitFor("the refusal reached the call", all(has("SUBAGENT REFUSED wrong file", "done", "idle"), lacks("Question (1/1)")))
+	a.waitFor("the refusal reached the call", all(has(`task text="go"`, "done", "idle"), lacks("Question (1/1)")))
+	a.key(tea.KeyCtrlO)
+	a.waitFor("the refusal's text", has("SUBAGENT REFUSED wrong file"))
 }
 
 func TestAToolsOwnQuestionIsYesOrNo(t *testing.T) {
@@ -72,5 +74,5 @@ func TestAToolsOwnQuestionIsYesOrNo(t *testing.T) {
 	a.submit("go")
 	a.waitFor("the question", all(has("Question (1/1)", "a tool asks: continue?", "[y] yes", "[n] no"), lacks("[y] allow")))
 	a.typeText("y")
-	a.waitFor("the run finished", has("SUBAGENT WROTE", "idle"))
+	a.waitFor("the run finished", all(has(`task text="go"`, `1 line (ctrl+o)`, "idle"), lacks("Question (1/1)")))
 }

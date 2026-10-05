@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -29,6 +31,10 @@ const cursor = "▍"
 
 // outputLines is how much of a tool's output shows while it is collapsed.
 const outputLines = 3
+
+// argRunes is how many runes a collapsed row shows of one argument
+// value.
+const argRunes = 60
 
 // opts are the rendering switches the user toggles: for every row, or, as
 // a row's flips, the switches that row has the other way round.
@@ -185,11 +191,31 @@ func renderRow(row view.Row, o opts) string {
 
 func renderCall(c view.Call, o opts, tag string, depth int) string {
 	pad := strings.Repeat("  ", depth)
-	head := toolStyle.Render("⚙ "+c.Name) + " [" + c.State.String() + "]" + tag
 	var b strings.Builder
-	b.WriteString(pad + head)
-	if c.Args != "" {
-		b.WriteString("\n" + pad + "  args: " + clipLine(c.Args, o.output))
+	if o.output {
+		// Expanded: the raw arguments on their own line, and the whole
+		// output, the way the model saw them.
+		b.WriteString(pad + toolStyle.Render("⚙ "+c.Name) + " [" + c.State.String() + "]" + tag)
+		if c.Args != "" {
+			b.WriteString("\n" + pad + "  args: " + c.Args)
+		}
+	} else {
+		// Collapsed: one line, the name and the arguments compact, the
+		// state only while the call has not ended. What the call
+		// produced is behind ctrl+o or a second click; the hint says
+		// how much of it there is, so a row stays one line however
+		// much output it carries.
+		head := toolStyle.Render("⚙ " + c.Name)
+		if c.Args != "" {
+			head += " " + compactArgs(c.Args)
+		}
+		if c.State != view.CallEnded {
+			head += " [" + c.State.String() + "]"
+		}
+		if c.State == view.CallEnded && !c.Committed {
+			head += dimStyle.Render(" (live)")
+		}
+		b.WriteString(pad + head + tag)
 	}
 	switch c.State {
 	case view.CallDeferred:
@@ -207,11 +233,16 @@ func renderCall(c view.Call, o opts, tag string, depth int) string {
 	case view.CallCutOff:
 		b.WriteString("\n" + pad + "  " + warnStyle.Render("cut off before it was answered"))
 	case view.CallEnded:
-		out := c.Output
-		if !c.Committed {
-			out += dimStyle.Render(" (live)")
+		if o.output {
+			out := c.Output
+			if !c.Committed {
+				out += dimStyle.Render(" (live)")
+			}
+			b.WriteString("\n" + pad + "  ↳ " + indent(clip(out, o.output), pad+"    "))
+		} else if c.Output != "" {
+			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
+			b.WriteString("\n" + pad + "  " + dimStyle.Render(countHint(n)))
 		}
-		b.WriteString("\n" + pad + "  ↳ " + indent(clip(out, o.output), pad+"    "))
 	}
 	if c.Verdict != "" && c.Verdict != "proceed" {
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
@@ -220,6 +251,41 @@ func renderCall(c view.Call, o opts, tag string, depth int) string {
 		b.WriteString("\n" + renderCall(ch, o, "", depth+1))
 	}
 	return b.String()
+}
+
+// countHint is the collapsed hint of an output's size.
+func countHint(n int) string {
+	if n == 1 {
+		return "· 1 line (ctrl+o)"
+	}
+	return fmt.Sprintf("· %d lines (ctrl+o)", n)
+}
+
+// compactArgs is the arguments on a collapsed row's line: the key=value
+// pairs of a JSON object, each value one line, sorted by key so a row
+// reads the same however the model ordered them. A value longer than
+// argRunes runes is cut, whatever it is: the arguments of a write carry
+// a file's whole content. Anything that is not a JSON object is shown
+// as it is.
+func compactArgs(raw string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(raw), &m) != nil {
+		return clipLine(raw, false)
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := fmt.Sprint(m[k])
+		if r := []rune(v); len(r) > argRunes {
+			v = string(r[:argRunes]) + "…"
+		}
+		parts = append(parts, fmt.Sprintf("%s=%q", k, v))
+	}
+	return strings.Join(parts, " ")
 }
 
 // clip shortens s to a few lines unless full.
