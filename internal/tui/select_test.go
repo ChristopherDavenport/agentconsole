@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -183,6 +184,62 @@ func TestCtrlCWithoutASelectionQuits(t *testing.T) {
 	a.waitQuit()
 	if got := a.copied(); len(got) != 0 {
 		t.Errorf("ctrl+c with nothing selected copied %q", got)
+	}
+}
+
+// The selection is held on the text, not on the screen: a run streaming
+// below it scrolls the conversation up, and the selection goes with the
+// text, so ctrl+c copies what was selected, even scrolled out of sight.
+func TestTheSelectionStaysOnItsTextWhileARunStreams(t *testing.T) {
+	g := newGates()
+	more := ""
+	for i := 1; i <= 40; i++ {
+		more += fmt.Sprintf("\n\nline %d", i)
+	}
+	a := newApp(t, cfgWith(say(g, map[int]string{0: "hold"}, "first words", more)))
+	t.Cleanup(func() { g.release("hold") })
+
+	a.submit("hi")
+	g.arrive(t, "hold")
+	a.waitFor("the first chunk streaming", all(has("first words"+cursor, "running")))
+	y := lineOf(a.screen(), "first words")
+	a.drag("first words", 0, 11)
+
+	g.release("hold")
+	s := a.waitFor("the answer committed", all(has("line 40", "idle")))
+	if lineOf(s, "first words") == y {
+		t.Fatalf("the text did not move; the test proves nothing:\n%s", s)
+	}
+	if !a.m.Selecting() {
+		t.Fatalf("the selection was dropped by the run:\n%s", s)
+	}
+	a.key(tea.KeyCtrlC)
+	if got := a.copied(); len(got) != 1 || got[0] != "first words" {
+		t.Errorf("copied %q, want [\"first words\"]", got)
+	}
+}
+
+// The wheel scrolls the text under the selection, and the selection with
+// it.
+func TestTheSelectionStaysOnItsTextWhenScrolled(t *testing.T) {
+	more := ""
+	for i := 1; i <= 40; i++ {
+		more += fmt.Sprintf("\n\nline %d", i)
+	}
+	a := newApp(t, cfgWith(say(nil, nil, "first words", more)))
+	a.submit("hi")
+	a.waitFor("the answer", all(has("line 40", "idle")))
+
+	a.drag("line 40", 0, 7)
+	for range 5 {
+		a.send(tea.MouseMsg{X: 0, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	}
+	if s := a.screen(); strings.Contains(s, "line 40") {
+		t.Fatalf("the wheel did not scroll the text away; the test proves nothing:\n%s", s)
+	}
+	a.key(tea.KeyCtrlC)
+	if got := a.copied(); len(got) != 1 || got[0] != "line 40" {
+		t.Errorf("copied %q, want [\"line 40\"]", got)
 	}
 }
 
