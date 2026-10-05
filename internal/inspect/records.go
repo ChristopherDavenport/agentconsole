@@ -46,7 +46,7 @@ func skillReads(path []agentsession.Entry) map[string]bool {
 }
 
 // skillOf names the skill a rule source stands for: agentkit's default
-// "agentskill:NAME", or a product's own naming ("skill:NAME" in dex) when
+// "agentskill:NAME", or a product's own naming ("skill:NAME" in dax) when
 // the path holds a read of the skill NAME, which is how a source the
 // product named is told from a settings file's.
 func skillOf(source string, reads map[string]bool) (string, bool) {

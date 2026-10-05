@@ -162,7 +162,7 @@ views only, labelled as unverified.
 4. **The ACP client backend,** tested against `front/acp` over a pipe,
    so both sides of ACP are exercised by stack code.
 5. **Extract the contract** once the wire backend or a second client
-   needs it. Done for the first embedder, dex: see "Decided in
+   needs it. Done for the first embedder, dax: see "Decided in
    implementation, step 5 (the library)".
 
 ## Decided in implementation
@@ -501,7 +501,7 @@ headless) changed the sketch in these places.
 
 ## Decided in implementation, step 5 (the library)
 
-dex, a coding agent in its own repository, is the second consumer: it
+dax, a coding agent in its own repository, is the second consumer: it
 imports agentconsole and runs the client over its own agentkit kit.
 
 - **The public surface.** `client`, `client/native`,
@@ -588,7 +588,7 @@ imports agentconsole and runs the client over its own agentkit kit.
 - **The host asks through the backend.** `native.Backend.Ask(ctx, q)`
   blocks until a client replies or ctx ends; `kitbackend` has it by
   embedding. It is not on `Control`: the asking side is the host's code
-  (dex's sub-agent policy, its tool elicitor), not the client's. The
+  (dax's sub-agent policy, its tool elicitor), not the client's. The
   answer is: `Control.Reply(id, r)` returns at once, since the call goes
   on by itself.
 - **Questions travel as live events and are not recorded here.**
@@ -612,7 +612,7 @@ imports agentconsole and runs the client over its own agentkit kit.
   nothing: a pending call is in `Control.State().Pending`, so the client
   asks about it as it does a live one, and the answer, with no `RunEnd` of
   this process, resumes it.
-- **`inspect` reads a product's own skill source names.** dex names its
+- **`inspect` reads a product's own skill source names.** dax names its
   grant sources `skill:NAME`, not agentkit's default `agentskill:NAME`, and
   the pane showed no grants. A source is now a skill's when it has the
   default prefix, or when its last segment is the name of a skill the path
@@ -703,7 +703,7 @@ selects itself.
   client knows no tool; it knows the arguments are a JSON object. A tool
   that wanted its own line (the command alone, say) would need a
   per-tool renderer, which the client would then have to grow per tool,
-  and dex's print front has shown the generic form is readable enough.
+  and dax's print front has shown the generic form is readable enough.
 
 ## Open questions
 
