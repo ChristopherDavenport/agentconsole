@@ -106,10 +106,15 @@ func TestClickingAScrolledInput(t *testing.T) {
 }
 
 // Right after a paste the textarea has not scrolled yet: it shows the
-// first rows with the cursor below them. The click still lands on the
-// row shown under it.
+// first rows with the cursor below them, until its next Update. The click
+// still lands on the row shown under it. The cursor is kept from
+// blinking, since a blink's message would be that next Update, at a time
+// of its own.
 func TestClickingAnInputNotScrolledToItsCursor(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
+	a.mu.Lock()
+	a.m.StillCursor()
+	a.mu.Unlock()
 	a.paste("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8")
 	if s := a.screen(); !strings.Contains(s, "line1") || strings.Contains(s, "line8") {
 		t.Fatalf("the input scrolled after the paste; the test proves nothing:\n%s", s)
@@ -124,7 +129,8 @@ func TestClickingAnInputNotScrolledToItsCursor(t *testing.T) {
 func TestClickingTheInputLeavesTheRows(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
-	a.waitFor("the answer", all(has("hello world", "idle")))
+	// Committed: a row still overlay (not committed yet) takes no cursor.
+	a.waitFor("the answer", all(has("hello world", "idle"), lacks("(not committed yet)")))
 	a.click("hello world")
 	a.waitFor("the row selected", has("▶"))
 	a.key(tea.KeyTab)

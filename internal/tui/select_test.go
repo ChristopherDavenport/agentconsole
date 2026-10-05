@@ -99,7 +99,8 @@ func TestCtrlCCopiesWhileARunGoes(t *testing.T) {
 func TestCtrlCCopiesWholeLinesBetween(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
-	a.waitFor("the answer", all(has("hello world", "idle")))
+	// Committed, so the label is the committed one.
+	a.waitFor("the answer", all(has("hello world", "idle"), lacks("(not committed yet)")))
 
 	// From the label's line to the text's: whole lines between, columns
 	// on the two ends.
@@ -163,7 +164,8 @@ func TestAKeyButCtrlCClearsTheSelection(t *testing.T) {
 func TestAClickWithoutMotionSelectsTheRowAndCopiesNothing(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
-	a.waitFor("the answer", all(has("hello world", "idle")))
+	// Committed: a row still overlay (not committed yet) takes no cursor.
+	a.waitFor("the answer", all(has("hello world", "idle"), lacks("(not committed yet)")))
 
 	a.click("hello world")
 	if got := a.copied(); len(got) != 0 {
@@ -201,7 +203,9 @@ func TestTheSelectionStaysOnItsTextWhileARunStreams(t *testing.T) {
 
 	a.submit("hi")
 	g.arrive(t, "hold")
-	a.waitFor("the first chunk streaming", all(has("first words"+cursor, "running")))
+	// The prompt's row drawn above it first: a row inserted above a
+	// selection moves its text but not the selection (see the plan).
+	a.waitFor("the first chunk streaming", all(has("first words"+cursor, "running"), promptRow("hi")))
 	y := lineOf(a.screen(), "first words")
 	a.drag("first words", 0, 11)
 
@@ -228,7 +232,7 @@ func TestTheSelectionStaysOnItsTextWhenScrolled(t *testing.T) {
 	}
 	a := newApp(t, cfgWith(say(nil, nil, "first words", more)))
 	a.submit("hi")
-	a.waitFor("the answer", all(has("line 40", "idle")))
+	a.waitFor("the answer", all(has("line 40", "idle"), lacks("(not committed yet)")))
 
 	a.drag("line 40", 0, 7)
 	for range 5 {
@@ -240,6 +244,19 @@ func TestTheSelectionStaysOnItsTextWhenScrolled(t *testing.T) {
 	a.key(tea.KeyCtrlC)
 	if got := a.copied(); len(got) != 1 || got[0] != "line 40" {
 		t.Errorf("copied %q, want [\"line 40\"]", got)
+	}
+}
+
+// promptRow is whether the screen shows a line that is text alone, the
+// user's prompt under its label.
+func promptRow(text string) func(screen string) bool {
+	return func(screen string) bool {
+		for _, l := range strings.Split(screen, "\n") {
+			if strings.TrimSpace(l) == text {
+				return true
+			}
+		}
+		return false
 	}
 }
 

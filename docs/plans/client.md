@@ -691,7 +691,12 @@ selects itself.
   viewport shows it, and a selection with both ends there copies from
   the content, the part scrolled out of sight too. An end anywhere else
   (the status line, the panes, the input) stays a line of the screen,
-  and a selection with one there is cut from the frame as before.
+  and a selection with one there is cut from the frame as before. A
+  line number follows a scroll and text added below, not a row inserted
+  above (the prompt's row landing after the answer started streaming,
+  in the first moments of a run) nor a rewrap at a resize: those move
+  the text and leave the selection. Holding an end by its row and a line
+  within the row would cover them.
 
 ## Decided in implementation, step 9 (clicking into things)
 
