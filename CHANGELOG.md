@@ -5,6 +5,24 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: a mouse drag selects text on any part of the terminal client's
+  screen — the conversation, the panes, the top bar — and the selection
+  stays drawn until the next key or press; the terminal's own selection
+  cannot reach the client, since the client has the mouse. Ctrl-C with
+  a selection drawn copies it to the terminal's clipboard with OSC 52,
+  which works over ssh too, as a desktop's copy does; it drops the
+  selection, so the next Ctrl-C is the abort or the quit it always was,
+  and with nothing selected Ctrl-C is that interrupt. A click with no
+  drag between the press and the release still selects the row under it
+  (a second one expands it). The copied text is what the selection holds
+  with the layout's padding trimmed; a terminal that does not take
+  OSC 52 (iTerm2 needs "Applications in terminal may access clipboard"
+  on) copies nothing. `tui.WithCopier` and `tui.Clipboard`, where a copy
+  goes, are the console's: `console.Run` writes the sequence to the
+  output the program renders to.
+
 ## v0.0.4 - 2026-10-04
 
 - Added: `client.Cost` names the price hook, and `console.WithCost` /
