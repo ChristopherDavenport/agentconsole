@@ -212,6 +212,12 @@ type app struct {
 
 	store agentsession.Store
 	rec   *session.Recorder
+
+	// copies are the selections the model copied, in order, under copyMu:
+	// the model copies from Update, which runs under mu, so the copies
+	// have a lock of their own.
+	copyMu sync.Mutex
+	copies []string
 }
 
 // starter opens the session the app's recorder writes, on the store.
@@ -244,7 +250,12 @@ func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{t: t, ctx: ctx, cancel: cancel, m: tui.New(ctx, be), store: store, rec: rec, be: be}
+	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, be: be}
+	a.m = tui.New(ctx, be, tui.WithCopier(func(text string) {
+		a.copyMu.Lock()
+		defer a.copyMu.Unlock()
+		a.copies = append(a.copies, text)
+	}))
 	a.wait = tui.Attach(ctx, be, func(msg tea.Msg) {
 		if _, ok := msg.(tui.ModelMsg); ok {
 			time.Sleep(time.Duration(a.feedDelay.Load()))
@@ -300,6 +311,13 @@ func (a *app) screen() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.m.View()
+}
+
+// copied is what the model copied to the clipboard, in order.
+func (a *app) copied() []string {
+	a.copyMu.Lock()
+	defer a.copyMu.Unlock()
+	return append([]string(nil), a.copies...)
 }
 
 func (a *app) waitQuit() {
