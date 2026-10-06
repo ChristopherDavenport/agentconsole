@@ -541,11 +541,19 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if p, _, ok := m.pending(); ok {
 		return m.permissionKey(msg, p)
 	}
+	if isNewlineKey(msg) {
+		return m, m.newline()
+	}
 	if msg.Code == tea.KeyEnter {
 		return m.send()
 	}
 	return m, m.updateInput(msg)
 }
+
+// newline breaks the input's line at the cursor, as a pasted line break
+// does: through the paste path, which replaces a selection and is not
+// held to the textarea's MaxHeight lines, as its own newline key is.
+func (m *Model) newline() tea.Cmd { return m.updateInput(tea.PasteMsg{Content: "\n"}) }
 
 // paste puts a paste in the input where a typed key would reach it: on
 // the conversation and not read only. A paste is never a y or an n: while
@@ -563,6 +571,9 @@ func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
 // then refuses with it.
 func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model, tea.Cmd) {
 	if m.refusing {
+		if isNewlineKey(msg) {
+			return m, m.newline()
+		}
 		switch msg.Code {
 		case tea.KeyEnter:
 			reason := strings.TrimSpace(m.in.Value())
@@ -593,6 +604,9 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 // reason is typed, Enter sends it and Esc goes back.
 func (m *Model) questionKey(msg tea.KeyPressMsg, q client.Question) (tea.Model, tea.Cmd) {
 	if m.refusingQ {
+		if isNewlineKey(msg) {
+			return m, m.newline()
+		}
 		switch msg.Code {
 		case tea.KeyEnter:
 			note := strings.TrimSpace(m.in.Value())
@@ -914,10 +928,13 @@ func (m *Model) updateInput(msg tea.Msg) tea.Cmd {
 // inputRowsUsed is how many screen rows the input needs for value at
 // width columns: each logical line contributes its soft-wrapped rows. A
 // pasted value keeps its newlines, so blank input is one row and a
-// four-line paste is four rows (more when a line wraps).
+// four-line paste is four rows (more when a line wraps). A value ending
+// in a newline ends on an empty row, where the cursor sits after a line
+// break, so the lines are split on the newline, as the textarea keeps
+// them, and not taken by strings.Lines, which has no row after the last.
 func inputRowsUsed(value string, width int) int {
 	rows := 0
-	for line := range strings.Lines(value) {
+	for line := range strings.SplitSeq(value, "\n") {
 		rows += wrapRows([]rune(line), width)
 	}
 	return max(rows, 1)

@@ -21,7 +21,7 @@ type keyGroup struct {
 
 var keyGroups = []keyGroup{
 	{"Conversation", [][2]string{
-		{"Enter", "send a prompt, or steer the run in flight"},
+		{"Enter", "send a prompt or steer the run; Shift-Enter, Alt-Enter, Ctrl-J: new line"},
 		{"Ctrl-C", "copy the selection when one is drawn; otherwise abort the run, quit when idle (a second one quits at once)"},
 		{"PgUp PgDn", "scroll a page"},
 		{"Ctrl-Up Ctrl-Down", "scroll a line"},
@@ -82,6 +82,19 @@ func renderKeys() string {
 func isKeysKey(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case "ctrl+/", "ctrl+_", "f1":
+		return true
+	}
+	return false
+}
+
+// isNewlineKey is whether msg breaks the input's line rather than sending
+// it. Only a terminal that speaks the kitty keyboard protocol (which
+// bubbletea asks for) reports Shift+Enter apart from Enter; the rest send
+// both as a carriage return. Alt+Enter (ESC CR) and Ctrl+J (a line feed)
+// reach the client from every terminal, so they break the line too.
+func isNewlineKey(msg tea.KeyPressMsg) bool {
+	switch msg.String() {
+	case "shift+enter", "alt+enter", "ctrl+j":
 		return true
 	}
 	return false
