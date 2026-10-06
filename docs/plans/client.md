@@ -915,6 +915,19 @@ selects itself.
   closes its queued entry, and the recorder writes it again after the
   end for an input the agent still holds, so the list shows it, except
   for the one step between those two entries.
+- **What was queued is delivered, abort and quit included.** A queued
+  input is part of the history, and replaying or forking a session is
+  cheap, so nothing the user sent is dropped. An abort leaves the
+  agent's queues alone, and the next run takes the input after its
+  prompt. A quit ends the agent's queue, which lives in memory, but the
+  record still owes the input, so `native.New` hands the agent what the
+  session owes (`Recorder.Requeue`), on a resumed session and on a
+  fork's base. The next run takes each input as the first process would
+  have, and the item names the queued entry written before the quit.
+  Without this, the list would show an input the agent did not hold,
+  and the next run's end would close it unsent. `New` has to be called
+  before the agent's first run, as the recorder's attach already had
+  to be.
 - **The TUI lists it over the input.** Under the run line, one dimmed
   line each: "queued: …", "queued for the end of the run: …" for a
   follow-up, "queued for the next run: …" once no run goes; three at

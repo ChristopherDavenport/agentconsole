@@ -18,6 +18,10 @@ versions may break the API.
 - Changed (breaking): `client.Control.Steer` is
   `Steer(ctx, items...) error`. The context carries a trigger for the
   record; the error says the input was not queued.
+- Changed: `native.New` (and so `kitbackend.New`) hands the agent the
+  inputs a resumed session, or a fork's base, still owes: a steer or
+  follow-up queued before an abort and a quit is listed as queued and
+  taken by the next run, after its prompt, rather than dropped.
 - Added: Shift-Enter puts a new line in the input, where Enter sends it;
   in a refusal's reason too. A terminal reports Shift-Enter apart from
   Enter only over the kitty keyboard protocol, so Alt-Enter and Ctrl-J
