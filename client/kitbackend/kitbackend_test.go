@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/console"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
 	"github.com/ChristopherDavenport/agentconsole/internal/scripted"
+	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -510,26 +510,11 @@ func TestAToolsQuestionIsRecordedUnderItsCall(t *testing.T) {
 	}
 }
 
-type syncBuf struct {
-	mu sync.Mutex
-	b  strings.Builder
-}
-
-func (s *syncBuf) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuf) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
-
 // TestConsoleApprovesAKitCallFromTheTerminal: console.Run over the kit
 // backend, on a pipe. The permission is shown, y approves it, and the
-// tool's reply reaches the screen.
+// tool's reply reaches the screen, read through a terminal: the renderer
+// writes only the cells that change, so a word is seldom whole in the
+// bytes written.
 func TestConsoleApprovesAKitCallFromTheTerminal(t *testing.T) {
 	var ran atomic.Int32
 	m := scripted.New(scripted.Call("c1", "danger", `{}`), scripted.Say("tool said ok"))
@@ -540,7 +525,8 @@ func TestConsoleApprovesAKitCallFromTheTerminal(t *testing.T) {
 	defer cancel()
 	pr, pw := io.Pipe()
 	defer pw.Close()
-	out := &syncBuf{}
+	out := termtest.New(100, 30)
+	defer out.Close()
 	done := make(chan error, 1)
 	go func() {
 		done <- console.Run(ctx, be, console.WithInput(pr), console.WithOutput(out), console.WithWindowSize(100, 30), console.WithoutSignalHandler())
@@ -548,9 +534,9 @@ func TestConsoleApprovesAKitCallFromTheTerminal(t *testing.T) {
 	wait := func(sub string) {
 		t.Helper()
 		deadline := time.Now().Add(10 * time.Second)
-		for !strings.Contains(out.String(), sub) {
+		for !strings.Contains(out.Screen(), sub) {
 			if time.Now().After(deadline) {
-				t.Fatalf("%q never shown; output:\n%q", sub, out.String())
+				t.Fatalf("%q never shown; screen:\n%s", sub, out.Screen())
 			}
 			time.Sleep(10 * time.Millisecond)
 		}

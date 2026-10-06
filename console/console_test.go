@@ -171,7 +171,7 @@ func TestRunCopiesASelectionToTheClipboard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the clipboard text is not base64: %v", err)
 	}
-	if !strings.Contains(string(text), "idle") {
+	if !strings.Contains(string(text), "model scripted") {
 		t.Errorf("the status line was not copied: %q", text)
 	}
 	if strings.TrimRight(string(text), " ") != string(text) {

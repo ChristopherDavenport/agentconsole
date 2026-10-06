@@ -7,6 +7,19 @@ versions may break the API.
 
 ## Unreleased
 
+- Changed: the run's state (running, aborting, requires action, idle)
+  moves from the status line at the top to a run line of its own above
+  the input, in color, with a spinner at its right edge while
+  a run goes. A tool call's row starts with a dot as the run line does,
+  in place of its gear: ● in motion (its arguments streaming, or the tool
+  running), ◆ waiting on a permission, ○ at rest, so its name lines up
+  with the run's state. A call in motion is drawn in the run line's color,
+  with the same spinner at the right edge, in the run line's spinner's
+  column. A blank line sits on each side of the run line.
+- Fixed: the input is drawn on the terminal's own background. bubbles'
+  textarea gave the line the cursor is on a background of its own (ANSI
+  black on a dark terminal, color 255 on a light one), a band of another
+  color across the input on most terminals.
 - Changed: the terminal toolkit is Bubble Tea v2 (`charm.land/bubbletea/v2`
   v2.0.10, with bubbles v2 and lipgloss v2), and Go 1.26 is the floor. No
   exported name changed. Ctrl-/ opens the keys on terminals that speak the

@@ -23,7 +23,7 @@ func TestStatusTextShowsRunningCost(t *testing.T) {
 		}
 		return (float64(u.InputTokens) + 2*float64(u.OutputTokens)) / 1000, true
 	})
-	s := statusText(m, false, false, true, cost)
+	s := statusText(m, true, cost)
 	for _, want := range []string{"tokens 300 in, 50 out", "$0.4000"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("status lacks %q:\n%s", want, s)
@@ -39,7 +39,7 @@ func TestStatusTextNamesUnpricedModels(t *testing.T) {
 		},
 	}
 	cost := client.Cost(func(string, openresponses.Usage) (float64, bool) { return 0, false })
-	s := statusText(m, false, false, true, cost)
+	s := statusText(m, true, cost)
 	if !strings.Contains(s, "unpriced: provider/model-name") {
 		t.Errorf("status does not name the unpriced model:\n%s", s)
 	}

@@ -21,6 +21,7 @@ var (
 	assistantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
 	dimStyle       = lipgloss.NewStyle().Faint(true)
 	toolStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	runStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 	warnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	errStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	statusStyle    = lipgloss.NewStyle().Reverse(true)
@@ -85,9 +86,11 @@ const gutter = 2
 // renderRows renders the conversation, wrapped to width, each row with o
 // flipped by its entry's flips. With a row selected (sel is its entry),
 // every block gets a two-column gutter with a marker on the selected one.
-// The spans say where each committed row's block sits, so the viewport can
-// scroll to the selected one and a click can find the row under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel string) (content string, spans []rowSpan) {
+// spin is the spinner's frame, drawn at the right edge of the calls in
+// motion. The spans say where each committed row's block sits, so the
+// viewport can scroll to the selected one and a click can find the row
+// under it.
+func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spin string) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -102,7 +105,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel stri
 		if hidden[i] {
 			continue
 		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]))
+		b := renderRow(row, o.flipped(flips[row.EntryID]), spin, w)
 		if b == "" {
 			continue
 		}
@@ -136,7 +139,7 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-func renderRow(row view.Row, o opts) string {
+func renderRow(row view.Row, o opts, spin string, width int) string {
 	if f := row.Fold; f != nil {
 		s := fmt.Sprintf("[compaction] context from %s on, summary %d chars", shortID(f.FirstKept), f.SummaryLen)
 		if f.Pinned > 0 {
@@ -184,9 +187,9 @@ func renderRow(row view.Row, o opts) string {
 		return dimStyle.Render("▾ reasoning"+tail) + tag + "\n" + dimStyle.Render(text)
 	case *openresponses.FunctionCall:
 		if row.Call != nil {
-			return renderCall(*row.Call, o, tag, 0)
+			return renderCall(*row.Call, o, tag, 0, spin, width)
 		}
-		return toolStyle.Render("⚙ "+it.Name) + tag + " " + it.Arguments
+		return toolStyle.Render("○ "+it.Name) + tag + " " + it.Arguments
 	case *openresponses.FunctionCallOutput:
 		return toolStyle.Render("↳ result "+it.CallID) + tag + "\n" + clip(it.Output.String(), o.output)
 	case *openresponses.Compaction:
@@ -195,13 +198,58 @@ func renderRow(row view.Row, o opts) string {
 	return dimStyle.Render("["+row.Item.ItemType()+"]") + tag
 }
 
-func renderCall(c view.Call, o opts, tag string, depth int) string {
+// moving is whether a call is in motion: its arguments still streaming,
+// or the tool running.
+func moving(c view.Call) bool { return c.State == view.CallOpen || c.State == view.CallRunning }
+
+// anyMoving is whether a call of the rows, or one under it, is in motion.
+func anyMoving(m view.Model) bool {
+	var in func(c view.Call) bool
+	in = func(c view.Call) bool {
+		if moving(c) {
+			return true
+		}
+		for _, ch := range c.Children {
+			if in(ch) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, row := range m.Rows {
+		if row.Call != nil && in(*row.Call) {
+			return true
+		}
+	}
+	return false
+}
+
+// renderCall renders a call and the calls under it, width columns wide.
+// Its dot reads as the run line's does: ● in motion, ◆ waiting on a
+// permission, ○ at rest, so a call's name starts in the column the run's
+// state does. A call in motion is drawn in the run line's color, with
+// the spinner at the right edge, under the run line's.
+func renderCall(c view.Call, o opts, tag string, depth int, spin string, width int) string {
 	pad := strings.Repeat("  ", depth)
+	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
+	switch {
+	case moving(c):
+		name, state = runStyle.Render("● "+c.Name), runStyle.Render(state)
+	case c.State == view.CallDeferred:
+		name = warnStyle.Render("◆ " + c.Name)
+	}
+	// head puts the spinner on the head line of a call in motion.
+	head := func(line string) string {
+		if moving(c) {
+			return atRight(line, runStyle.Render(spin), width)
+		}
+		return line
+	}
 	var b strings.Builder
 	if o.output {
 		// Expanded: the raw arguments on their own line, and the whole
 		// output, the way the model saw them.
-		b.WriteString(pad + toolStyle.Render("⚙ "+c.Name) + " [" + c.State.String() + "]" + tag)
+		b.WriteString(head(pad + name + state + tag))
 		if c.Args != "" {
 			b.WriteString("\n" + pad + "  args: " + c.Args)
 		}
@@ -211,17 +259,17 @@ func renderCall(c view.Call, o opts, tag string, depth int) string {
 		// produced is behind ctrl+o or a second click; the hint says
 		// how much of it there is, so a row stays one line however
 		// much output it carries.
-		head := toolStyle.Render("⚙ " + c.Name)
+		line := name
 		if c.Args != "" {
-			head += " " + compactArgs(c.Args)
+			line += " " + compactArgs(c.Args)
 		}
 		if c.State != view.CallEnded {
-			head += " [" + c.State.String() + "]"
+			line += state
 		}
 		if c.State == view.CallEnded && !c.Committed {
-			head += dimStyle.Render(" (live)")
+			line += dimStyle.Render(" (live)")
 		}
-		b.WriteString(pad + head + tag)
+		b.WriteString(head(pad + line + tag))
 	}
 	switch c.State {
 	case view.CallDeferred:
@@ -266,7 +314,7 @@ func renderCall(c view.Call, o opts, tag string, depth int) string {
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
 	}
 	for _, ch := range c.Children {
-		b.WriteString("\n" + renderCall(ch, o, "", depth+1))
+		b.WriteString("\n" + renderCall(ch, o, "", depth+1, spin, width))
 	}
 	return b.String()
 }
@@ -361,19 +409,64 @@ func indent(s, pad string) string {
 	return strings.ReplaceAll(s, "\n", "\n"+pad)
 }
 
-// statusText is the turn view: the run's state, the model and attempt,
-// the turn number, and the session's running token use and cost.
-func statusText(m view.Model, busy, aborting, verified bool, cost client.Cost) string {
-	state := "idle"
+// runState is how the run stands, for the run line.
+type runState int
+
+const (
+	stateIdle runState = iota
+	stateRunning
+	stateAborting
+	stateRequiresAction
+)
+
+func turnState(m view.Model, busy, aborting bool) runState {
 	switch {
 	case aborting:
-		state = "aborting"
+		return stateAborting
 	case m.Turn.State == view.Running || busy:
-		state = "running"
+		return stateRunning
 	case m.Turn.State == view.RequiresAction:
-		state = "requires action"
+		return stateRequiresAction
 	}
-	parts := []string{state}
+	return stateIdle
+}
+
+// runLine is the line over the input (or the hint that takes its place):
+// the run's state in words and color, and while the run goes, the
+// spinner at the right edge.
+func runLine(s runState, spin string, width int) string {
+	switch s {
+	case stateIdle:
+		return dimStyle.Render("○ idle")
+	case stateRequiresAction:
+		return warnStyle.Render("◆ requires action")
+	}
+	left := runStyle.Render("● running")
+	if s == stateAborting {
+		left = warnStyle.Render("● aborting")
+	}
+	return atRight(left, runStyle.Render(spin), width)
+}
+
+// atRight puts spin at the right edge of a width-wide line, so the
+// spinners of the run line and of the calls in motion stand in one
+// column. A line too long for it to fit beside is wrapped first, and the
+// spinner goes on its first row.
+func atRight(line, spin string, width int) string {
+	room := width - 1 - lipgloss.Width(spin)
+	if room < 1 {
+		return line
+	}
+	rows := strings.Split(wrap(line, room), "\n")
+	rows[0] = padTo(rows[0], room) + " " + spin
+	return strings.Join(rows, "\n")
+}
+
+// statusText is the turn view: the model and attempt, the turn number,
+// and the session's running token use and cost. The run's state is on
+// the run line.
+func statusText(m view.Model, verified bool, cost client.Cost) string {
+	var parts []string
 	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
 		usage := fmt.Sprintf("tokens %s in, %s out", compactTokens(m.Usage.InputTokens), compactTokens(m.Usage.OutputTokens))
 		if cost != nil {
