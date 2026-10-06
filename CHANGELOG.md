@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.7 - 2026-10-06
 
 - Added: the assistant's messages are rendered as markdown with glamour
   (CommonMark with GitHub's tables, task lists, strikethrough and bare
