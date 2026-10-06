@@ -547,6 +547,15 @@ func (c *checker) step(what string, moved bool) string {
 	if (m.Turn.State == Running) != c.running {
 		return fail("turn %v with a live run open=%v", m.Turn.State, c.running)
 	}
+	// What waits to join the conversation is never a row as well.
+	for _, q := range m.Queued {
+		t := textOfItem(q.Item)
+		for _, row := range m.Rows {
+			if textOfItem(row.Item) == t {
+				return fail("input %q is queued and a row", t)
+			}
+		}
+	}
 	if m.Turn.State == RequiresAction && len(m.Permissions) == 0 {
 		return fail("requires_action with no permission")
 	}
@@ -617,6 +626,10 @@ func (c *checker) converged() string {
 	}
 	if len(c.v.liveEnded) != 0 {
 		return fail("%d live run ends left unsettled", len(c.v.liveEnded))
+	}
+	// Every steer the generator plays is taken by its run.
+	if len(m.Queued) != 0 {
+		return fail("inputs %v left queued", m.Queued)
 	}
 	return ""
 }

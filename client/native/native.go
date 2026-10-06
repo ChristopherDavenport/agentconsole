@@ -149,7 +149,14 @@ func (c control) Prompt(ctx context.Context, items ...openresponses.Item) error 
 	return err
 }
 
-func (c control) Steer(items ...openresponses.Item) { c.b.agent.Steer(items...) }
+// Steer writes each item as a queued entry before the agent takes it,
+// through the recorder's Queue, rather than leaving the entry to the
+// agent's queued event: that event is delivered at the run's next event,
+// which a quiet tool can hold off, and the client would show nothing of
+// the steer meanwhile.
+func (c control) Steer(ctx context.Context, items ...openresponses.Item) error {
+	return c.b.rec.Queue(ctx, c.b.agent, agentturn.QueueSteer, items...)
+}
 
 func (c control) Abort() { c.b.agent.Abort() }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -231,6 +232,13 @@ func newApp(t *testing.T, cfg agentturn.Config) *app { return newAppOn(t, cfg, n
 // one.
 func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 	t.Helper()
+	return newAppWith(t, cfg, start, nil)
+}
+
+// newAppWith is newAppOn with the backend the model drives wrapped, to
+// play a backend that fails where the native one does not.
+func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(client.Backend) client.Backend) *app {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
 	if err != nil {
@@ -253,12 +261,16 @@ func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 		t.Fatal(err)
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, be: be}
-	a.m = tui.New(ctx, be, tui.WithCopier(func(text string) {
+	var driven client.Backend = be
+	if wrap != nil {
+		driven = wrap(be)
+	}
+	a.m = tui.New(ctx, driven, tui.WithCopier(func(text string) {
 		a.copyMu.Lock()
 		defer a.copyMu.Unlock()
 		a.copies = append(a.copies, text)
 	}))
-	a.wait = tui.Attach(ctx, be, func(msg tea.Msg) {
+	a.wait = tui.Attach(ctx, driven, func(msg tea.Msg) {
 		if _, ok := msg.(tui.ModelMsg); ok {
 			time.Sleep(time.Duration(a.feedDelay.Load()))
 		}

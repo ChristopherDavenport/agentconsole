@@ -7,6 +7,17 @@ versions may break the API.
 
 ## Unreleased
 
+- Added: a steer typed while a run goes is listed over the input,
+  "queued: …", from the moment it is sent until the run takes it into
+  the conversation, and an input left for the next run as "queued for
+  the next run: …". The list is the record's queued entries
+  (`view.Model.Queued`, new type `view.Queued`); the native backend's
+  steer now writes its queued entry before the agent takes it, so it
+  shows at once even while a tool runs quietly. A steer that cannot be
+  written says so and gives its text back to the input.
+- Changed (breaking): `client.Control.Steer` is
+  `Steer(ctx, items...) error`. The context carries a trigger for the
+  record; the error says the input was not queued.
 - Added: Shift-Enter puts a new line in the input, where Enter sends it;
   in a refusal's reason too. A terminal reports Shift-Enter apart from
   Enter only over the kitty keyboard protocol, so Alt-Enter and Ctrl-J

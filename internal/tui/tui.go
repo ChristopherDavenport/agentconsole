@@ -96,9 +96,12 @@ type Model struct {
 	err     string
 	feedErr string
 
-	// inflight counts the Prompt and Answer commands that have not
-	// returned, for [Model.Drain].
+	// inflight counts the Prompt, Answer and Steer commands that have
+	// not returned, for [Model.Drain].
 	inflight sync.WaitGroup
+	// steers hands what is typed while a run goes to Control.Steer, in
+	// the order it was typed.
+	steers *steerQueue
 
 	// decided are the answers given so far to the permissions out, by call.
 	decided map[string]agentturn.Answer
@@ -185,6 +188,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 		replied:  map[string]bool{},
+		steers:   &steerQueue{},
 		inputY:   -1,
 	}
 	for _, o := range options {
@@ -323,6 +327,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			delete(m.replied, msg.id)
 			m.err = "reply: " + msg.err.Error()
+		}
+		m.relayout()
+		return m, nil
+	case steerDoneMsg:
+		if msg.err != nil {
+			m.err = "steer: " + msg.err.Error()
+			// The steer was not queued: give its text back to edit or
+			// send again, unless something else is being typed.
+			if m.in.Value() == "" {
+				m.in.SetValue(msg.text)
+			}
 		}
 		m.relayout()
 		return m, nil
@@ -686,8 +701,9 @@ func (m *Model) send() (tea.Model, tea.Cmd) {
 	m.in.Reset()
 	item := openresponses.UserText(text)
 	if m.running() {
-		m.ctl.Steer(item)
-		return m, nil
+		m.err = ""
+		m.relayout()
+		return m, m.steer(text, item)
 	}
 	m.busy = true
 	m.err = ""
@@ -725,6 +741,7 @@ func (m *Model) relayout() {
 	if m.err != "" {
 		used++
 	}
+	used += len(m.queuedLines())
 	m.vp.SetWidth(m.width)
 	m.vp.SetHeight(max(m.height-used, 1))
 	if m.screen == screenKeys {
@@ -880,6 +897,9 @@ func (m *Model) frame() string {
 	}
 	// A blank line keeps the run line off what is above it.
 	parts = append(parts, "", runLine(state, runFigures(m.view, state, now), m.spinner.View(), m.width))
+	// What waits to join the conversation sits under the run it waits
+	// on, over the input it was typed in.
+	parts = append(parts, m.queuedLines()...)
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))
