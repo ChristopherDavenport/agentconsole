@@ -43,7 +43,10 @@ func TestCutLineSplitsAtColumns(t *testing.T) {
 func TestCtrlCCopiesTheSelectedText(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.submit("hi")
-	a.waitFor("the answer", all(has("hello world", "idle")))
+	// The prompt's row is on the record too: the run can end before the
+	// record is read up to it, and its row landing above the answer
+	// after the drag would move the selection off its text.
+	a.waitFor("the answer", all(has("hello world", "idle"), prompted("hi")))
 
 	// The drag draws the selection and copies nothing on its own.
 	a.drag("hello world", 0, 11)
@@ -79,7 +82,7 @@ func TestCtrlCCopiesWhileARunGoes(t *testing.T) {
 
 	a.submit("hi")
 	g.arrive(t, "hold")
-	a.waitFor("the first chunk streaming", all(has("hel"+cursor, "running")))
+	a.waitFor("the first chunk streaming", all(has("hel"+cursor, "running"), prompted("hi")))
 	a.drag("hel", 0, 3)
 	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] != "hel" {

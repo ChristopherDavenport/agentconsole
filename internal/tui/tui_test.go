@@ -148,13 +148,15 @@ func TestTheRunLineShowsTheTurnsTimeAndTokens(t *testing.T) {
 		t.Errorf("the status line does not lead with the session's time: %q", top)
 	}
 	g.release("tool")
-	s = a.waitFor("the run over", has("○ idle", "done"))
+	// The session's figures stay on the status line, the two calls summed
+	// once the second's response entry lands, which can be after the run
+	// is idle.
+	summed := regexp.MustCompile(`^time \d+s \| tokens 3\.5k in, 100 out`)
+	s = a.waitFor("the run over, its calls summed", func(s string) bool {
+		return has("○ idle", "done")(s) && summed.MatchString(strings.Split(s, "\n")[0])
+	})
 	if strings.Contains(s, "↑") {
 		t.Errorf("idle shows a turn's figures:\n%s", s)
-	}
-	// The session's figures stay on the status line, the two calls summed.
-	if !regexp.MustCompile(`^time \d+s \| tokens 3\.5k in, 100 out`).MatchString(strings.Split(s, "\n")[0]) {
-		t.Errorf("the status line lost the session's tokens:\n%s", s)
 	}
 }
 
