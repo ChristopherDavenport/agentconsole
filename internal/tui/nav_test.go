@@ -249,7 +249,9 @@ func callApp(t *testing.T) *app {
 	a.submit("go")
 	a.waitFor("the permission", has("Permission requested"))
 	a.typeText("y")
-	a.waitFor("the call done", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "done", "idle")))
+	// Idle is read from the live stream, and the answer may still be an
+	// overlay row the cursor skips: wait for its entry too.
+	a.waitFor("the call done", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "done", "idle"), lacks("(streaming)", "(not committed yet)")))
 	return a
 }
 
