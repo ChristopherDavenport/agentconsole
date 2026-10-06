@@ -21,10 +21,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
 
@@ -168,7 +168,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 		ctl:      be.Control(),
 		verified: be.Record().Verified(),
 		rec:      be.Record(),
-		vp:       viewport.New(0, 0),
+		vp:       viewport.New(),
 		in:       in,
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
@@ -186,8 +186,9 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 	return m
 }
 
-// Init implements tea.Model.
-func (m *Model) Init() tea.Cmd { return textarea.Blink }
+// Init implements tea.Model. The textarea's styles depend on whether the
+// terminal's background is dark, which the terminal is asked for.
+func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, tea.RequestBackgroundColor) }
 
 func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
 
@@ -224,6 +225,11 @@ func (m *Model) pending() (view.Permission, int, bool) {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// A program whose output is not a terminal and was given no size
+		// reports 0x0 at its start: wait for a size to lay out in.
+		if msg.Width <= 0 || msg.Height <= 0 {
+			return m, nil
+		}
 		m.width, m.height, m.ready = msg.Width, msg.Height, true
 		m.in.SetWidth(max(msg.Width-4, 1))
 		m.relayout()
@@ -299,15 +305,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// handled while the run's Prompt was still returning, with the
 		// pane still pinned.
 		return m, m.wantPane()
+	case tea.BackgroundColorMsg:
+		m.in.SetStyles(textarea.DefaultStyles(msg.IsDark()))
+		return m, nil
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
 	case InterruptMsg:
 		return m.interrupt()
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		m.clearSelection()
+		return m, m.paste(msg)
+	case tea.KeyPressMsg:
 		// Ctrl+c with a selection drawn copies it, as a desktop's copy
 		// does, and drops it, so the next ctrl+c is the interrupt again.
 		// Any other key drops the selection.
-		if m.sel != nil && msg.Type == tea.KeyCtrlC {
+		if m.sel != nil && msg.String() == "ctrl+c" {
 			m.copySelection()
 			m.clearSelection()
 			return m, nil
@@ -389,7 +401,7 @@ func (m *Model) Drain(timeout time.Duration) bool {
 	}
 }
 
-func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if isKeysKey(msg) {
 		if m.screen == screenKeys {
 			m.screen = screenConversation
@@ -481,24 +493,35 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if p, _, ok := m.pending(); ok {
 		return m.permissionKey(msg, p)
 	}
-	if msg.Type == tea.KeyEnter {
+	if msg.Code == tea.KeyEnter {
 		return m.send()
 	}
 	return m, m.updateInput(msg)
 }
 
+// paste puts a paste in the input where a typed key would reach it: on
+// the conversation and not read only. A paste is never a y or an n: while
+// a question or a permission waits for one the input is blurred and takes
+// nothing, until a refusal's reason is being typed.
+func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
+	if !m.typing() {
+		return nil
+	}
+	return m.updateInput(msg)
+}
+
 // permissionKey handles a key while a permission is asked: y approves, n
 // starts a refusal whose optional reason is typed in the input, and Enter
 // then refuses with it.
-func (m *Model) permissionKey(msg tea.KeyMsg, p view.Permission) (tea.Model, tea.Cmd) {
+func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model, tea.Cmd) {
 	if m.refusing {
-		switch msg.Type {
+		switch msg.Code {
 		case tea.KeyEnter:
 			reason := strings.TrimSpace(m.in.Value())
 			m.in.Reset()
 			m.refusing = false
 			return m.decide(refusal(p, reason))
-		case tea.KeyEsc:
+		case tea.KeyEscape:
 			m.in.Reset()
 			m.refusing = false
 			m.relayout()
@@ -520,15 +543,15 @@ func (m *Model) permissionKey(msg tea.KeyMsg, p view.Permission) (tea.Model, tea
 // questionKey handles a key while a question is asked, as permissionKey
 // does a permission's: y allows, n starts a refusal whose optional
 // reason is typed, Enter sends it and Esc goes back.
-func (m *Model) questionKey(msg tea.KeyMsg, q client.Question) (tea.Model, tea.Cmd) {
+func (m *Model) questionKey(msg tea.KeyPressMsg, q client.Question) (tea.Model, tea.Cmd) {
 	if m.refusingQ {
-		switch msg.Type {
+		switch msg.Code {
 		case tea.KeyEnter:
 			note := strings.TrimSpace(m.in.Value())
 			m.in.Reset()
 			m.refusingQ = false
 			return m.reply(q, client.Reply{Note: note})
-		case tea.KeyEsc:
+		case tea.KeyEscape:
 			m.in.Reset()
 			m.refusingQ = false
 			m.relayout()
@@ -640,8 +663,8 @@ func (m *Model) relayout() {
 	if m.err != "" {
 		used++
 	}
-	m.vp.Width = m.width
-	m.vp.Height = max(m.height-used, 1)
+	m.vp.SetWidth(m.width)
+	m.vp.SetHeight(max(m.height-used, 1))
 	if m.screen == screenKeys {
 		m.setContent(wrap(renderKeys(), max(m.width, 10)))
 		if m.drawn != m.screen {
@@ -694,10 +717,10 @@ func (m *Model) setContent(s string) {
 // as far as the viewport is tall enough to show them.
 func (m *Model) showLine(line, height int) {
 	switch {
-	case line < m.vp.YOffset:
+	case line < m.vp.YOffset():
 		m.vp.SetYOffset(line)
-	case line+height > m.vp.YOffset+m.vp.Height:
-		m.vp.SetYOffset(min(line, line+height-m.vp.Height))
+	case line+height > m.vp.YOffset()+m.vp.Height():
+		m.vp.SetYOffset(min(line, line+height-m.vp.Height()))
 	}
 }
 
@@ -760,8 +783,17 @@ func feedNote(feedErr string) string {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
-// View implements tea.Model.
-func (m *Model) View() string {
+// View implements tea.Model. The program takes the whole screen and
+// reports the mouse, motion with a button down included, for selecting.
+func (m *Model) View() tea.View {
+	v := tea.NewView(m.frame())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+// frame is the screen's content.
+func (m *Model) frame() string {
 	if !m.ready {
 		return "starting..."
 	}
@@ -843,8 +875,9 @@ func wrapRows(runes []rune, width int) int { return len(wrapLine(runes, width)) 
 
 // wrapLine is the rows one logical line soft-wraps into, with the same
 // algorithm the textarea applies. It is a copy of the unexported wrap
-// function in charmbracelet/bubbles@v1.0.0's textarea package; bubbles
-// exposes nothing better, so keep this in step when bubbles is upgraded.
+// function in charm.land/bubbles/v2@v2.2.1's textarea package (the same
+// as bubbles v1.0.0's); bubbles exposes nothing better, so keep this in
+// step when bubbles is upgraded.
 func wrapLine(runes []rune, width int) [][]rune {
 	var (
 		lines  = [][]rune{{}}

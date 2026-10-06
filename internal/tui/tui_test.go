@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ChristopherDavenport/agenttool"
 
@@ -59,9 +59,9 @@ func TestReasoningIsCollapsedUntilToggled(t *testing.T) {
 	if strings.Contains(s, "secret musings") || !strings.Contains(s, "reasoning (14 chars") {
 		t.Errorf("reasoning is not collapsed:\n%s", s)
 	}
-	a.key(tea.KeyCtrlR)
+	a.key("ctrl+r")
 	a.waitFor("the reasoning expanded", has("secret musings"))
-	a.key(tea.KeyCtrlR)
+	a.key("ctrl+r")
 	a.waitFor("the reasoning collapsed again", lacks("secret musings"))
 }
 
@@ -81,7 +81,7 @@ func TestToolCallShowsItsStates(t *testing.T) {
 
 	g.release("tool")
 	a.waitFor("the call ended", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "done", "idle"), lacks("(live)", "ABC", "[running]")))
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
 	s = a.waitFor("the output expanded", has("ABC"))
 	if n := strings.Count(s, "ABC"); n != 1 {
 		t.Errorf("output shown %d times, want 1 (the call row carries it):\n%s", n, s)
@@ -100,7 +100,7 @@ func TestLongToolOutputCollapsesUntilToggled(t *testing.T) {
 	if strings.Contains(s, "l1") {
 		t.Errorf("output not collapsed:\n%s", s)
 	}
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
 	a.waitFor("the output expanded", has("l4", "l5"))
 }
 
@@ -138,18 +138,18 @@ func twoCallsApp(t *testing.T) *app {
 
 func TestCtrlOOnASelectedRowExpandsThatRowAlone(t *testing.T) {
 	a := twoCallsApp(t)
-	a.press(tea.KeyCtrlP, tea.KeyCtrlP, tea.KeyCtrlP) // the answer, the second call, the first
-	a.key(tea.KeyCtrlO)
+	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, the second call, the first
+	a.key("ctrl+o")
 	a.waitFor("the first call expanded", all(has("p4", "p5"), lacks("q4")))
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
 	a.waitFor("the first call collapsed", lacks("p4", "q4"))
 	// With no row selected, ctrl+o is for every row again.
-	a.key(tea.KeyCtrlO)
-	a.key(tea.KeyEsc)
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
+	a.key("esc")
+	a.key("ctrl+o")
 	a.waitFor("every call expanded", has("p4", "q4"))
 	// A row's own flip goes when every row is toggled.
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
 	a.waitFor("every call collapsed", lacks("p4", "q4"))
 }
 
@@ -159,8 +159,8 @@ func (a *app) click(sub string) {
 	a.t.Helper()
 	for y, l := range strings.Split(a.screen(), "\n") {
 		if strings.Contains(l, sub) {
-			a.send(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
-			a.send(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+			a.send(tea.MouseClickMsg{X: 4, Y: y, Button: tea.MouseLeft})
+			a.send(tea.MouseReleaseMsg{X: 4, Y: y, Button: tea.MouseLeft})
 			return
 		}
 	}
@@ -182,9 +182,9 @@ func (a *app) drag(sub string, x0, x1 int) string {
 
 // dragCells presses at (x0, y0), moves to (x1, y1), and releases.
 func (a *app) dragCells(x0, y0, x1, y1 int) string {
-	a.send(tea.MouseMsg{X: x0, Y: y0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
-	a.send(tea.MouseMsg{X: x1, Y: y1, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
-	a.send(tea.MouseMsg{X: x1, Y: y1, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	a.send(tea.MouseClickMsg{X: x0, Y: y0, Button: tea.MouseLeft})
+	a.send(tea.MouseMotionMsg{X: x1, Y: y1, Button: tea.MouseLeft})
+	a.send(tea.MouseReleaseMsg{X: x1, Y: y1, Button: tea.MouseLeft})
 	return a.screen()
 }
 
@@ -211,14 +211,14 @@ func TestClickingARowSelectsItAndClickingAgainExpandsIt(t *testing.T) {
 	if s := a.screen(); !strings.Contains(cursorLine(s), `text="q"`) || strings.Contains(s, "q4") {
 		t.Fatalf("the click on the second call did not just select it:\n%s", s)
 	}
-	a.key(tea.KeyTab)
+	a.key("tab")
 	a.waitFor("the second call's detail", has("record detail", "call c2 lines"))
 }
 
 func TestClickingTheStatusLineSelectsNothing(t *testing.T) {
 	a := twoCallsApp(t)
-	a.send(tea.MouseMsg{X: 4, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
-	a.send(tea.MouseMsg{X: 4, Y: 0, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	a.send(tea.MouseClickMsg{X: 4, Y: 0, Button: tea.MouseLeft})
+	a.send(tea.MouseReleaseMsg{X: 4, Y: 0, Button: tea.MouseLeft})
 	if s := a.screen(); strings.Contains(s, "▶") {
 		t.Fatalf("a row was selected:\n%s", s)
 	}
@@ -252,14 +252,14 @@ func TestRefusingAPermissionRecordsTheReason(t *testing.T) {
 	a.typeText("n")
 	a.waitFor("the reason prompt", has("Reason for refusing"))
 	a.typeText("too risky")
-	a.key(tea.KeyEnter)
+	a.key("enter")
 	s := a.waitFor("the refusal recorded", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "idle"), lacks("Permission requested")))
 	if strings.Contains(s, "ABC") {
 		t.Errorf("the refused call ran:\n%s", s)
 	}
 	// The refusal's text is the call's output: hidden collapsed, and
 	// expanded by ctrl+o.
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
 	a.waitFor("the refusal's text", has("The user refused this call. Reason: too risky"))
 }
 
@@ -272,11 +272,38 @@ func TestRefusingWithNoReasonAndGoingBack(t *testing.T) {
 	a.waitFor("the permission", has("Permission requested"))
 	a.typeText("n")
 	a.waitFor("the reason prompt", has("Reason for refusing"))
-	a.key(tea.KeyEsc)
+	a.key("esc")
 	a.waitFor("back at the question", has("[y] approve"))
 	a.typeText("n")
-	a.key(tea.KeyEnter)
+	a.key("enter")
 	a.waitFor("the plain refusal", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "idle"), lacks("Permission requested")))
+}
+
+// A paste is text, never a key: it does not answer a permission, and it
+// reaches the input only once a refusal's reason is being typed.
+func TestAPasteDoesNotAnswerAPermission(t *testing.T) {
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = deferAll("")
+	a := newApp(t, cfg)
+	a.submit("go")
+	a.waitFor("the permission", has("Permission requested"))
+	a.paste("y")
+	a.paste("n")
+	s := a.screen()
+	if !strings.Contains(s, "[y] approve") || strings.Contains(s, "Reason for refusing") {
+		t.Fatalf("a paste answered the permission:\n%s", s)
+	}
+	if !strings.Contains(lineWith(s, "> "), "say something") {
+		t.Fatalf("a paste reached the input while the permission waits:\n%s", s)
+	}
+	a.typeText("n")
+	a.waitFor("the reason prompt", has("Reason for refusing"))
+	a.paste("too risky")
+	a.key("enter")
+	a.waitFor("the refusal recorded", all(has(`upper text="abc"`, "idle"), lacks("Permission requested")))
+	a.key("ctrl+o")
+	a.waitFor("the pasted reason", has("The user refused this call. Reason: too risky"))
 }
 
 func TestEnterWhileRunningSteers(t *testing.T) {
@@ -303,7 +330,7 @@ func TestCtrlCAbortsARunAndQuitsWhenIdle(t *testing.T) {
 	a.submit("start")
 	g.arrive(t, "mid")
 	a.waitFor("running", has("partial"+cursor, "running"))
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	a.waitFor("the run ended", has("idle"))
 	if a.quitted() {
 		t.Fatal("ctrl+c quit a running program instead of aborting")
@@ -311,8 +338,26 @@ func TestCtrlCAbortsARunAndQuitsWhenIdle(t *testing.T) {
 	if s := a.screen(); strings.Contains(s, "never") {
 		t.Errorf("the aborted stream went on:\n%s", s)
 	}
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	a.waitQuit()
+}
+
+// A program whose output is not a terminal, given no size, reports 0x0
+// at its start: the client waits for a size rather than laying out in
+// none.
+func TestAZeroSizeIsNotASize(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	a.mu.Lock()
+	m := tui.New(a.ctx, a.be)
+	a.mu.Unlock()
+	m.Update(tea.WindowSizeMsg{Width: 0, Height: 0})
+	if s := m.View().Content; s != "starting..." {
+		t.Fatalf("a 0x0 size was laid out:\n%s", s)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	if s := m.View().Content; s == "starting..." {
+		t.Fatal("a size did not lay the screen out")
+	}
 }
 
 func TestResize(t *testing.T) {
@@ -344,9 +389,9 @@ func TestUnverifiedAndScroll(t *testing.T) {
 	if s := a.screen(); strings.Contains(s, "you") {
 		t.Errorf("a long answer should have scrolled the prompt off:\n%s", s)
 	}
-	a.send(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	a.key("ctrl+home")
 	a.waitFor("the top", has("you"))
-	a.send(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	a.key("ctrl+end")
 	a.waitFor("the bottom", lacks("you"))
 }
 
@@ -425,14 +470,14 @@ func TestInterruptFromOutsideActsLikeCtrlC(t *testing.T) {
 func TestHomeEndAndArrowsMoveTheInputCursor(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "ok")))
 	a.typeText("abc")
-	a.key(tea.KeyHome)
+	a.key("home")
 	a.typeText("X")
 	a.waitFor("X at the start", has("> Xabc"))
-	a.key(tea.KeyEnd)
+	a.key("end")
 	a.typeText("Y")
 	a.waitFor("Y at the end", has("> XabcY"))
-	a.key(tea.KeyLeft)
-	a.key(tea.KeyLeft)
+	a.key("left")
+	a.key("left")
 	a.typeText("Z")
 	a.waitFor("Z two from the end", has("> XabZcY"))
 }
@@ -505,7 +550,7 @@ func TestTheInputSitsBetweenTwoBarsAndTheScreenStillFits(t *testing.T) {
 		t.Fatalf("the input is not between two bars:\n%s", s)
 	}
 	// The tree has no input, so no bars.
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	if s := a.screen(); strings.Contains(s, bar) {
 		t.Fatalf("the tree shows the input's bars:\n%s", s)
 	}
@@ -517,7 +562,7 @@ func TestCtrlSlashOrF1ShowsTheKeysAndTakesNoInput(t *testing.T) {
 	if s := a.screen(); !strings.Contains(s, "ctrl+/ for keys") {
 		t.Fatalf("the input does not say how to get the keys:\n%s", s)
 	}
-	for _, open := range []tea.KeyType{tea.KeyCtrlUnderscore, tea.KeyF1} {
+	for _, open := range []string{"ctrl+/", "ctrl+_", "f1"} {
 		a.key(open)
 		s := a.screen()
 		for _, want := range []string{"Ctrl-P Ctrl-N", "Permissions", "Tree (Ctrl-T)", "esc, q or ctrl+/ back"} {
@@ -529,16 +574,17 @@ func TestCtrlSlashOrF1ShowsTheKeysAndTakesNoInput(t *testing.T) {
 			t.Fatalf("%v: the keys screen shows the input or the conversation:\n%s", open, s)
 		}
 		a.typeText("x") // typed on the keys screen, it goes nowhere
+		a.paste("pasted")
 		a.key(open)
 		s = a.screen()
 		if !strings.Contains(s, "hello") || strings.Contains(s, "Permissions") {
 			t.Fatalf("%v: the keys screen did not close:\n%s", open, s)
 		}
-		if strings.Contains(lineWith(s, "> "), "x") {
-			t.Fatalf("%v: a key typed on the keys screen reached the input:\n%s", open, s)
+		if l := lineWith(s, "> "); strings.Contains(l, "x") || strings.Contains(l, "pasted") {
+			t.Fatalf("%v: a key typed or pasted on the keys screen reached the input:\n%s", open, s)
 		}
 	}
-	a.key(tea.KeyF1)
+	a.key("f1")
 	a.rune('q')
 	a.waitFor("q closes the keys", all(has("hello"), lacks("Permissions")))
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -13,8 +13,8 @@ import (
 
 // clickCell left-clicks screen cell (x, y).
 func (a *app) clickCell(x, y int) {
-	a.send(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
-	a.send(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	a.send(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	a.send(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
 }
 
 // clickOn left-clicks the first cell of sub on the screen.
@@ -78,10 +78,8 @@ func TestClickingAWrappedRowOfTheInput(t *testing.T) {
 func TestClickingAScrolledInput(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
 	a.paste("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8")
-	a.screen()
-	// The textarea scrolls against what it last rendered: the key after
-	// the paste brings the cursor's row into view.
-	a.key(tea.KeyEnd)
+	// The textarea keeps the cursor's row in view as soon as the paste is
+	// in: no key is needed to scroll it.
 	if s := a.screen(); strings.Contains(s, "line1") || !strings.Contains(s, "line8") {
 		t.Fatalf("the input did not scroll to its end; the test proves nothing:\n%s", s)
 	}
@@ -92,7 +90,7 @@ func TestClickingAScrolledInput(t *testing.T) {
 	}
 	// Scroll it up with the cursor, then click the bottom row shown.
 	for range 7 {
-		a.key(tea.KeyUp)
+		a.key("up")
 	}
 	s := a.screen()
 	if !strings.Contains(s, "line1") || strings.Contains(s, "line8") {
@@ -103,26 +101,20 @@ func TestClickingAScrolledInput(t *testing.T) {
 	if s := a.screen(); !strings.Contains(s, "Yline4") {
 		t.Fatalf("the click did not put the cursor before line4:\n%s", s)
 	}
-}
-
-// Right after a paste the textarea has not scrolled yet: it shows the
-// first rows with the cursor below them, until its next Update. The click
-// still lands on the row shown under it. The cursor is kept from
-// blinking, since a blink's message would be that next Update, at a time
-// of its own.
-func TestClickingAnInputNotScrolledToItsCursor(t *testing.T) {
-	a := newApp(t, cfgWith(say(nil, nil, "hello world")))
-	a.mu.Lock()
-	a.m.StillCursor()
-	a.mu.Unlock()
-	a.paste("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8")
-	if s := a.screen(); !strings.Contains(s, "line1") || strings.Contains(s, "line8") {
-		t.Fatalf("the input scrolled after the paste; the test proves nothing:\n%s", s)
+	// Rows deleted from the end leave the scroll where it was, with blank
+	// rows under the value: the click lands on the row drawn, not on the
+	// one a scroll fitted to the value would show there.
+	a.press("down", "down", "down", "down", "end")
+	for range len("line8") + 1 + len("line7") + 1 {
+		a.key("backspace")
 	}
-	a.clickOn("line3")
-	a.typeText("X")
-	if s := a.screen(); !strings.Contains(s, "Xline3") {
-		t.Fatalf("the click did not put the cursor before line3:\n%s", s)
+	if s := a.screen(); strings.Contains(s, "line3") || strings.Contains(s, "line7") {
+		t.Fatalf("the input's scroll moved; the test proves nothing:\n%s", s)
+	}
+	a.clickOn("Xline5")
+	a.typeText("Z")
+	if s := a.screen(); !strings.Contains(s, "ZXline5") {
+		t.Fatalf("the click did not put the cursor before Xline5:\n%s", s)
 	}
 }
 
@@ -133,7 +125,7 @@ func TestClickingTheInputLeavesTheRows(t *testing.T) {
 	a.waitFor("the answer", all(has("hello world", "idle"), lacks("(not committed yet)")))
 	a.click("hello world")
 	a.waitFor("the row selected", has("▶"))
-	a.key(tea.KeyTab)
+	a.key("tab")
 	a.waitFor("the detail pane", has("record detail"))
 
 	a.clickOn("say something")
@@ -149,7 +141,7 @@ func TestClickingTheInputLeavesTheRows(t *testing.T) {
 
 func TestClickingATreeItemSelectsItAndAgainOpensIt(t *testing.T) {
 	a, _ := branched(t)
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	a.waitFor("the tree", has("assistant: r2", "assistant: r3"))
 
 	a.clickOn("assistant: r2")

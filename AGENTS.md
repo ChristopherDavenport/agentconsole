@@ -8,7 +8,7 @@ committed, and live events carry only what is not committed yet.
 ## Module
 
 - Module path: `github.com/ChristopherDavenport/agentconsole`.
-- Go 1.25 is the floor.
+- Go 1.26 is the floor.
 - The library surface is `client`, `client/native`, `client/kitbackend`,
   `view` and `console`; `tui` and `inspect` stay under `internal/`. An
   embedder (dax) imports the public ones and calls `console.Run`. Adding

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agenttool"
@@ -42,13 +42,13 @@ func (r *recordingModel) last() string {
 	return strings.Join(r.sent[len(r.sent)-1], "|")
 }
 
-func (a *app) press(keys ...tea.KeyType) {
+func (a *app) press(keys ...string) {
 	for _, k := range keys {
 		a.key(k)
 	}
 }
 
-func (a *app) rune(r rune) { a.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}) }
+func (a *app) rune(r rune) { a.send(tea.KeyPressMsg{Code: r, Text: string(r)}) }
 
 func (a *app) resize(w, h int) { a.send(tea.WindowSizeMsg{Width: w, Height: h}) }
 
@@ -88,9 +88,9 @@ func branched(t *testing.T) (*app, *recordingModel) {
 	a.exchange("one", "r1")
 	a.exchange("two", "r2")
 	// Select r1 (up from the last row: r2, two, r1) and continue there.
-	a.press(tea.KeyCtrlP, tea.KeyCtrlP, tea.KeyCtrlP)
+	a.press("ctrl+p", "ctrl+p", "ctrl+p")
 	a.waitFor("the cursor", has("▶"))
-	a.key(tea.KeyCtrlB)
+	a.key("ctrl+b")
 	s := a.waitFor("the head moved", all(has("head moved to"), lacks("two", "r2")))
 	if strings.Contains(s, "▶") {
 		t.Errorf("the cursor stayed after the head moved:\n%s", s)
@@ -102,7 +102,7 @@ func branched(t *testing.T) (*app, *recordingModel) {
 func TestBranchThenSwitchBetweenTheConversationAndTheTree(t *testing.T) {
 	a, _ := branched(t)
 
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	s := a.waitFor("the tree", has("branches of session", "assistant: r2", "assistant: r3", "tree: up/down"))
 	if l := lineWith(s, "assistant: r3"); !strings.Contains(l, "* ") || !strings.Contains(l, "▶") {
 		t.Errorf("the head's branch is not marked and selected: %q", l)
@@ -115,20 +115,20 @@ func TestBranchThenSwitchBetweenTheConversationAndTheTree(t *testing.T) {
 	}
 
 	// Select the other branch and view it: a read-only look at its line.
-	a.press(tea.KeyDown, tea.KeyEnter)
+	a.press("down", "enter")
 	a.waitFor("the abandoned branch", all(has("VIEWING branch", "two", "r2", "read only"), lacks("three", "branches of session")))
 	a.typeText("zzz")
 	if s2 := a.screen(); strings.Contains(s2, "zzz") {
 		t.Errorf("typed into a read-only view:\n%s", s2)
 	}
 	// The tree is one key away from the frozen view too, and back.
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	a.waitFor("the tree again", has("branches of session"))
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	a.waitFor("the frozen view again", has("VIEWING branch", "r2"))
 
 	// Esc returns to the live session, where the head still is.
-	a.key(tea.KeyEsc)
+	a.key("esc")
 	s = a.waitFor("the live view", all(has("three", "r3", "idle"), lacks("VIEWING", "r2")))
 	if !strings.Contains(s, "say something") && !strings.Contains(s, "> ") {
 		t.Errorf("no input back:\n%s", s)
@@ -142,9 +142,9 @@ func TestContinueFromHereMovesTheHeadAndTheNextPromptContinuesFromIt(t *testing.
 	}
 
 	// View the abandoned branch, then continue from it.
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	a.waitFor("the tree", has("assistant: r2"))
-	a.press(tea.KeyDown, tea.KeyEnter)
+	a.press("down", "enter")
 	a.waitFor("the abandoned branch", has("VIEWING branch", "r2"))
 	a.rune('c')
 	s := a.waitFor("the head on it", all(has("head moved to", "r2", "two"), lacks("VIEWING", "three")))
@@ -154,7 +154,7 @@ func TestContinueFromHereMovesTheHeadAndTheNextPromptContinuesFromIt(t *testing.
 		t.Errorf("the request after continuing from r2 carried %q, want one|r1|two|r2|four", got)
 	}
 	// The tree has the two lines, the head on the new one.
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	s = a.waitFor("the tree", has("assistant: r4", "assistant: r3"))
 	if l := lineWith(s, "assistant: r4"); !strings.Contains(l, "* ") {
 		t.Errorf("the new head is not marked: %q", l)
@@ -175,9 +175,9 @@ func TestContinueFromHereIsRefusedWhileARunGoes(t *testing.T) {
 	a.submit("two")
 	g.arrive(t, "mid")
 	a.waitFor("running", has("running"))
-	a.key(tea.KeyCtrlP)
+	a.key("ctrl+p")
 	a.waitFor("the cursor", has("▶"))
-	a.key(tea.KeyCtrlB)
+	a.key("ctrl+b")
 	a.waitFor("the refusal", has("cannot move the head while a run goes"))
 	g.release("mid")
 	a.waitFor("the run over", all(has("idle", "xy"), lacks("(streaming)")))
@@ -216,9 +216,9 @@ func TestAForksOriginOpensReadOnly(t *testing.T) {
 		t.Fatalf("the fork shows what its origin wrote after the base:\n%s", s)
 	}
 
-	a.key(tea.KeyCtrlT)
+	a.key("ctrl+t")
 	a.waitFor("the origin in the tree", has("origin: session", "forked at entry"))
-	a.press(tea.KeyDown, tea.KeyEnter) // the branch first, then the origin
+	a.press("down", "enter") // the branch first, then the origin
 	s = a.waitFor("the origin opened", all(has("VIEWING origin", "origin later", "read only"), lacks("branches of session")))
 	// The cursor starts on the entry the fork was made at.
 	if l := lineWith(s, "▶"); !strings.Contains(l, "assistant") {
@@ -233,7 +233,7 @@ func TestAForksOriginOpensReadOnly(t *testing.T) {
 	if strings.Contains(s, "hello?") {
 		t.Errorf("typed into the origin:\n%s", s)
 	}
-	a.key(tea.KeyEsc)
+	a.key("esc")
 	a.waitFor("back on the fork", all(has("origin answer", "idle"), lacks("VIEWING", "origin later")))
 }
 
@@ -255,21 +255,21 @@ func callApp(t *testing.T) *app {
 
 func TestDetailPaneShowsADeferredCallsDecisionAndWhoApprovedIt(t *testing.T) {
 	a := callApp(t)
-	a.press(tea.KeyCtrlP, tea.KeyCtrlP) // the answer, then the call
-	a.key(tea.KeyTab)
+	a.press("ctrl+p", "ctrl+p") // the answer, then the call
+	a.key("tab")
 	s := a.waitFor("the detail", has("record detail", "call call_1 upper", "hold by", "may I run upper?", "proceed by human", "dispatch: to", "ABC"))
 	if !strings.Contains(s, "state:    completed") {
 		t.Errorf("no call state:\n%s", s)
 	}
 	// Moving the cursor re-targets the pane.
-	a.key(tea.KeyCtrlP)
+	a.key("ctrl+p")
 	a.waitFor("the prompt's detail", has("user message", "response: none"))
-	a.key(tea.KeyCtrlN)
+	a.key("ctrl+n")
 	a.waitFor("the call's detail again", has("call call_1 upper"))
 	// Tab goes to the session pane, then closes.
-	a.key(tea.KeyTab)
+	a.key("tab")
 	a.waitFor("the session pane", has("session ", "verify:", "harness:  tui-test 9"))
-	a.key(tea.KeyTab)
+	a.key("tab")
 	a.waitFor("no pane", lacks("verify:", "record detail"))
 }
 
@@ -281,10 +281,10 @@ func TestAnUnhashedResponseShowsWhy(t *testing.T) {
 	a := newApp(t, cfg)
 	a.resize(110, 50)
 	a.exchange("hello", "hi")
-	a.key(tea.KeyCtrlP) // the answer
-	a.key(tea.KeyTab)
+	a.key("ctrl+p") // the answer
+	a.key("tab")
 	a.waitFor("why", has("UNHASHED", "why: the request's input differs", "model:    scripted"))
-	a.key(tea.KeyTab)
+	a.key("tab")
 	a.waitFor("the session pane", has("verify:", "unhashed"))
 }
 
@@ -317,8 +317,8 @@ func TestACompactionsDetailSaysWhatItFolded(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.waitFor("the compaction row", has("[compaction]", "summary 18 chars", "1 pinned"))
-	a.key(tea.KeyCtrlP) // the compaction is the last row
-	a.key(tea.KeyTab)
+	a.key("ctrl+p") // the compaction is the last row
+	a.key("tab")
 	a.waitFor("the fold", has("compaction", "folded:    2 items", "first kept:", "two", "summary:   message, 18 chars", "pinned:    1 items", "about 800"))
 }
 
@@ -333,7 +333,7 @@ func TestTheSessionPaneListsRefsAndTheHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.exchange("hello", "hi")
-	a.press(tea.KeyTab, tea.KeyTab)
+	a.press("tab", "tab")
 	a.waitFor("the pane", has("session "+a.rec.SessionID(), "cwd:      /work/dir", "harness:  tui-test 9", "format:   agentsession/", "refs:", "work/main", "verify:   OK", "config:   model scripted"))
 }
 
@@ -345,7 +345,7 @@ func TestTheSessionPaneShowsTheMemoryManifest(t *testing.T) {
 	if _, err := a.rec.Annotate(a.ctx, "agentmemory:render", json.RawMessage(data)); err != nil {
 		t.Fatal(err)
 	}
-	a.press(tea.KeyTab, tea.KeyTab)
+	a.press("tab", "tab")
 	a.waitFor("the manifest", has("memory:   manifest in force: 1 entries", "user/style"))
 }
 
@@ -361,7 +361,7 @@ func TestPanesAreComputedOnlyWhenAskedForAndNotPerEntry(t *testing.T) {
 	if n := a.reads(); n != 0 {
 		t.Fatalf("%d reads with no pane open", n)
 	}
-	a.press(tea.KeyTab, tea.KeyTab)
+	a.press("tab", "tab")
 	a.waitFor("the session pane", has("verify:"))
 	if n := a.reads(); n != 1 {
 		t.Fatalf("%d reads for the session pane, want 1", n)

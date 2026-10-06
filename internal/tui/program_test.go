@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
@@ -62,11 +62,10 @@ func TestRunsUnderARealProgram(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pw.Close()
 	out := &syncBuf{}
-	p := tea.NewProgram(tui.New(ctx, be), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx))
+	p := tea.NewProgram(tui.New(ctx, be), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20))
 	wait := tui.Attach(ctx, be, p.Send)
 	done := make(chan error, 1)
 	go func() { _, err := p.Run(); done <- err }()
-	p.Send(tea.WindowSizeMsg{Width: 80, Height: 20})
 
 	pw.Write([]byte("ping\r"))
 	deadline := time.Now().Add(10 * time.Second)

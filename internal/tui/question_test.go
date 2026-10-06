@@ -5,8 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/openresponses"
 
@@ -59,13 +57,13 @@ func TestRefusingASubagentsQuestionSendsTheReason(t *testing.T) {
 	a.waitFor("the question", has("Question (1/1)"))
 	a.typeText("n")
 	a.waitFor("the reason prompt", has("Reason for refusing"))
-	a.key(tea.KeyEsc)
+	a.key("esc")
 	a.waitFor("back at the question", has("[y] allow"))
 	a.typeText("n")
 	a.typeText("wrong file")
-	a.key(tea.KeyEnter)
+	a.key("enter")
 	a.waitFor("the refusal reached the call", all(has(`task text="go"`, "done", "idle"), lacks("Question (1/1)")))
-	a.key(tea.KeyCtrlO)
+	a.key("ctrl+o")
 	a.waitFor("the refusal's text", has("SUBAGENT REFUSED wrong file"))
 }
 

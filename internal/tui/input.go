@@ -7,18 +7,15 @@ package tui
 // pointer, or at the end of the row when the click is past its text.
 //
 // The textarea keeps its own scroll, for a value taller than the rows it
-// shows, and does not tell where it is; nor can it be worked out from
-// the keys, since the textarea clamps its scroll against the content it
-// last rendered, and when it renders is the program's frame rate. So the
-// click reads it from the frame it was made on: the scroll is where the
-// value's rows line up with the input's rows on the screen. A click
+// shows. It follows the cursor on every Update and is clamped to the
+// value when the textarea is drawn, which the program does after every
+// Update, so at a click it is the scroll of the frame clicked on. A click
 // moves the cursor only to a row shown, so the scroll stays where it is.
 
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -45,43 +42,6 @@ func (m *Model) inputCursorRow() int {
 	return row + m.in.LineInfo().RowOffset
 }
 
-// inputScroll is the first of the value's rows the input showed on the
-// last frame: the one from which the value's rows read as the frame's
-// input rows do. Of two that both do (rows that repeat), the one that
-// shows the cursor's row, as the textarea keeps it in view.
-func (m *Model) inputScroll(rows []string) int {
-	var shown []string
-	pw := lipgloss.Width(m.in.Prompt)
-	for y := m.inputY; y < m.inputY+m.in.Height() && y < len(m.lines); y++ {
-		_, text, _ := cutLine(ansi.Strip(m.lines[y]), pw, 1<<30)
-		shown = append(shown, strings.TrimSpace(text))
-	}
-	cur, found := m.inputCursorRow(), -1
-	for top := range rows {
-		match := true
-		for i, s := range shown {
-			r := ""
-			if top+i < len(rows) {
-				r = strings.TrimSpace(rows[top+i])
-			}
-			if r != s {
-				match = false
-				break
-			}
-		}
-		if !match {
-			continue
-		}
-		if cur >= top && cur < top+len(shown) {
-			return top
-		}
-		if found < 0 {
-			found = top
-		}
-	}
-	return max(found, 0)
-}
-
 // clickInput is a click on cell (x, y) of the input, y counted from its
 // first row shown. On a permission or a question waiting for y or n the
 // input is off, and the click only leaves the rows.
@@ -94,7 +54,7 @@ func (m *Model) clickInput(x, y int) {
 		return
 	}
 	rows, _ := m.inputRows()
-	target := min(m.inputScroll(rows)+y, len(rows)-1)
+	target := min(m.in.ScrollYOffset()+y, len(rows)-1)
 	for cur := m.inputCursorRow(); cur < target; cur++ {
 		m.in.CursorDown()
 	}
@@ -118,5 +78,5 @@ func (m *Model) clickInput(x, y int) {
 		}
 		at += w
 	}
-	m.in.SetCursor(col)
+	m.in.SetCursorColumn(col)
 }
