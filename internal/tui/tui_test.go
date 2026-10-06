@@ -65,6 +65,52 @@ func TestReasoningIsCollapsedUntilToggled(t *testing.T) {
 	a.waitFor("the reasoning collapsed again", lacks("secret musings"))
 }
 
+// spinFrames are the spinner's frames, one rune each.
+const spinFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+func TestTheRunLineAndARunningCallTurnOneSpinner(t *testing.T) {
+	g := newGates()
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(g)}
+	a := newApp(t, cfg)
+	t.Cleanup(func() { g.release("tool") })
+
+	a.submit("go")
+	g.arrive(t, "tool")
+	s := a.waitFor("the call running", has(`upper text="abc" [running]`))
+	// The run line is above the blank line, the input and its two bars.
+	frame := func(s string) (run string, spin rune) {
+		lines := strings.Split(s, "\n")
+		run = lines[len(lines)-5]
+		r := []rune(run)
+		return run, r[len(r)-1]
+	}
+	run, spin := frame(s)
+	if !strings.HasPrefix(run, "● running") || !strings.ContainsRune(spinFrames, spin) {
+		t.Fatalf("the run line is not running with the spinner at its end: %q", run)
+	}
+	if lipgloss.Width(run) != 100 {
+		t.Errorf("the spinner is not at the right edge: %q", run)
+	}
+	// The call's row reads as the run line does: a dot, the text in the
+	// column "running" starts in, and the same spinner at the same edge.
+	row := strings.Split(s, "\n")[lineOf(s, `upper text="abc"`)]
+	if !strings.HasPrefix(row, `● upper text="abc" [running]`) {
+		t.Errorf("the running call is not dotted as the run line is: %q", row)
+	}
+	if r := []rune(row); r[len(r)-1] != spin || lipgloss.Width(row) != lipgloss.Width(run) {
+		t.Errorf("the running call's spinner is not under the run line's %q:\n%s\n%s", spin, row, run)
+	}
+	a.waitFor("the spinner turning", func(s string) bool { _, r := frame(s); return r != spin })
+
+	g.release("tool")
+	a.waitFor("the call ended", all(has(`○ upper text="abc"`, "done"), lacks("[running]")))
+	s = a.waitFor("the run line idle", func(s string) bool { run, _ := frame(s); return run == "○ idle" })
+	if strings.ContainsAny(s, spinFrames) {
+		t.Errorf("a spinner is left after the run:\n%s", s)
+	}
+}
+
 func TestToolCallShowsItsStates(t *testing.T) {
 	g := newGates()
 	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
@@ -366,7 +412,7 @@ func TestResize(t *testing.T) {
 	a.submit("hi")
 	a.waitFor("the answer", has("word", "idle"))
 
-	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 12}, {Width: 120, Height: 40}, {Width: 20, Height: 6}} {
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 12}, {Width: 120, Height: 40}, {Width: 20, Height: 8}} {
 		a.send(size)
 		s := a.screen()
 		lines := strings.Split(s, "\n")
@@ -536,7 +582,7 @@ func TestPastedNewlinesCountAsRows(t *testing.T) {
 	}
 }
 
-func TestTheInputSitsBetweenTwoBarsAndTheScreenStillFits(t *testing.T) {
+func TestTheInputSitsBetweenTwoBarsUnderTheRunLineAndTheScreenStillFits(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hi")))
 	a.exchange("hello", "hi")
 	bar := strings.Repeat("─", 100)
@@ -548,6 +594,15 @@ func TestTheInputSitsBetweenTwoBarsAndTheScreenStillFits(t *testing.T) {
 	n := len(lines)
 	if !strings.Contains(lines[n-2], "> ") || !strings.Contains(lines[n-3], bar) || !strings.Contains(lines[n-1], bar) {
 		t.Fatalf("the input is not between two bars:\n%s", s)
+	}
+	if strings.TrimSpace(lines[n-4]) != "" {
+		t.Fatalf("no blank line above the input:\n%s", s)
+	}
+	if lines[n-5] != "○ idle" {
+		t.Fatalf("the run line is not above the blank line:\n%s", s)
+	}
+	if strings.TrimSpace(lines[n-6]) != "" {
+		t.Fatalf("no blank line above the run line:\n%s", s)
 	}
 	// The tree has no input, so no bars.
 	a.key("ctrl+t")

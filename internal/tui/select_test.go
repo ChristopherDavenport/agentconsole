@@ -124,7 +124,7 @@ func TestCtrlCCopiesTheStatusLine(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("copied %q, want one selection", got)
 	}
-	if !strings.Contains(got[0], "idle") || !strings.Contains(got[0], "session ") {
+	if !strings.Contains(got[0], "model scripted") || !strings.Contains(got[0], "session ") {
 		t.Errorf("the status line's text was not copied: %q", got[0])
 	}
 	if strings.TrimRight(got[0], " ") != got[0] {

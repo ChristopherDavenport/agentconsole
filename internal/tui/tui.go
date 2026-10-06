@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -63,7 +64,12 @@ type Model struct {
 	view view.Model // the latest the feed sent
 	vp   viewport.Model
 	in   textarea.Model
-	o    opts
+	// spinner turns on the run line and the calls in motion while a run
+	// goes; spinning is whether its ticks are coming, so a second chain
+	// of them is never started.
+	spinner  spinner.Model
+	spinning bool
+	o        opts
 	// flips are the rows shown the other way round from o, by entry: what
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
@@ -170,6 +176,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 		rec:      be.Record(),
 		vp:       viewport.New(),
 		in:       in,
+		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 		replied:  map[string]bool{},
@@ -191,6 +198,16 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, tea.RequestBackgroundColor) }
 
 func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
+
+// spin starts the spinner's ticks when a run goes and they are not
+// coming already. They stop at the first tick after the run.
+func (m *Model) spin() tea.Cmd {
+	if m.spinning || !m.running() {
+		return nil
+	}
+	m.spinning = true
+	return m.spinner.Tick
+}
 
 // question is the question being asked: the first a running call waits
 // on that has no reply yet. It is asked while the run goes, on the
@@ -240,7 +257,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncQuestions()
 		m.keepCursor()
 		m.relayout()
-		return m, m.wantPane()
+		return m, tea.Batch(m.wantPane(), m.spin())
+	case spinner.TickMsg:
+		if !m.running() {
+			m.spinning = false
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		// The run line reads the spinner as it is drawn; the calls in
+		// motion are in the viewport's content, laid out again for them.
+		if anyMoving(m.shown()) {
+			m.relayout()
+		}
+		return m, cmd
 	case paneMsg:
 		if msg.seq == m.panes.seq && msg.key == m.panes.want {
 			m.panes.have, m.panes.lines, m.panes.err = msg.key, msg.lines, ""
@@ -609,10 +639,10 @@ func (m *Model) decide(a agentturn.Answer) (tea.Model, tea.Cmd) {
 	m.relayout()
 	ctl, ctx := m.ctl, m.ctx
 	m.inflight.Add(1)
-	return m, func() tea.Msg {
+	return m, tea.Batch(func() tea.Msg {
 		defer m.inflight.Done()
 		return runDoneMsg{err: ctl.Answer(ctx, answers...)}
-	}
+	}, m.spin())
 }
 
 // send takes the input: a prompt when idle, a steer while a run goes.
@@ -632,10 +662,10 @@ func (m *Model) send() (tea.Model, tea.Cmd) {
 	m.relayout()
 	ctl, ctx := m.ctl, m.ctx
 	m.inflight.Add(1)
-	return m, func() tea.Msg {
+	return m, tea.Batch(func() tea.Msg {
 		defer m.inflight.Done()
 		return runDoneMsg{err: ctl.Prompt(ctx, item)}
-	}
+	}, m.spin())
 }
 
 // relayout sizes the parts and refills the viewport, keeping it at the
@@ -650,9 +680,9 @@ func (m *Model) relayout() {
 	rows := inputRowsUsed(m.in.Value(), m.in.Width())
 	visible := min(rows, inputMaxRows)
 	m.in.SetHeight(visible)
-	used := 2 // status line and the space the input would take
+	used := 4 // the status line, the run line and the blank over it, the hint the input's place takes
 	if m.typing() {
-		used = 1 + visible + 2 // status, the input's rows, and its bars
+		used = 1 + 2 + 1 + visible + 2 // status, the run line and the blank over it, the buffer, the input's rows, its bars
 	}
 	if panel != "" {
 		used += lipgloss.Height(panel)
@@ -682,7 +712,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry)
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry, m.spinner.View())
 	m.setContent(content)
 	m.spans = spans
 	switch {
@@ -797,7 +827,7 @@ func (m *Model) frame() string {
 	if !m.ready {
 		return "starting..."
 	}
-	status := feedNote(m.feedErr) + statusText(m.view, m.busy, m.aborting, m.verified, m.cost)
+	status := feedNote(m.feedErr) + statusText(m.view, m.verified, m.cost)
 	if m.note != "" {
 		status += " | " + m.note
 	}
@@ -815,6 +845,8 @@ func (m *Model) frame() string {
 	if m.err != "" {
 		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
 	}
+	// A blank line keeps the run line off what is above it.
+	parts = append(parts, "", runLine(turnState(m.view, m.busy, m.aborting), m.spinner.View(), m.width))
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))
@@ -824,7 +856,9 @@ func (m *Model) frame() string {
 		parts = append(parts, dimStyle.Render(truncate("read only: esc back to the live session, c continue from here, tab detail", m.width)))
 	default:
 		bar := dimStyle.Render(strings.Repeat("─", max(m.width, 1)))
-		// The input starts under the bar, below every line so far.
+		// A blank line keeps the input off the run line. The input
+		// starts under the bar, below every line so far.
+		parts = append(parts, "")
 		inputY = strings.Count(strings.Join(parts, "\n"), "\n") + 2
 		parts = append(parts, bar, m.in.View(), bar)
 	}
