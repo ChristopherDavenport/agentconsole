@@ -66,6 +66,8 @@ and the API key from the environment variable named by `--api-key-env`
   `--instructions`, `--max-turns`.
 
 In the terminal: Enter sends a prompt, or steers while a run is going;
+Shift-Enter starts a new line in the prompt (Alt-Enter and Ctrl-J do too,
+for a terminal that sends Shift-Enter as a plain Enter);
 Ctrl-C (or SIGINT) aborts a run, and quits when idle; PgUp, PgDn, Ctrl-Up,
 Ctrl-Down, Ctrl-Home, Ctrl-End and the mouse wheel scroll the conversation,
 while the prompt wraps over up to five lines, then scrolls, and the

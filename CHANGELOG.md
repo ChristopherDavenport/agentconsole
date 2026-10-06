@@ -5,6 +5,16 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: Shift-Enter puts a new line in the input, where Enter sends it;
+  in a refusal's reason too. A terminal reports Shift-Enter apart from
+  Enter only over the kitty keyboard protocol, so Alt-Enter and Ctrl-J
+  do the same for the rest. The keys screen lists them.
+- Fixed: an input ending in a line break (a paste that ends in one, now
+  a typed one too) was sized a row short, and scrolled its first line
+  out of view.
+
 ## v0.0.7 - 2026-10-06
 
 - Added: the assistant's messages are rendered as markdown with glamour
