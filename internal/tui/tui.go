@@ -70,6 +70,9 @@ type Model struct {
 	spinner  spinner.Model
 	spinning bool
 	o        opts
+	// md renders the assistant's markdown, and keeps what it rendered
+	// for the next layout.
+	md *markdown
 	// flips are the rows shown the other way round from o, by entry: what
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
@@ -178,6 +181,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 		vp:       viewport.New(),
 		in:       in,
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		md:       newMarkdown(),
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 		replied:  map[string]bool{},
@@ -204,8 +208,9 @@ func inputStyles(isDark bool) textarea.Styles {
 	return s
 }
 
-// Init implements tea.Model. The textarea's styles depend on whether the
-// terminal's background is dark, which the terminal is asked for.
+// Init implements tea.Model. The textarea's styles and the markdown's
+// (glamour's dark or light) depend on whether the terminal's background
+// is dark, which the terminal is asked for.
 func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, tea.RequestBackgroundColor) }
 
 func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
@@ -348,6 +353,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.wantPane()
 	case tea.BackgroundColorMsg:
 		m.in.SetStyles(inputStyles(msg.IsDark()))
+		m.md.setDark(msg.IsDark())
+		m.relayout()
 		return m, nil
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
@@ -723,7 +730,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry, m.spinner.View())
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry, m.spinner.View(), m.md)
 	m.setContent(content)
 	m.spans = spans
 	switch {
@@ -838,7 +845,8 @@ func (m *Model) frame() string {
 	if !m.ready {
 		return "starting..."
 	}
-	status := feedNote(m.feedErr) + statusText(m.view, m.verified, m.cost)
+	state, now := turnState(m.view, m.busy, m.aborting), time.Now()
+	status := feedNote(m.feedErr) + statusText(m.view, sessionTime(m.view, state, now), m.verified, m.cost)
 	if m.note != "" {
 		status += " | " + m.note
 	}
@@ -857,7 +865,7 @@ func (m *Model) frame() string {
 		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
 	}
 	// A blank line keeps the run line off what is above it.
-	parts = append(parts, "", runLine(turnState(m.view, m.busy, m.aborting), m.spinner.View(), m.width))
+	parts = append(parts, "", runLine(state, runFigures(m.view, state, now), m.spinner.View(), m.width))
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))

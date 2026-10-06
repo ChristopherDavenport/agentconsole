@@ -79,10 +79,11 @@ works over ssh too (a terminal that does not take it, iTerm2 with
 With a selection drawn the first Ctrl-C is the copy and the second the
 abort or the quit; with nothing selected, Ctrl-C is the interrupt it
 always was.
-The status line keeps a running total of
-tokens used and, when the host supplies a price source, what the session
-has cost. The line above the input says whether a run is going, in
-color, with a spinner at its right edge while one does; a tool call in
+The status line keeps the session's time working (its
+runs' time, summed), a running total of tokens used and, when the host supplies a price source, what the session
+has cost. The line above the input is the current turn's: whether a run
+is going, in color, how long it has run and the tokens it took in and
+gave out, with a spinner at its right edge while one does; a tool call in
 motion carries the same dot, color and spinner, its spinner in the same
 column. When a tool call needs permission, y
 approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every

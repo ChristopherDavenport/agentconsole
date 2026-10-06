@@ -51,6 +51,7 @@ package view
 import (
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
@@ -242,6 +243,11 @@ type Model struct {
 	// UsageByModel the same split by the model each call was made under.
 	Usage        openresponses.Usage
 	UsageByModel map[string]openresponses.Usage
+	// Run is the last run on the viewed line, by the record, and Worked
+	// how long the line's runs that ended took, summed: the session's
+	// time working.
+	Run    Run
+	Worked time.Duration
 	// Rows is the path's visible items, then the live rows.
 	Rows        []Row
 	Turn        Turn
@@ -1060,6 +1066,7 @@ func (v *View) Model() Model {
 	}
 	m.Branches = append([]Branch(nil), v.branches...)
 	m.Usage, m.UsageByModel = Usage(v.path)
+	m.Run, m.Worked = lastRun(v.path), worked(v.path)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c

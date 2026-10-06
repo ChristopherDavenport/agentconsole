@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
@@ -34,7 +35,7 @@ func TestRunsUnderARealProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ag := agentturn.New(cfgWith(say(nil, nil, "pong")))
+	ag := agentturn.New(cfgWith(say(nil, nil, "**pong** [docs](https://example.com/docs)")))
 	defer rec.Attach(ag)()
 	be, err := native.New(ag, rec)
 	if err != nil {
@@ -45,18 +46,24 @@ func TestRunsUnderARealProgram(t *testing.T) {
 	defer pw.Close()
 	out := termtest.New(80, 20)
 	defer out.Close()
-	p := tea.NewProgram(tui.New(ctx, be), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20))
+	p := tea.NewProgram(tui.New(ctx, be), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20), tea.WithColorProfile(colorprofile.ANSI))
 	wait := tui.Attach(ctx, be, p.Send)
 	done := make(chan error, 1)
 	go func() { _, err := p.Run(); done <- err }()
 
 	pw.Write([]byte("ping\r"))
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(out.Screen(), "pong") {
+	for !strings.Contains(out.Screen(), "pong docs") {
 		if time.Now().After(deadline) {
 			t.Fatalf("no reply on the terminal; screen:\n%s", out.Screen())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// The reply's link reaches the terminal as a hyperlink. (A program
+	// whose output is not a terminal writes no styles, hyperlinks among
+	// them, unless it is given a profile.)
+	if !strings.Contains(out.Raw(), ";https://example.com/docs\a") {
+		t.Errorf("the reply's link is not a hyperlink: written %q", out.Raw())
 	}
 	// Let the run settle to idle before quitting.
 	for ag.State().Running {

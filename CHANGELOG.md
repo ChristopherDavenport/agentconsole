@@ -7,6 +7,16 @@ versions may break the API.
 
 ## Unreleased
 
+- Added: the assistant's messages are rendered as markdown with glamour
+  (CommonMark with GitHub's tables, task lists, strikethrough and bare
+  links, code blocks highlighted), in its dark or light style by the
+  terminal's background, wrapped to the conversation's width. Its style
+  is fitted to the conversation: no margin, no "##" before headings,
+  inline code a muted gray, a one-column quote bar. Links are OSC 8
+  hyperlinks. What the user typed is shown as typed. New dependency:
+  `charm.land/glamour/v2`; `github.com/yuin/goldmark`,
+  `golang.org/x/text` and `golang.org/x/net` are required past the
+  advisories in the versions glamour asks for.
 - Changed: the run's state (running, aborting, requires action, idle)
   moves from the status line at the top to a run line of its own above
   the input, in color, with a spinner at its right edge while
@@ -16,6 +26,17 @@ versions may break the API.
   with the run's state. A call in motion is drawn in the run line's color,
   with the same spinner at the right edge, in the run line's spinner's
   column. A blank line sits on each side of the run line.
+- Added: the run line shows the current turn's figures after its state,
+  while the run goes or waits on a permission: how long it has run and
+  the tokens its model calls took in and gave out, as
+  "(19s · 1.3M↑ / 534k↓)". `view.Model.Run`, of the new type `view.Run`,
+  carries them: the last run on the viewed line, by its start and end
+  entries, and the usage of its model calls. Token counts keep three
+  figures (534k, not 534.0k), on the status line too.
+- Added: the status line leads with the session's time working, as
+  "time 4m12s": the runs on the line, each from its start entry to its
+  end entry, and the current turn's time so far. `view.Model.Worked`
+  carries the runs that ended.
 - Fixed: the input is drawn on the terminal's own background. bubbles'
   textarea gave the line the cursor is on a background of its own (ANSI
   black on a dark terminal, color 255 on a light one), a band of another

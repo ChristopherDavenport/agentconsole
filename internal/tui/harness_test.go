@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -432,6 +433,12 @@ func has(subs ...string) func(string) bool {
 		}
 		return true
 	}
+}
+
+// prompted is whether the screen shows the user's prompt as its row,
+// "you" over the text, as the record has it.
+func prompted(text string) func(string) bool {
+	return regexp.MustCompile(`(?m)^you +\n` + regexp.QuoteMeta(text) + ` *$`).MatchString
 }
 
 func lacks(subs ...string) func(string) bool {

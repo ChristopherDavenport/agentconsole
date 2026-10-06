@@ -797,7 +797,93 @@ selects itself.
   none). `x/vt` has no tagged release and is required at a
   pseudo-version; it is charm's own, built on the ultraviolet already
   in the graph, and only `internal/termtest` imports it, so a library
-  build does not compile it.
+  build does not compile it. The terminal makes a newline a carriage
+  return and a line feed, as a line discipline's ONLCR does: a program
+  whose input is not a terminal takes its output to be cooked and moves
+  to the start of a line below with a bare newline, which an emulator
+  taking it literally drew a line's width over, when a frame's diff
+  happened to use it.
+
+## Decided in implementation, the run line
+
+- **The turn has a line of its own; the status line is the session's.**
+  The run's state left the status line for a run line above the input:
+  its words in color, the current turn's figures after them, and a
+  spinner at the right edge while the run goes. The status line keeps
+  the session's figures (tokens, cost, model, turn, session). A tool
+  call in motion carries the run line's dot, color and spinner, its
+  spinner in the run line's column.
+- **The turn's figures are the record's.** `view.Model.Run` (of the new
+  exported type `view.Run`) is the last run whose start entry is on the
+  viewed line: when its start and end entries were written, and the
+  usage of the model calls after the start, counted as `view.Usage`
+  counts a line's. The run line shows them as "(19s · 1.3M↑ / 534k↓)"
+  while the run goes and while it waits on a permission, with the clock
+  stopped at the end entry. A run whose start entry has not landed yet
+  shows none rather than the run before it's, and the tokens move when
+  a response entry lands, not as the stream reports them: the live
+  stream carries what is not committed yet, and usage is committed with
+  its response. Idle, there is no current turn and the line says so
+  alone.
+- **The session's time is its time working.** `view.Model.Worked` sums
+  the line's runs that ended, each from its start entry to its end
+  entry; a run with no end on the line (one whose process died) adds
+  nothing. The status line leads with it as "time 4m12s", the current
+  turn's time so far added while it goes, so it moves with the run
+  line's clock. Wall time since the session began was the other
+  reading; it grows while idle and spans days for a resumed session,
+  which says little about the session.
+
+## Decided in implementation, markdown
+
+- **The assistant's messages are markdown, drawn.** Models write
+  markdown; shown as source, a reply is its asterisks, fences and
+  pipes. An assistant message is now rendered: CommonMark with GitHub's
+  tables, task lists, strikethrough and bare links. What the user typed
+  stays as typed, and reasoning and tool output stay plain.
+- **glamour draws it.** glamour v2 (charm's renderer, on lipgloss v2)
+  is the renderer, with its dark or light style by the background the
+  terminal reports. A renderer of the client's own over goldmark was
+  written first and dropped: it differed from glamour mostly in not
+  writing a link's address, and glamour brings code highlighting
+  (chroma) and leaves the client no renderer to keep. The price is the
+  weight: chroma, bluemonday, goldmark, goldmark-emoji, regexp2,
+  gorilla/css, douceur and x/net come with it. The goldmark, x/text and
+  x/net glamour asks for have advisories govulncheck finds reachable,
+  and are required at versions past them (goldmark v1.8.6, x/text and
+  x/net at their latest).
+- **glamour's style, fitted.** The changes from its defaults are few:
+  no margin and no blank lines around the document, which sits under
+  its row's label as any row does, in the terminal's own text color; no
+  "##" before a heading (the markup glamour keeps by default: H1 is
+  still its bar, H2 is underlined, the color and weight do the rest);
+  inline code a gray a shade off the text (250 dark, 238 light) on
+  glamour's background rather than its red; and a quote's bar `▎`, one
+  column, where glamour's `│ ` is two in the one column it sets aside
+  for it, which ran a quote's lines a column over and broke them.
+- **What the client does around it.** Tabs are expanded to four-column
+  stops before glamour sees the source, since it keeps a code block's
+  tabs and a cell renderer cannot measure them. The blank lines glamour
+  writes before and after are dropped, and the spaces it pads the last
+  line to the width with, where a streaming row's cursor goes.
+- **What glamour does that stays.** A link is its text and then its
+  address, both an OSC 8 hyperlink. Every line is padded to the width
+  with styled spaces, and every token styled and reset on its own, so a
+  line cut by the viewport or a selection leaves no style open. Inline
+  code is padded with no-break spaces, which a copy carries. Its
+  limits stay too: a wrapped list item does not hang under its text, a
+  code line too long for the width wraps to the left edge rather than
+  the block's indent, and a hard line break (two spaces, a backslash)
+  is joined like a soft one.
+- **Rendered once per state.** The conversation is laid out on every
+  spinner frame, and glamour is slow to build and to run. A renderer is
+  built once per width; what it rendered is kept by source and width,
+  and a layout keeps only what it asked for, so the spinner renders
+  nothing and a streaming message leaves only its last state behind.
+- **Streaming markdown is markdown so far.** An unclosed fence is a code
+  block to the end, a `**` not yet closed reads as asterisks until it
+  is, and a paragraph's trailing space is not drawn, so a word streaming
+  in sits against the cursor.
 
 ## Open questions
 

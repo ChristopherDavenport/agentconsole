@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
@@ -87,10 +88,10 @@ const gutter = 2
 // flipped by its entry's flips. With a row selected (sel is its entry),
 // every block gets a two-column gutter with a marker on the selected one.
 // spin is the spinner's frame, drawn at the right edge of the calls in
-// motion. The spans say where each committed row's block sits, so the
+// motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spin string) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spin string, md *markdown) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -105,7 +106,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spi
 		if hidden[i] {
 			continue
 		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]), spin, w)
+		b := renderRow(row, o.flipped(flips[row.EntryID]), spin, w, md)
 		if b == "" {
 			continue
 		}
@@ -132,6 +133,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spi
 		blocks = append(blocks, b)
 		at += h + 1
 	}
+	md.sweep()
 	return strings.Join(blocks, "\n\n"), spans
 }
 
@@ -139,7 +141,7 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-func renderRow(row view.Row, o opts, spin string, width int) string {
+func renderRow(row view.Row, o opts, spin string, width int, md *markdown) string {
 	if f := row.Fold; f != nil {
 		s := fmt.Sprintf("[compaction] context from %s on, summary %d chars", shortID(f.FirstKept), f.SummaryLen)
 		if f.Pinned > 0 {
@@ -162,16 +164,20 @@ func renderRow(row view.Row, o opts, spin string, width int) string {
 	}
 	switch it := row.Item.(type) {
 	case *openresponses.Message:
+		// The assistant writes markdown, and is shown it rendered; what
+		// the user typed is shown as typed.
 		var label string
+		body := it.Text()
 		switch it.Role {
 		case openresponses.RoleUser:
 			label = userStyle.Render("you")
 		case openresponses.RoleAssistant:
 			label = assistantStyle.Render("assistant")
+			body = md.render(body, width)
 		default:
 			label = dimStyle.Render(string(it.Role))
 		}
-		return label + tag + "\n" + it.Text() + tail
+		return label + tag + "\n" + body + tail
 	case *openresponses.ReasoningItem:
 		text := it.Summary.Text()
 		if text == "" {
@@ -431,21 +437,102 @@ func turnState(m view.Model, busy, aborting bool) runState {
 	return stateIdle
 }
 
-// runLine is the line over the input (or the hint that takes its place):
-// the run's state in words and color, and while the run goes, the
-// spinner at the right edge.
-func runLine(s runState, spin string, width int) string {
+// runLine is the line over the input (or the hint that takes its place),
+// about the current turn as the status line is about the session: the
+// run's state in words and color, its figures after it, and while the
+// run goes, the spinner at the right edge. It is one line at any width:
+// the figures go first, then the words are cut.
+func runLine(s runState, figures, spin string, width int) string {
+	var word string
+	style := runStyle
 	switch s {
 	case stateIdle:
-		return dimStyle.Render("○ idle")
+		word, style = "○ idle", dimStyle
 	case stateRequiresAction:
-		return warnStyle.Render("◆ requires action")
+		word, style = "◆ requires action", warnStyle
+	case stateAborting:
+		word, style = "● aborting", warnStyle
+	default:
+		word = "● running"
 	}
-	left := runStyle.Render("● running")
-	if s == stateAborting {
-		left = warnStyle.Render("● aborting")
+	moving := s == stateRunning || s == stateAborting
+	room := width
+	if moving {
+		room = width - 1 - lipgloss.Width(spin)
+	}
+	if figures != "" {
+		figures = " " + figures
+	}
+	if lipgloss.Width(word+figures) > room {
+		figures = ""
+	}
+	left := style.Render(truncate(word, room)) + dimStyle.Render(figures)
+	if !moving {
+		return left
 	}
 	return atRight(left, runStyle.Render(spin), width)
+}
+
+// runFigures is what the run line says of the current turn, in parens:
+// how long it has run and the tokens its model calls took in and gave
+// out, as "(19s · 1.3M↑ / 534k↓)". They are the record's figures for the
+// last run on the line, shown while it goes (once its start entry has
+// landed, so a run before it is never taken for it) and while it waits
+// on a permission, its clock stopped at its end. Idle, there is no
+// current turn and nothing is said.
+func runFigures(m view.Model, s runState, now time.Time) string {
+	r, ok := currentRun(m, s)
+	if !ok {
+		return ""
+	}
+	tokens := compactTokens(r.Usage.InputTokens) + "↑ / " + compactTokens(r.Usage.OutputTokens) + "↓"
+	if r.Started.IsZero() {
+		return "(" + tokens + ")"
+	}
+	end := r.Ended
+	if end.IsZero() {
+		end = now
+	}
+	return "(" + elapsed(end.Sub(r.Started)) + " · " + tokens + ")"
+}
+
+// currentRun is the record's last run on the line when it is the current
+// turn: going, with its start entry landed, or waiting on a permission.
+func currentRun(m view.Model, s runState) (view.Run, bool) {
+	r := m.Run
+	switch {
+	case r.ID == "", s == stateIdle:
+		return r, false
+	case s != stateRequiresAction && (m.Turn.State != view.Running || r.ID != m.Turn.RunID):
+		return r, false
+	}
+	return r, true
+}
+
+// sessionTime is the session's time working for the status line: the
+// runs on the line that ended, and the current turn's time so far. It is
+// "" before the line holds a run.
+func sessionTime(m view.Model, s runState, now time.Time) string {
+	if m.Run.ID == "" {
+		return ""
+	}
+	d := m.Worked
+	if r, ok := currentRun(m, s); ok && r.Ended.IsZero() && !r.Started.IsZero() {
+		d += max(now.Sub(r.Started), 0)
+	}
+	return elapsed(d)
+}
+
+// elapsed is a turn's running time to the second: 19s, 4m05s, 1h02m.
+func elapsed(d time.Duration) string {
+	d = max(d, 0).Truncate(time.Second)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // atRight puts spin at the right edge of a width-wide line, so the
@@ -462,11 +549,15 @@ func atRight(line, spin string, width int) string {
 	return strings.Join(rows, "\n")
 }
 
-// statusText is the turn view: the model and attempt, the turn number,
-// and the session's running token use and cost. The run's state is on
-// the run line.
-func statusText(m view.Model, verified bool, cost client.Cost) string {
+// statusText is the session's view: its time working (worked, from
+// [sessionTime]; "" says none), its running token use and cost, the
+// model and attempt and the turn number. The run's state is on the run
+// line.
+func statusText(m view.Model, worked string, verified bool, cost client.Cost) string {
 	var parts []string
+	if worked != "" {
+		parts = append(parts, "time "+worked)
+	}
 	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
 		usage := fmt.Sprintf("tokens %s in, %s out", compactTokens(m.Usage.InputTokens), compactTokens(m.Usage.OutputTokens))
 		if cost != nil {
@@ -509,12 +600,17 @@ func statusText(m view.Model, verified bool, cost client.Cost) string {
 	return strings.Join(parts, " | ")
 }
 
-// compactTokens shortens a token count for the status line: the full count
-// in the panes would push the dollar figure past the terminal's edge.
+// compactTokens shortens a token count for the status and run lines: the
+// full count in the panes would push the dollar figure past the
+// terminal's edge. Three figures are enough: 1.3M, 534k, 12.5k.
 func compactTokens(n int) string {
 	switch {
-	case n >= 1_000_000:
+	case n >= 99_950_000:
+		return fmt.Sprintf("%.0fM", float64(n)/1_000_000)
+	case n >= 999_500:
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 99_950:
+		return fmt.Sprintf("%.0fk", float64(n)/1000)
 	case n >= 1000:
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}

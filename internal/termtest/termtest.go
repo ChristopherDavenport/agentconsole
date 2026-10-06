@@ -32,12 +32,19 @@ func New(width, height int) *Term {
 	return t
 }
 
-// Write takes the program's output.
+// Write takes the program's output. A newline is a carriage return and
+// a line feed, as a terminal's line discipline makes it (ONLCR): a
+// program whose input is not a terminal takes its output to be cooked,
+// and moves the cursor to the start of a line below with a bare
+// newline.
 func (t *Term) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.raw.Write(p)
-	return t.emu.Write(p)
+	if _, err := t.emu.Write(bytes.ReplaceAll(p, []byte("\n"), []byte("\r\n"))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // Screen is the text the screen shows, its trailing blanks trimmed.
