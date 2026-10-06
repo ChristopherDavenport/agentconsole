@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/openresponses"
@@ -155,10 +155,10 @@ func (m *Model) click(x, y int) tea.Cmd {
 		return nil
 	}
 	// The status line is line 0; the viewport starts under it.
-	if y < 1 || y > m.vp.Height {
+	if y < 1 || y > m.vp.Height() {
 		return nil
 	}
-	line := m.vp.YOffset + y - 1
+	line := m.vp.YOffset() + y - 1
 	switch m.screen {
 	case screenTree:
 		return m.clickTree(line)
@@ -529,7 +529,7 @@ func (m *Model) renderTree() (string, int, []int) {
 }
 
 // treeKey handles a key on the tree screen.
-func (m *Model) treeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) treeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	items := m.treeItems()
 	switch msg.String() {
 	case "up", "k":

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -55,7 +55,7 @@ func TestCtrlCCopiesTheSelectedText(t *testing.T) {
 	}
 	// Ctrl+c copies and drops the selection, so the next one would be
 	// the interrupt again.
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] != "hello world" {
 		t.Errorf("copied %q, want [\"hello world\"]", got)
 	}
@@ -81,7 +81,7 @@ func TestCtrlCCopiesWhileARunGoes(t *testing.T) {
 	g.arrive(t, "hold")
 	a.waitFor("the first chunk streaming", all(has("hel"+cursor, "running")))
 	a.drag("hel", 0, 3)
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] != "hel" {
 		t.Errorf("copied %q, want [\"hel\"]", got)
 	}
@@ -106,7 +106,7 @@ func TestCtrlCCopiesWholeLinesBetween(t *testing.T) {
 	// on the two ends.
 	ya, yw := lineOf(a.screen(), "assistant"), lineOf(a.screen(), "hello world")
 	a.dragCells(0, ya, 11, yw)
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	want := "assistant\nhello world"
 	if got := a.copied(); len(got) != 1 || got[0] != want {
 		t.Errorf("copied %q, want [%q]", got, want)
@@ -119,7 +119,7 @@ func TestCtrlCCopiesTheStatusLine(t *testing.T) {
 	a.waitFor("the answer", all(has("hello world", "idle")))
 
 	a.dragCells(0, 0, 99, 0)
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	got := a.copied()
 	if len(got) != 1 {
 		t.Fatalf("copied %q, want one selection", got)
@@ -140,7 +140,7 @@ func TestADragDoesNotSelectARow(t *testing.T) {
 	if strings.Contains(s, "▶") {
 		t.Errorf("the drag selected a row:\n%s", s)
 	}
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] == "" {
 		t.Errorf("ctrl+c copied nothing: %q", got)
 	}
@@ -152,7 +152,7 @@ func TestAKeyButCtrlCClearsTheSelection(t *testing.T) {
 	a.waitFor("the answer", all(has("hello world", "idle")))
 
 	a.drag("hello world", 0, 11)
-	a.key(tea.KeyEsc)
+	a.key("esc")
 	if a.m.Selecting() {
 		t.Errorf("the selection is still drawn after a key:\n%s", a.screen())
 	}
@@ -182,7 +182,7 @@ func TestCtrlCWithoutASelectionQuits(t *testing.T) {
 	a.submit("hi")
 	a.waitFor("the answer", all(has("hello world", "idle")))
 
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	a.waitQuit()
 	if got := a.copied(); len(got) != 0 {
 		t.Errorf("ctrl+c with nothing selected copied %q", got)
@@ -217,7 +217,7 @@ func TestTheSelectionStaysOnItsTextWhileARunStreams(t *testing.T) {
 	if !a.m.Selecting() {
 		t.Fatalf("the selection was dropped by the run:\n%s", s)
 	}
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] != "first words" {
 		t.Errorf("copied %q, want [\"first words\"]", got)
 	}
@@ -236,12 +236,12 @@ func TestTheSelectionStaysOnItsTextWhenScrolled(t *testing.T) {
 
 	a.drag("line 40", 0, 7)
 	for range 5 {
-		a.send(tea.MouseMsg{X: 0, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+		a.send(tea.MouseWheelMsg{X: 0, Y: 5, Button: tea.MouseWheelUp})
 	}
 	if s := a.screen(); strings.Contains(s, "line 40") {
 		t.Fatalf("the wheel did not scroll the text away; the test proves nothing:\n%s", s)
 	}
-	a.key(tea.KeyCtrlC)
+	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] != "line 40" {
 		t.Errorf("copied %q, want [\"line 40\"]", got)
 	}

@@ -8,7 +8,7 @@ committed, and live events carry only what is not committed yet.
 ## Module
 
 - Module path: `github.com/ChristopherDavenport/agentconsole`.
-- Go 1.25 is the floor.
+- Go 1.26 is the floor.
 - The library surface is `client`, `client/native`, `client/kitbackend`,
   `view` and `console`; `tui` and `inspect` stay under `internal/`. An
   embedder (dax) imports the public ones and calls `console.Run`. Adding
@@ -37,6 +37,8 @@ committed, and live events carry only what is not committed yet.
     `Attach`, which feeds the view from the record and live streams and
     sends each `view.Model` to the program.
   - `internal/scripted`: the scripted model the tests share.
+  - `internal/termtest`: a terminal emulator (`x/vt`) for the tests
+    that run the program over a pipe, to read its screen.
   - `cmd/agentconsole`: the binary, a native agent in process, a thin
     user of `console.Run`.
 - No ACP backend yet. A later step.
@@ -107,4 +109,7 @@ where the Go environment sets `-mod=mod`.
 Headless, offline and under `-race`: a scripted model (an
 `openresponses.Streamer` built on the emitter), a store from
 `agentsession`, a real `agentturn.Agent` with a real recorder. Assert
-the rendered model at each step, not the event stream.
+the rendered model at each step, not the event stream. A test that runs
+the program over a pipe reads the screen through `internal/termtest`,
+never the bytes written: the renderer writes only the cells that change,
+so a streamed word is seldom whole in them.

@@ -35,8 +35,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
@@ -62,8 +62,8 @@ type end struct {
 // endAt is the end at screen cell (x, y). The status line is line 0; the
 // viewport starts under it.
 func (m *Model) endAt(x, y int) end {
-	if y >= 1 && y <= m.vp.Height {
-		return end{x: x, line: m.vp.YOffset + y - 1, onContent: true}
+	if y >= 1 && y <= m.vp.Height() {
+		return end{x: x, line: m.vp.YOffset() + y - 1, onContent: true}
 	}
 	return end{x: x, line: y}
 }
@@ -72,7 +72,7 @@ func (m *Model) endAt(x, y int) end {
 // below it, when its text is scrolled out of sight.
 func (m *Model) screenY(e end) int {
 	if e.onContent {
-		return e.line - m.vp.YOffset + 1
+		return e.line - m.vp.YOffset() + 1
 	}
 	return e.line
 }
@@ -98,37 +98,40 @@ func WithCopier(fn func(string)) Option { return func(m *Model) { m.copier = fn 
 // mouse is every mouse event. A left press anchors both a click and a
 // selection; motion with the button down selects, and the release ends
 // the drag, leaving the selection drawn — or, when no motion came
-// between, clicks the row under it. Anything else goes to the viewport,
-// which scrolls.
+// between, clicks the row under it. The release is taken whatever button
+// it names, since not every terminal names one. Anything else goes to
+// the viewport, which scrolls.
 func (m *Model) mouse(msg tea.MouseMsg) tea.Cmd {
-	if msg.Button == tea.MouseButtonLeft {
-		switch msg.Action {
-		case tea.MouseActionPress:
-			m.pressed, m.pressX, m.pressY = true, msg.X, msg.Y
-			m.sel = nil
-			return nil
-		case tea.MouseActionMotion:
-			if !m.pressed {
-				break
-			}
-			if m.sel == nil {
-				if msg.X == m.pressX && msg.Y == m.pressY {
-					return nil
-				}
-				m.sel = &selection{a: m.endAt(m.pressX, m.pressY)}
-			}
-			m.sel.b = m.endAt(msg.X, msg.Y)
-			return nil
-		case tea.MouseActionRelease:
-			if !m.pressed {
-				break
-			}
-			m.pressed = false
-			if m.sel != nil {
-				return nil // a drag, not a click: the selection stays drawn
-			}
-			return m.click(msg.X, msg.Y)
+	at := msg.Mouse()
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			break
 		}
+		m.pressed, m.pressX, m.pressY = true, at.X, at.Y
+		m.sel = nil
+		return nil
+	case tea.MouseMotionMsg:
+		if msg.Button != tea.MouseLeft || !m.pressed {
+			break
+		}
+		if m.sel == nil {
+			if at.X == m.pressX && at.Y == m.pressY {
+				return nil
+			}
+			m.sel = &selection{a: m.endAt(m.pressX, m.pressY)}
+		}
+		m.sel.b = m.endAt(at.X, at.Y)
+		return nil
+	case tea.MouseReleaseMsg:
+		if !m.pressed {
+			break
+		}
+		m.pressed = false
+		if m.sel != nil {
+			return nil // a drag, not a click: the selection stays drawn
+		}
+		return m.click(at.X, at.Y)
 	}
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
@@ -182,7 +185,7 @@ func (m *Model) markSelection(lines []string) []string {
 	x0, y0, x1, y1 := m.selScreen()
 	lo, hi := 0, len(lines)-1
 	if m.sel.onContent() {
-		lo, hi = 1, min(m.vp.Height, hi)
+		lo, hi = 1, min(m.vp.Height(), hi)
 	}
 	out := append([]string(nil), lines...)
 	for _, r := range region(x0, y0, x1, y1, lo, hi) {

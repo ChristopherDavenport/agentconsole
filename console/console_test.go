@@ -1,7 +1,6 @@
 package console_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"io"
@@ -19,24 +18,8 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/console"
 	"github.com/ChristopherDavenport/agentconsole/internal/scripted"
+	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 )
-
-type syncBuf struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuf) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuf) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
 
 // rig is an agent, its recorder and a backend over a store, and a
 // console.Run on a pipe.
@@ -45,7 +28,7 @@ type rig struct {
 	agent *agentturn.Agent
 	be    *native.Backend
 	in    *io.PipeWriter
-	out   *syncBuf
+	out   *termtest.Term
 	done  chan error
 }
 
@@ -70,7 +53,8 @@ func start(t *testing.T, m *scripted.Model, opts ...console.Option) *rig {
 	}
 	pr, pw := io.Pipe()
 	t.Cleanup(func() { pw.Close() })
-	r := &rig{t: t, agent: ag, be: be, in: pw, out: &syncBuf{}, done: make(chan error, 1)}
+	r := &rig{t: t, agent: ag, be: be, in: pw, out: termtest.New(80, 20), done: make(chan error, 1)}
+	t.Cleanup(func() { r.out.Close() })
 	opts = append([]console.Option{console.WithInput(pr), console.WithOutput(r.out), console.WithoutSignalHandler(), console.WithWindowSize(80, 20)}, opts...)
 	go func() { r.done <- console.Run(ctx, be, opts...) }()
 	return r
@@ -83,12 +67,25 @@ func (r *rig) type_(s string) {
 	}
 }
 
-func (r *rig) waitOutput(sub string) {
+// waitScreen waits until the terminal's screen shows sub.
+func (r *rig) waitScreen(sub string) {
+	r.t.Helper()
+	r.waitFor(sub, r.out.Screen)
+}
+
+// waitRaw waits until the program has written sub, a command to the
+// terminal that the screen does not show.
+func (r *rig) waitRaw(sub string) {
+	r.t.Helper()
+	r.waitFor(sub, r.out.Raw)
+}
+
+func (r *rig) waitFor(sub string, read func() string) {
 	r.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(r.out.String(), sub) {
+	for !strings.Contains(read(), sub) {
 		if time.Now().After(deadline) {
-			r.t.Fatalf("%q never shown; output:\n%q", sub, r.out.String())
+			r.t.Fatalf("%q never written; screen:\n%s", sub, r.out.Screen())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -111,7 +108,7 @@ func (r *rig) waitEnd() error {
 func TestRunDrivesAnAgentOverAPipe(t *testing.T) {
 	r := start(t, scripted.New(scripted.Say("po", "ng")))
 	r.type_("ping\r")
-	r.waitOutput("pong")
+	r.waitScreen("pong")
 	for r.agent.State().Running {
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -128,7 +125,7 @@ func TestRunDrivesAnAgentOverAPipe(t *testing.T) {
 func TestRunEndsARunItQuitsOver(t *testing.T) {
 	r := start(t, scripted.New(scripted.SayThenBlock("part")))
 	r.type_("go\r")
-	r.waitOutput("part")
+	r.waitScreen("part")
 	r.type_("\x03")
 	r.type_("\x03")
 	if err := r.waitEnd(); err != nil {
@@ -146,7 +143,7 @@ func TestRunEndsARunItQuitsOver(t *testing.T) {
 func TestRunCopiesASelectionToTheClipboard(t *testing.T) {
 	r := start(t, scripted.New(scripted.Say("po", "ng")))
 	r.type_("ping\r")
-	r.waitOutput("pong")
+	r.waitScreen("pong")
 	// The status line copied is the one at the copy, and the run that
 	// printed pong is still ending: wait for it to be over before the
 	// drag, or the copy races the relayout to idle.
@@ -155,12 +152,12 @@ func TestRunCopiesASelectionToTheClipboard(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	// A drag over the status line, always the first line of the screen.
-	r.type_("\x1b[<0;1;1M")    // press the left button at (0, 0)
-	r.type_("\x1b[<32;80;1M")  // drag to (79, 0)
-	r.type_("\x1b[<0;80;1m")   // release: the selection stays, nothing copied
-	r.type_("\x03")            // ctrl+c: the copy is a choice
-	r.waitOutput("\x1b]52;c;") // the clipboard was set
-	out := r.out.String()
+	r.type_("\x1b[<0;1;1M")   // press the left button at (0, 0)
+	r.type_("\x1b[<32;80;1M") // drag to (79, 0)
+	r.type_("\x1b[<0;80;1m")  // release: the selection stays, nothing copied
+	r.type_("\x03")           // ctrl+c: the copy is a choice
+	r.waitRaw("\x1b]52;c;")   // the clipboard was set
+	out := r.out.Raw()
 	i := strings.Index(out, "\x1b]52;c;")
 	if i < 0 {
 		t.Fatalf("no OSC 52 in the output:\n%q", out)

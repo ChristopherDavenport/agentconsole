@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
@@ -307,10 +308,13 @@ func (a *app) run(cmd tea.Cmd) {
 	}()
 }
 
+// screen is the screen as text. lipgloss styles it whatever the
+// terminal, and the program fits the colors to the terminal it writes to,
+// so the styles are stripped.
 func (a *app) screen() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.m.View()
+	return ansi.Strip(a.m.View().Content)
 }
 
 // copied is what the model copied to the clipboard, in order.
@@ -337,25 +341,70 @@ func (a *app) quitted() bool {
 	return a.quit
 }
 
-// paste sends value as the terminal sends a paste: one key message
-// holding every rune, over bracketed paste, that the model sees whole.
-func (a *app) paste(value string) {
-	a.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value), Paste: true})
-}
+// paste sends value as the terminal sends a paste: one message holding
+// every rune, over bracketed paste, that the model sees whole.
+func (a *app) paste(value string) { a.send(tea.PasteMsg{Content: value}) }
 
 // typeText types text, one key per rune.
 func (a *app) typeText(text string) {
 	for _, r := range text {
-		a.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		a.send(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 }
 
-func (a *app) key(t tea.KeyType) { a.send(tea.KeyMsg{Type: t}) }
+// key presses the key bubbletea names name ("enter", "ctrl+p", "f1").
+func (a *app) key(name string) {
+	a.t.Helper()
+	a.send(keyPress(a.t, name))
+}
+
+// keyNames are the keys with a name of their own that the tests press.
+var keyNames = map[string]rune{
+	"enter": tea.KeyEnter, "tab": tea.KeyTab, "esc": tea.KeyEscape,
+	"up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight,
+	"home": tea.KeyHome, "end": tea.KeyEnd, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown,
+	"backspace": tea.KeyBackspace, "f1": tea.KeyF1,
+}
+
+// keyPress is the press of the key bubbletea names name: modifiers
+// joined to a key's name or its rune with "+". It fails the test when the
+// message does not name itself so, which would make it a different key.
+func keyPress(t *testing.T, name string) tea.KeyPressMsg {
+	t.Helper()
+	parts := strings.Split(name, "+")
+	base := parts[len(parts)-1]
+	if base == "" { // "ctrl++"
+		base = "+"
+	}
+	var k tea.KeyPressMsg
+	for _, mod := range parts[:len(parts)-1] {
+		switch mod {
+		case "ctrl":
+			k.Mod |= tea.ModCtrl
+		case "alt":
+			k.Mod |= tea.ModAlt
+		case "shift":
+			k.Mod |= tea.ModShift
+		}
+	}
+	if code, ok := keyNames[base]; ok {
+		k.Code = code
+	} else if r := []rune(base); len(r) == 1 {
+		k.Code = r[0]
+		if k.Mod == 0 {
+			k.Text = base
+		}
+	}
+	if k.String() != name {
+		t.Fatalf("key %q is sent as %q", name, k.String())
+	}
+	return k
+}
 
 // submit types a line and presses Enter.
 func (a *app) submit(text string) {
 	a.typeText(text)
-	a.key(tea.KeyEnter)
+	a.key("enter")
 }
 
 // waitFor blocks until the screen satisfies cond, and returns it.

@@ -27,7 +27,7 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
@@ -122,12 +122,15 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
 	// ctrl+c) is made the same thing: the program's own handling would
 	// end it with an error, without aborting the run.
-	popts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx), tea.WithoutSignalHandler()}
+	popts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithoutSignalHandler()}
 	if cfg.in != nil {
 		popts = append(popts, tea.WithInput(cfg.in))
 	}
 	if cfg.out != nil {
 		popts = append(popts, tea.WithOutput(cfg.out))
+	}
+	if cfg.width > 0 && cfg.height > 0 {
+		popts = append(popts, tea.WithWindowSize(cfg.width, cfg.height))
 	}
 	p := tea.NewProgram(m, popts...)
 	if cfg.signals {
@@ -144,10 +147,6 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 				}
 			}
 		}()
-	}
-	if cfg.width > 0 && cfg.height > 0 {
-		// Send blocks until the program is running.
-		go p.Send(tea.WindowSizeMsg{Width: cfg.width, Height: cfg.height})
 	}
 	wait := tui.Attach(ctx, be, p.Send)
 	_, err := p.Run()

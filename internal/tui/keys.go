@@ -3,14 +3,15 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // The keys screen lists every key the client takes. It is opened with
-// ctrl+/ or F1: a terminal sends ctrl+/ as the unit separator, which
-// bubbletea names ctrl+_, and most send ctrl+? (ctrl+shift+/) the same
-// way; the ones that send it as DEL cannot be told from backspace, so F1
-// opens it too.
+// ctrl+/ or F1: a terminal that reports keys unambiguously (the kitty
+// keyboard protocol, which bubbletea asks for) names it ctrl+/; the rest
+// send it as the unit separator, which bubbletea names ctrl+_, and most
+// send ctrl+? (ctrl+shift+/) the same way; the ones that send it as DEL
+// cannot be told from backspace, so F1 opens it too.
 
 // keyGroup is a heading and its keys, each a key and what it does.
 type keyGroup struct {
@@ -78,12 +79,16 @@ func renderKeys() string {
 }
 
 // isKeysKey is whether msg opens or closes the keys screen.
-func isKeysKey(msg tea.KeyMsg) bool {
-	return msg.Type == tea.KeyCtrlUnderscore || msg.Type == tea.KeyF1
+func isKeysKey(msg tea.KeyPressMsg) bool {
+	switch msg.String() {
+	case "ctrl+/", "ctrl+_", "f1":
+		return true
+	}
+	return false
 }
 
 // keysKey handles a key on the keys screen: Esc or q goes back.
-func (m *Model) keysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) keysKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		m.screen = screenConversation

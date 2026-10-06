@@ -7,6 +7,12 @@ versions may break the API.
 
 ## Unreleased
 
+- Changed: the terminal toolkit is Bubble Tea v2 (`charm.land/bubbletea/v2`
+  v2.0.10, with bubbles v2 and lipgloss v2), and Go 1.26 is the floor. No
+  exported name changed. Ctrl-/ opens the keys on terminals that speak the
+  kitty keyboard protocol, which name it as itself. A paste never answers
+  a permission or a question, and goes nowhere on the tree, the keys or a
+  read-only view.
 - Added: the MIT license.
 - Fixed: a mouse selection on the conversation stays on the text it
   covers. Before, it was fixed to the screen, so a run streaming below it

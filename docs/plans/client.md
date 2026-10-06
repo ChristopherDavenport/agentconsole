@@ -315,7 +315,8 @@ headless) changed the sketch in these places.
   View are plain functions, so the model is tested headless by sending
   messages and reading `View()`, with no teatest; and the transitive
   weight is the terminal basics (termenv, x/ansi, runewidth, uniseg). No
-  testing dependency was added.
+  testing dependency was added. (Since moved to v2: see "Bubble Tea
+  v2".)
 - **The view is fed under one lock, and the model is taken inside it.**
   `tui.Attach` follows Live and Record on two goroutines. The view is not
   safe for concurrent use, and a `Change.Session` is valid only until the
@@ -460,7 +461,8 @@ headless) changed the sketch in these places.
   puts the harness and the working directory in the header of a session it
   starts (the summary pane showed neither).
 - **Keys.** `ctrl+/` (or `f1`) shows the list of keys and takes no input
-  until `esc`, `q` or `ctrl+/` closes it. A terminal sends Ctrl-/ as the
+  until `esc`, `q` or `ctrl+/` closes it. A terminal that speaks the
+  kitty keyboard protocol names Ctrl-/ itself; the rest send it as the
   unit separator, which bubbletea names `ctrl+_`; Ctrl-? (Ctrl-Shift-/)
   comes the same way in most terminals and as DEL in the rest, where it
   cannot be told from backspace, so F1 opens it too. `ctrl+t` switches
@@ -712,7 +714,9 @@ selects itself.
   soft-wraps it stops on the space the row wrapped at, since a cursor
   after it is on the next row. On a permission or question waiting for
   y or n the input is off and the click only leaves the rows.
-- **The textarea's scroll is read from the frame.** A value taller than
+- **The textarea's scroll is read from the frame.** (Superseded by
+  bubbles v2, which keeps the scroll on the cursor as it updates and
+  says where it is: see "Bubble Tea v2".) A value taller than
   the input's five rows scrolls inside the textarea, which does not say
   where; nor can the scroll be worked out from the keys, since the
   textarea clamps it against the content it last rendered, and when it
@@ -745,6 +749,55 @@ selects itself.
   that wanted its own line (the command alone, say) would need a
   per-tool renderer, which the client would then have to grow per tool,
   and dax's print front has shown the generic form is readable enough.
+
+## Decided in implementation, Bubble Tea v2
+
+- **The toolkit is Bubble Tea v2**: `charm.land/bubbletea/v2` v2.0.10,
+  `charm.land/bubbles/v2` v2.2.1 and `charm.land/lipgloss/v2` v2.0.6,
+  under their new module paths. bubbletea v2.0.10 requires Go 1.26, so
+  that is the floor now (v2.0.9 was the last on 1.25). No exported name
+  changed: `console` never showed a bubbletea type, so an embedder that
+  uses bubbletea v1 itself builds beside it.
+- **The screen's modes are the view's.** v2 drops the program options
+  for the alternate screen and the mouse; `View` returns a `tea.View`
+  that asks for both on every frame. `console.WithWindowSize` is
+  bubbletea's `WithWindowSize` now, rather than a size sent once the
+  program runs. A program whose output is not a terminal and that was
+  given no size reports 0x0 at its start, which the model takes for no
+  size and keeps waiting on.
+- **A paste is not a key.** v1 delivered a paste as a key message, so it
+  went the way of keys; v2 has `PasteMsg`. It reaches the input only on
+  the conversation and not read only, and it never answers a question
+  or a permission: while one waits for y or n the input is blurred and
+  takes nothing, until a refusal's reason is being typed.
+- **The input's scroll is the textarea's.** bubbles v2 keeps the
+  textarea's scroll on the cursor in every Update and says where it is
+  (`ScrollYOffset`); the program draws after every Update, so at a click
+  it is the scroll of the frame clicked on. The matching of the value's
+  rows against the frame is gone. One quirk is the textarea's: rows
+  deleted from the end leave the scroll where it was, with blank rows
+  under the value, until the cursor moves up past them; the click lands
+  on what is drawn.
+- **Styles are always written; the program fits them.** lipgloss v2 no
+  longer asks the terminal what it can show: a style always writes its
+  escape codes, and bubbletea fits the colors to the terminal it writes
+  to. The tests read the screen with the codes stripped. The textarea's
+  styles depend on a dark or light background, which the model asks the
+  terminal for at its start.
+- **The tests that run the program read a terminal's screen.** v1
+  redrew a changed line whole, so a test over a pipe could look for a
+  word in the bytes written. v2's renderer writes only the cells that
+  change between frames (moving the cursor, inserting characters), so a
+  word streamed over two frames is seldom whole in them, which failed CI
+  and passed locally by the timing. Those tests (`console`'s and
+  `TestRunsUnderARealProgram`) now write the program's output into
+  `internal/termtest`, a terminal emulator from `x/vt`, and read its
+  screen; the clipboard, a command and not something shown, is still
+  read from the bytes. This is the first testing dependency (step 3 had
+  none). `x/vt` has no tagged release and is required at a
+  pseudo-version; it is charm's own, built on the ultraviolet already
+  in the graph, and only `internal/termtest` imports it, so a library
+  build does not compile it.
 
 ## Open questions
 
