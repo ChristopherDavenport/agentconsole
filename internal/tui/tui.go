@@ -845,7 +845,8 @@ func (m *Model) frame() string {
 	if !m.ready {
 		return "starting..."
 	}
-	status := feedNote(m.feedErr) + statusText(m.view, m.verified, m.cost)
+	state, now := turnState(m.view, m.busy, m.aborting), time.Now()
+	status := feedNote(m.feedErr) + statusText(m.view, sessionTime(m.view, state, now), m.verified, m.cost)
 	if m.note != "" {
 		status += " | " + m.note
 	}
@@ -864,7 +865,7 @@ func (m *Model) frame() string {
 		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
 	}
 	// A blank line keeps the run line off what is above it.
-	parts = append(parts, "", runLine(turnState(m.view, m.busy, m.aborting), m.spinner.View(), m.width))
+	parts = append(parts, "", runLine(state, runFigures(m.view, state, now), m.spinner.View(), m.width))
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))

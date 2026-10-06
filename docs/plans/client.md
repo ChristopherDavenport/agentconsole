@@ -804,6 +804,36 @@ selects itself.
   taking it literally drew a line's width over, when a frame's diff
   happened to use it.
 
+## Decided in implementation, the run line
+
+- **The turn has a line of its own; the status line is the session's.**
+  The run's state left the status line for a run line above the input:
+  its words in color, the current turn's figures after them, and a
+  spinner at the right edge while the run goes. The status line keeps
+  the session's figures (tokens, cost, model, turn, session). A tool
+  call in motion carries the run line's dot, color and spinner, its
+  spinner in the run line's column.
+- **The turn's figures are the record's.** `view.Model.Run` (of the new
+  exported type `view.Run`) is the last run whose start entry is on the
+  viewed line: when its start and end entries were written, and the
+  usage of the model calls after the start, counted as `view.Usage`
+  counts a line's. The run line shows them as "(19s · 1.3M↑ / 534k↓)"
+  while the run goes and while it waits on a permission, with the clock
+  stopped at the end entry. A run whose start entry has not landed yet
+  shows none rather than the run before it's, and the tokens move when
+  a response entry lands, not as the stream reports them: the live
+  stream carries what is not committed yet, and usage is committed with
+  its response. Idle, there is no current turn and the line says so
+  alone.
+- **The session's time is its time working.** `view.Model.Worked` sums
+  the line's runs that ended, each from its start entry to its end
+  entry; a run with no end on the line (one whose process died) adds
+  nothing. The status line leads with it as "time 4m12s", the current
+  turn's time so far added while it goes, so it moves with the run
+  line's clock. Wall time since the session began was the other
+  reading; it grows while idle and spans days for a resumed session,
+  which says little about the session.
+
 ## Decided in implementation, markdown
 
 - **The assistant's messages are markdown, drawn.** Models write

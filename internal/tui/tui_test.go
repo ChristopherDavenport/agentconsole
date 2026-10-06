@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/ChristopherDavenport/agenttool"
+	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -120,6 +121,40 @@ func TestTheRunLineAndARunningCallTurnOneSpinner(t *testing.T) {
 	s = a.waitFor("the run line idle", func(s string) bool { run, _ := frame(s); return run == "○ idle" })
 	if strings.ContainsAny(s, spinFrames) {
 		t.Errorf("a spinner is left after the run:\n%s", s)
+	}
+}
+
+func TestTheRunLineShowsTheTurnsTimeAndTokens(t *testing.T) {
+	g := newGates()
+	call := callTool("call_1", "upper", `{"text":"abc"}`)
+	cfg := cfgWith(func(ctx context.Context, em *openresponses.Emitter) error {
+		em.Response().Usage = &openresponses.Usage{InputTokens: 1500, OutputTokens: 40, TotalTokens: 1540}
+		return call(ctx, em)
+	}, usageSay(2000, 60, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(g)}
+	a := newApp(t, cfg)
+	t.Cleanup(func() { g.release("tool") })
+
+	a.submit("go")
+	g.arrive(t, "tool")
+	// The first model call is on the record by the time its call runs.
+	figures := regexp.MustCompile(`^● running \((\d+)s · 1\.5k↑ / 40↓\) +[` + spinFrames + `]$`)
+	s := a.waitFor("the turn's figures", func(s string) bool {
+		ls := strings.Split(s, "\n")
+		return figures.MatchString(ls[len(ls)-5])
+	})
+	session := regexp.MustCompile(`^time \d+s \| tokens 1\.5k in, 40 out`)
+	if top := strings.Split(s, "\n")[0]; !session.MatchString(top) {
+		t.Errorf("the status line does not lead with the session's time: %q", top)
+	}
+	g.release("tool")
+	s = a.waitFor("the run over", has("○ idle", "done"))
+	if strings.Contains(s, "↑") {
+		t.Errorf("idle shows a turn's figures:\n%s", s)
+	}
+	// The session's figures stay on the status line, the two calls summed.
+	if !regexp.MustCompile(`^time \d+s \| tokens 3\.5k in, 100 out`).MatchString(strings.Split(s, "\n")[0]) {
+		t.Errorf("the status line lost the session's tokens:\n%s", s)
 	}
 }
 

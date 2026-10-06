@@ -3,6 +3,7 @@ package view
 import (
 	"encoding/json"
 	"sort"
+	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn/session"
@@ -72,6 +73,60 @@ func Usage(path []agentsession.Entry) (openresponses.Usage, map[string]openrespo
 		byModel[m] = b
 	}
 	return total, byModel
+}
+
+// Run is a run on a line, by the record: when its start entry and its
+// end entry were written, and the token use of its model calls so far.
+// A client shows it as the current turn's figures.
+type Run struct {
+	ID      string
+	Started time.Time
+	// Ended is zero while the line holds no end entry for the run.
+	Ended time.Time
+	Usage openresponses.Usage
+}
+
+// lastRun is the last run whose start entry is on path, zero when there
+// is none. Its usage is the model calls' after the start entry, counted
+// as [Usage] counts them.
+func lastRun(path []agentsession.Entry) Run {
+	for i := len(path) - 1; i >= 0; i-- {
+		start, ok := path[i].(*agentsession.RunEntry)
+		if !ok || !start.IsStart() {
+			continue
+		}
+		r := Run{ID: start.RunID, Started: start.Timestamp}
+		r.Usage, _ = Usage(path[i+1:])
+		for _, e := range path[i+1:] {
+			if end, ok := e.(*agentsession.RunEntry); ok && end.IsEnd() && end.RunID == start.RunID {
+				r.Ended = end.Timestamp
+			}
+		}
+		return r
+	}
+	return Run{}
+}
+
+// worked sums how long the runs on path took, each from its start entry
+// to its end entry. A run with no end on the path (the one going, or one
+// whose process died) adds nothing.
+func worked(path []agentsession.Entry) time.Duration {
+	var total time.Duration
+	started := map[string]time.Time{}
+	for _, e := range path {
+		r, ok := e.(*agentsession.RunEntry)
+		switch {
+		case !ok:
+		case r.IsStart():
+			started[r.RunID] = r.Timestamp
+		case r.IsEnd():
+			if t, ok := started[r.RunID]; ok && !t.IsZero() && !r.Timestamp.IsZero() {
+				total += max(r.Timestamp.Sub(t), 0)
+				delete(started, r.RunID)
+			}
+		}
+	}
+	return total
 }
 
 type PriceSummary struct {
