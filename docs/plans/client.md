@@ -784,6 +784,20 @@ selects itself.
   to. The tests read the screen with the codes stripped. The textarea's
   styles depend on a dark or light background, which the model asks the
   terminal for at its start.
+- **The tests that run the program read a terminal's screen.** v1
+  redrew a changed line whole, so a test over a pipe could look for a
+  word in the bytes written. v2's renderer writes only the cells that
+  change between frames (moving the cursor, inserting characters), so a
+  word streamed over two frames is seldom whole in them, which failed CI
+  and passed locally by the timing. Those tests (`console`'s and
+  `TestRunsUnderARealProgram`) now write the program's output into
+  `internal/termtest`, a terminal emulator from `x/vt`, and read its
+  screen; the clipboard, a command and not something shown, is still
+  read from the bytes. This is the first testing dependency (step 3 had
+  none). `x/vt` has no tagged release and is required at a
+  pseudo-version; it is charm's own, built on the ultraviolet already
+  in the graph, and only `internal/termtest` imports it, so a library
+  build does not compile it.
 
 ## Open questions
 

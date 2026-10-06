@@ -16,6 +16,7 @@ require (
 	github.com/ChristopherDavenport/agentturn/session v0.0.16
 	github.com/ChristopherDavenport/openresponses v0.0.14
 	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/charmbracelet/x/vt v0.0.0-20261004011457-ad85c59fdf4e
 	github.com/mattn/go-runewidth v0.0.27
 	github.com/rivo/uniseg v0.4.7
 )
@@ -26,6 +27,7 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect
+	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect

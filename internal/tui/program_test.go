@@ -1,11 +1,9 @@
 package tui_test
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,25 +15,9 @@ import (
 	"github.com/ChristopherDavenport/agentturn/session"
 
 	"github.com/ChristopherDavenport/agentconsole/client/native"
+	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
-
-type syncBuf struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuf) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuf) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
 
 // TestRunsUnderARealProgram drives the model with a tea.Program over a
 // pipe: bytes in as a terminal would send them, a reply streamed through
@@ -61,7 +43,8 @@ func TestRunsUnderARealProgram(t *testing.T) {
 
 	pr, pw := io.Pipe()
 	defer pw.Close()
-	out := &syncBuf{}
+	out := termtest.New(80, 20)
+	defer out.Close()
 	p := tea.NewProgram(tui.New(ctx, be), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20))
 	wait := tui.Attach(ctx, be, p.Send)
 	done := make(chan error, 1)
@@ -69,9 +52,9 @@ func TestRunsUnderARealProgram(t *testing.T) {
 
 	pw.Write([]byte("ping\r"))
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(out.String(), "pong") {
+	for !strings.Contains(out.Screen(), "pong") {
 		if time.Now().After(deadline) {
-			t.Fatalf("no reply on the terminal; output:\n%q", out.String())
+			t.Fatalf("no reply on the terminal; screen:\n%s", out.Screen())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
