@@ -35,7 +35,9 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 
 	g.release("one")
 	g.arrive(t, "two")
-	s = a.waitFor("the text grown in place", has("hello "+cursor))
+	// The reply is markdown, and a paragraph's trailing space is not
+	// drawn.
+	s = a.waitFor("the text grown in place", has("hello"+cursor))
 	if n := strings.Count(s, "assistant"); n != 1 {
 		t.Errorf("assistant label shown %d times while streaming, want 1:\n%s", n, s)
 	}
@@ -48,6 +50,12 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	if n := strings.Count(s, "assistant"); n != 1 {
 		t.Errorf("assistant label shown %d times, want 1:\n%s", n, s)
 	}
+}
+
+func TestTheReplyIsRenderedMarkdown(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "# Plan\n\n- **one**\n- `two`\n\n```\nthree\n```")))
+	a.submit("go")
+	a.waitFor("the reply rendered", all(has("Plan", "• one", "two", "  three", "idle"), lacks("# Plan", "**", "`")))
 }
 
 func TestRunningTokenTotalShowsOnTheStatusLine(t *testing.T) {

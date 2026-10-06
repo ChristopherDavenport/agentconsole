@@ -87,10 +87,10 @@ const gutter = 2
 // flipped by its entry's flips. With a row selected (sel is its entry),
 // every block gets a two-column gutter with a marker on the selected one.
 // spin is the spinner's frame, drawn at the right edge of the calls in
-// motion. The spans say where each committed row's block sits, so the
+// motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spin string) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spin string, md *markdown) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -105,7 +105,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spi
 		if hidden[i] {
 			continue
 		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]), spin, w)
+		b := renderRow(row, o.flipped(flips[row.EntryID]), spin, w, md)
 		if b == "" {
 			continue
 		}
@@ -132,6 +132,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spi
 		blocks = append(blocks, b)
 		at += h + 1
 	}
+	md.sweep()
 	return strings.Join(blocks, "\n\n"), spans
 }
 
@@ -139,7 +140,7 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-func renderRow(row view.Row, o opts, spin string, width int) string {
+func renderRow(row view.Row, o opts, spin string, width int, md *markdown) string {
 	if f := row.Fold; f != nil {
 		s := fmt.Sprintf("[compaction] context from %s on, summary %d chars", shortID(f.FirstKept), f.SummaryLen)
 		if f.Pinned > 0 {
@@ -162,16 +163,20 @@ func renderRow(row view.Row, o opts, spin string, width int) string {
 	}
 	switch it := row.Item.(type) {
 	case *openresponses.Message:
+		// The assistant writes markdown, and is shown it rendered; what
+		// the user typed is shown as typed.
 		var label string
+		body := it.Text()
 		switch it.Role {
 		case openresponses.RoleUser:
 			label = userStyle.Render("you")
 		case openresponses.RoleAssistant:
 			label = assistantStyle.Render("assistant")
+			body = md.render(body, width)
 		default:
 			label = dimStyle.Render(string(it.Role))
 		}
-		return label + tag + "\n" + it.Text() + tail
+		return label + tag + "\n" + body + tail
 	case *openresponses.ReasoningItem:
 		text := it.Summary.Text()
 		if text == "" {

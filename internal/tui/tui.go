@@ -70,6 +70,9 @@ type Model struct {
 	spinner  spinner.Model
 	spinning bool
 	o        opts
+	// md renders the assistant's markdown, and keeps what it rendered
+	// for the next layout.
+	md *markdown
 	// flips are the rows shown the other way round from o, by entry: what
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
@@ -178,6 +181,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 		vp:       viewport.New(),
 		in:       in,
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		md:       newMarkdown(),
 		flips:    map[string]opts{},
 		decided:  map[string]agentturn.Answer{},
 		replied:  map[string]bool{},
@@ -204,8 +208,9 @@ func inputStyles(isDark bool) textarea.Styles {
 	return s
 }
 
-// Init implements tea.Model. The textarea's styles depend on whether the
-// terminal's background is dark, which the terminal is asked for.
+// Init implements tea.Model. The textarea's styles and the markdown's
+// (glamour's dark or light) depend on whether the terminal's background
+// is dark, which the terminal is asked for.
 func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, tea.RequestBackgroundColor) }
 
 func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
@@ -348,6 +353,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.wantPane()
 	case tea.BackgroundColorMsg:
 		m.in.SetStyles(inputStyles(msg.IsDark()))
+		m.md.setDark(msg.IsDark())
+		m.relayout()
 		return m, nil
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
@@ -723,7 +730,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry, m.spinner.View())
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry, m.spinner.View(), m.md)
 	m.setContent(content)
 	m.spans = spans
 	switch {

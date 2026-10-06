@@ -7,6 +7,16 @@ versions may break the API.
 
 ## Unreleased
 
+- Added: the assistant's messages are rendered as markdown with glamour
+  (CommonMark with GitHub's tables, task lists, strikethrough and bare
+  links, code blocks highlighted), in its dark or light style by the
+  terminal's background, wrapped to the conversation's width. Its style
+  is fitted to the conversation: no margin, no "##" before headings,
+  inline code a muted gray, a one-column quote bar. Links are OSC 8
+  hyperlinks. What the user typed is shown as typed. New dependency:
+  `charm.land/glamour/v2`; `github.com/yuin/goldmark`,
+  `golang.org/x/text` and `golang.org/x/net` are required past the
+  advisories in the versions glamour asks for.
 - Changed: the run's state (running, aborting, requires action, idle)
   moves from the status line at the top to a run line of its own above
   the input, in color, with a spinner at its right edge while
