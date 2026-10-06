@@ -3,6 +3,10 @@ package tui_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"image/color"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -642,4 +646,56 @@ func TestCtrlSlashOrF1ShowsTheKeysAndTakesNoInput(t *testing.T) {
 	a.key("f1")
 	a.rune('q')
 	a.waitFor("q closes the keys", all(has("hello"), lacks("Permissions")))
+}
+
+// TestTheInputHasTheTerminalsBackground: the textarea's default styles
+// give the line the cursor is on a background of their own, which shows
+// as a band of another color across the input on most terminals. The
+// input's rows are drawn with no background, before the terminal says
+// what its own is and after, dark or light.
+func TestTheInputHasTheTerminalsBackground(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	check := func(when string) {
+		t.Helper()
+		a.mu.Lock()
+		raw := a.m.View().Content
+		a.mu.Unlock()
+		for _, l := range strings.Split(raw, "\n") {
+			if strings.Contains(l, "> ") && hasBackground(l) {
+				t.Errorf("%s: the input is drawn with a background: %q", when, l)
+			}
+		}
+	}
+	check("at the start")
+	a.typeText("typed")
+	check("with text typed")
+	for _, bg := range []color.Color{color.Black, color.White} {
+		a.send(tea.BackgroundColorMsg{Color: bg})
+		check(fmt.Sprintf("on a %v terminal", bg))
+	}
+}
+
+var sgr = regexp.MustCompile("\x1b\\[([0-9;:]*)m")
+
+// hasBackground is whether s sets a background color: an SGR 40-47,
+// 100-107 or 48, the extended foreground and underline colors' own
+// numbers skipped.
+func hasBackground(s string) bool {
+	for _, m := range sgr.FindAllStringSubmatch(s, -1) {
+		ps := strings.FieldsFunc(m[1], func(r rune) bool { return r == ';' || r == ':' })
+		for i := 0; i < len(ps); i++ {
+			n, _ := strconv.Atoi(ps[i])
+			switch {
+			case n == 48, n >= 40 && n <= 47, n >= 100 && n <= 107:
+				return true
+			case n == 38 || n == 58:
+				if i+1 < len(ps) && ps[i+1] == "5" {
+					i += 2
+				} else if i+1 < len(ps) && ps[i+1] == "2" {
+					i += 4
+				}
+			}
+		}
+	}
+	return false
 }

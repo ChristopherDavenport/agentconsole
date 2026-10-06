@@ -168,6 +168,7 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 	in.MaxHeight = inputMaxRows
 	in.KeyMap.InsertNewline.SetEnabled(false)
 	in.CharLimit = 0
+	in.SetStyles(inputStyles(true))
 	in.Focus()
 	m := &Model{
 		ctx:      ctx,
@@ -191,6 +192,16 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 	}
 	m.insp = inspect.New(be.Record(), inspOpts...)
 	return m
+}
+
+// inputStyles are the textarea's default styles for a dark or a light
+// terminal, less the background they give the line the cursor is on: the
+// input is drawn on the terminal's own background, as the rest of the
+// screen is.
+func inputStyles(isDark bool) textarea.Styles {
+	s := textarea.DefaultStyles(isDark)
+	s.Focused.CursorLine = s.Focused.CursorLine.UnsetBackground()
+	return s
 }
 
 // Init implements tea.Model. The textarea's styles depend on whether the
@@ -336,7 +347,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// pane still pinned.
 		return m, m.wantPane()
 	case tea.BackgroundColorMsg:
-		m.in.SetStyles(textarea.DefaultStyles(msg.IsDark()))
+		m.in.SetStyles(inputStyles(msg.IsDark()))
 		return m, nil
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
