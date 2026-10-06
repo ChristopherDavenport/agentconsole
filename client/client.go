@@ -46,7 +46,16 @@ type Backend interface {
 // run went from Live's [RunEnded]. Steer and Abort return at once.
 type Control interface {
 	Prompt(ctx context.Context, items ...openresponses.Item) error
-	Steer(items ...openresponses.Item)
+	// Steer queues items into the run in flight, after its current tool
+	// batch and before its next model call, or into the next run when
+	// none can take them. Each is on the record, as a queued entry, when
+	// Steer returns, so a client shows what waits from the record
+	// (view.Model.Queued) before the run appends it. An item whose entry
+	// cannot be written is not queued and the error says so; the items
+	// before it are. A trigger on ctx (agentturn.ContextWithTrigger) is
+	// written as what brought the items in; nothing else is read from
+	// it.
+	Steer(ctx context.Context, items ...openresponses.Item) error
 	Abort()
 	// Answer answers the calls a run left pending and continues it: the
 	// reply to a permission request.

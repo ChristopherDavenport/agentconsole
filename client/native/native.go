@@ -89,6 +89,14 @@ func WithHeadMove(before func(context.Context) error, after func(context.Context
 // recorder has to be subscribed ahead of this backend, so that an event's
 // entry is in the store before the client sees the event. The recorder's
 // store must be able to follow: every store of agentsession is.
+//
+// New hands agent the inputs the session owes ([session.Recorder.Requeue]):
+// those queued on a resumed session, or on a fork's base, that no run took
+// before the process that accepted them ended. They are part of the
+// history, listed as queued (view.Model.Queued), and the next run takes
+// them, after its prompt, as it would have in the process that accepted
+// them. Call New before the agent's first run, or the run's end closes
+// them and they are dropped.
 func New(agent *agentturn.Agent, rec *session.Recorder, opts ...Option) (*Backend, error) {
 	f, ok := rec.Store().(agentsession.Follower)
 	if !ok {
@@ -98,6 +106,11 @@ func New(agent *agentturn.Agent, rec *session.Recorder, opts ...Option) (*Backen
 	for _, o := range opts {
 		o(b)
 	}
+	// Each owed input is on the path already, so its queued event writes
+	// nothing, and Requeue reads nothing from the context but a trigger,
+	// which it puts there itself. An input already handed over is not
+	// handed over again.
+	rec.Requeue(context.Background(), agent)
 	return b, nil
 }
 
@@ -149,7 +162,14 @@ func (c control) Prompt(ctx context.Context, items ...openresponses.Item) error 
 	return err
 }
 
-func (c control) Steer(items ...openresponses.Item) { c.b.agent.Steer(items...) }
+// Steer writes each item as a queued entry before the agent takes it,
+// through the recorder's Queue, rather than leaving the entry to the
+// agent's queued event: that event is delivered at the run's next event,
+// which a quiet tool can hold off, and the client would show nothing of
+// the steer meanwhile.
+func (c control) Steer(ctx context.Context, items ...openresponses.Item) error {
+	return c.b.rec.Queue(ctx, c.b.agent, agentturn.QueueSteer, items...)
+}
 
 func (c control) Abort() { c.b.agent.Abort() }
 

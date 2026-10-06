@@ -885,6 +885,59 @@ selects itself.
   is, and a paragraph's trailing space is not drawn, so a word streaming
   in sits against the cursor.
 
+## Decided in implementation, queued input
+
+- **A steer is on the record before the run takes it.** `Control.Steer`
+  used to call the agent's `Steer`. The recorder writes that queued
+  event as a queued entry only at the run's next event, and the message
+  itself reached the record when the run appended it, after the tool
+  batch. A steer typed during a quiet tool showed nothing until then.
+  The native backend's `Steer` now goes through the recorder's `Queue`,
+  which writes the queued entry durably before it hands the item to the
+  agent, so the entry is in the store when `Steer` returns.
+- **`Steer` returns an error and takes a context.** It is now
+  `Steer(ctx, items...) error`: an item whose queued entry cannot be
+  written is not queued, and the error says so. The context carries a
+  trigger (`agentturn.ContextWithTrigger`), written as what brought the
+  input in; nothing else is read from it. Embedders change with it.
+- **What waits is the record's.** `view.Model.Queued` (of the new
+  exported type `view.Queued`: the entry, its mode, its item) is
+  `agentsession.Queued` over the path to the record's head: the queued
+  entries no item entry names in `QueuedFrom` and no run end has closed.
+  The item that drains one names it, so the input leaves the list in
+  the same step its row appears: shown once, and never neither. It is
+  read on the path to the head, not the viewed line, which runs on
+  through the bookkeeping behind its item and could hold a queued entry
+  that an item further on took. No live event is needed: the agent's
+  `Queued` event comes no sooner than the entry.
+- **An input a run did not take stays listed.** A steer that arrives
+  past the run's last drain waits for the next run. The run's end
+  closes its queued entry, and the recorder writes it again after the
+  end for an input the agent still holds, so the list shows it, except
+  for the one step between those two entries.
+- **What was queued is delivered, abort and quit included.** A queued
+  input is part of the history, and replaying or forking a session is
+  cheap, so nothing the user sent is dropped. An abort leaves the
+  agent's queues alone, and the next run takes the input after its
+  prompt. A quit ends the agent's queue, which lives in memory, but the
+  record still owes the input, so `native.New` hands the agent what the
+  session owes (`Recorder.Requeue`), on a resumed session and on a
+  fork's base. The next run takes each input as the first process would
+  have, and the item names the queued entry written before the quit.
+  Without this, the list would show an input the agent did not hold,
+  and the next run's end would close it unsent. `New` has to be called
+  before the agent's first run, as the recorder's attach already had
+  to be.
+- **The TUI lists it over the input.** Under the run line, one dimmed
+  line each: "queued: …", "queued for the end of the run: …" for a
+  follow-up, "queued for the next run: …" once no run goes; three at
+  most, the rest counted. A steer is written in a command, off the
+  program's goroutine; one command per steer pops the oldest under a
+  lock held across the write, so steers reach the record in the order
+  typed. A steer that fails puts its text back in an empty input and
+  shows the error. An input cannot be taken back out of the queue:
+  agentturn has no unqueue.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

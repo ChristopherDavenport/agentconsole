@@ -65,7 +65,8 @@ and the API key from the environment variable named by `--api-key-env`
 - `--tools none|clock`, `--confirm-tools` (ask before every tool call),
   `--instructions`, `--max-turns`.
 
-In the terminal: Enter sends a prompt, or steers while a run is going;
+In the terminal: Enter sends a prompt, or steers while a run is going (the
+steer is listed as queued over the input until the run takes it);
 Shift-Enter starts a new line in the prompt (Alt-Enter and Ctrl-J do too,
 for a terminal that sends Shift-Enter as a plain Enter);
 Ctrl-C (or SIGINT) aborts a run, and quits when idle; PgUp, PgDn, Ctrl-Up,

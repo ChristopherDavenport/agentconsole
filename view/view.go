@@ -215,6 +215,18 @@ type Permission struct {
 	Reason   string
 }
 
+// Queued is an input the agent accepted into its queue, a steer or a
+// follow-up, that the conversation does not hold yet: a queued entry on
+// the record that no item entry names as its source. It leaves the list
+// in the same step its item becomes a row, so it is never shown twice.
+type Queued struct {
+	// EntryID is the queued entry.
+	EntryID string
+	// Mode is agentsession.ModeSteer or agentsession.ModeFollowUp.
+	Mode string
+	Item openresponses.Item
+}
+
 // Model is what a client renders.
 type Model struct {
 	// Session is the followed session's ID.
@@ -259,6 +271,12 @@ type Model struct {
 	// in the order they were asked: a sub-agent's call its policy asks
 	// about, a tool's own question.
 	Questions []client.Question
+	// Queued are the inputs waiting to join the conversation, in the
+	// order they were accepted, from the record's path to its head
+	// (agentsession.Queued). An input a run did not take before it
+	// ended is written again after the run's end by the recorder, so it
+	// stays listed until the next run appends it.
+	Queued []Queued
 }
 
 type ovItem struct {
@@ -370,6 +388,9 @@ type View struct {
 	perms []Permission
 	cut   []Permission
 	asked []client.Question
+	// queued are the inputs waiting on the head's path, copied out of
+	// the session.
+	queued []Queued
 	// liveEnded are the runs whose live end was seen and whose overlay
 	// waits for the record; endSeen the end entries the record has
 	// delivered, capped, since a run the live stream never mentions
@@ -535,6 +556,13 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	v.path = append([]agentsession.Entry(nil), s.Path(lineEnd(s, leaf))...)
 	for _, e := range v.path {
 		v.parent[e.Base().ID] = e.Base().Parent
+	}
+	// What waits is read on the path to the head itself, not the viewed
+	// line: the line runs on through the bookkeeping behind its item,
+	// and a queued entry there may belong to an item further on.
+	v.queued = nil
+	for _, q := range agentsession.Queued(s.Path(leaf)) {
+		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
 	}
 	v.leaves = tips(s)
 	v.branches = branchesOf(s, branchTips(s, v.leaf), v.leaf)
@@ -1112,6 +1140,9 @@ func (v *View) Model() Model {
 	m.Permissions = append([]Permission(nil), v.perms...)
 	m.CutOff = append([]Permission(nil), v.cut...)
 	m.Questions = append([]client.Question(nil), v.asked...)
+	for _, q := range v.queued {
+		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
+	}
 	return m
 }
 
