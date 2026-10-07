@@ -19,6 +19,10 @@ versions may break the API.
 - Added: `view.Call.Schema`, the parameters schema of the call's tool as
   the config in force at the call holds it, so a renderer can tell the
   tool it was written for from another of the same name.
+- Changed: the spinner turns in the dot of the run line and of each call
+  in motion, in place of ●, instead of at the right edge, where it was
+  far from the eye. A call's dot goes back to ○ when it ends, and the
+  run line's when the run does.
 
 - Added: a steer typed while a run goes is listed over the input,
   "queued: …", from the moment it is sent until the run takes it into

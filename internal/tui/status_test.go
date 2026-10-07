@@ -109,17 +109,17 @@ func TestTheRunLineIsOneLineAtAnyWidth(t *testing.T) {
 	figures := "(19s · 1.3M↑ / 534k↓)"
 	for _, width := range []int{80, 30, 20, 8} {
 		got := ansi.Strip(runLine(stateRunning, figures, "⠹", width))
-		if strings.Contains(got, "\n") || lipgloss.Width(got) != width {
+		if strings.Contains(got, "\n") || lipgloss.Width(got) > width {
 			t.Errorf("at %d: %q", width, got)
 		}
-		if !strings.HasSuffix(got, "⠹") {
-			t.Errorf("at %d the spinner is not at the edge: %q", width, got)
+		if !strings.HasPrefix(got, "⠹ ") {
+			t.Errorf("at %d the spinner is not in the dot: %q", width, got)
 		}
 	}
-	if got := ansi.Strip(runLine(stateRunning, figures, "⠹", 40)); !strings.HasPrefix(got, "● running "+figures) {
+	if got := ansi.Strip(runLine(stateRunning, figures, "⠹", 40)); got != "⠹ running "+figures {
 		t.Errorf("the figures do not follow the state: %q", got)
 	}
-	if got := ansi.Strip(runLine(stateRunning, figures, "⠹", 20)); strings.Contains(got, "(") || !strings.HasPrefix(got, "● running") {
+	if got := ansi.Strip(runLine(stateRunning, figures, "⠹", 20)); got != "⠹ running" {
 		t.Errorf("too narrow, the figures go first: %q", got)
 	}
 }
