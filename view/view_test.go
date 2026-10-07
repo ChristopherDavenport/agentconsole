@@ -1155,3 +1155,39 @@ func TestLiveEndOfARunOnAnotherBranchBeforeItsEndEntryShowsNoPermission(t *testi
 		t.Fatalf("the viewed line holds no such call: %+v, %v", m.Permissions, m.Turn.State)
 	}
 }
+
+// A call carries the schema of its tool as the config in force where the
+// call sits holds it, not as a later config does; a live call takes the
+// config at the end of the line, and a call to a tool the config does
+// not name has none.
+func TestACallCarriesItsToolsSchemaWhereItSits(t *testing.T) {
+	tool := func(schema string) *openresponses.FunctionTool {
+		return &openresponses.FunctionTool{Name: "upper", Parameters: json.RawMessage(schema)}
+	}
+	l := newLog(t)
+	l.append(&agentsession.ConfigEntry{Model: "m1", ToolsAdded: openresponses.Tools{tool(`{"v":1}`)}})
+	l.append(itemEntry(&openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "upper", Arguments: `{}`}, "resp1"))
+	l.append(itemEntry(&openresponses.FunctionCall{ID: "fc2", CallID: "c2", Name: "other", Arguments: `{}`}, "resp1"))
+	l.append(&agentsession.ConfigEntry{ToolsAdded: openresponses.Tools{tool(`{"v":2}`)}})
+	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.stream("run1", "resp2", &openresponses.FunctionCall{ID: "fc3", CallID: "c3", Name: "upper", Arguments: `{}`}, true)
+
+	m := l.v.Model()
+	if len(m.Rows) != 3 {
+		t.Fatalf("rows: %+v", m.Rows)
+	}
+	if got := string(m.Rows[0].Call.Schema); got != `{"v":1}` {
+		t.Errorf("the committed call's schema is %s, want the one in force at the call", got)
+	}
+	if m.Rows[1].Call.Schema != nil {
+		t.Errorf("a call to a tool the config does not name has a schema: %s", m.Rows[1].Call.Schema)
+	}
+	if got := string(m.Rows[2].Call.Schema); !m.Rows[2].Live || got != `{"v":2}` {
+		t.Errorf("the live call's schema is %s, want the one in force now", got)
+	}
+	// The model's schema is its own: changing it leaves the view's.
+	m.Rows[0].Call.Schema[1] = 'x'
+	if got := string(l.v.Model().Rows[0].Call.Schema); got != `{"v":1}` {
+		t.Errorf("the model shares its schema with the view: %s", got)
+	}
+}

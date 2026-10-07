@@ -43,8 +43,21 @@ return console.Run(ctx, be) // returns when the user quits; the store is then sa
 For an `agentturn.Agent` built by hand, attach its `session.Recorder`
 and use `native.New(agent, rec)` instead; `native` does not import
 agentkit. The public packages are `console`, `client`, `client/native`,
-`client/kitbackend` and `view`; the terminal model and the record panes
-are internal.
+`client/kitbackend`, `view` and `toolview`; the terminal model and the
+record panes are internal.
+
+A call to a tool shows its name and its arguments as `key=value` pairs.
+To draw a tool's calls its own way (a command as a shell line, an edit
+as a diff), give the client a `toolview.Renderer` for it:
+
+```go
+console.Run(ctx, be, console.WithToolRenderers(toolview.Renderers{"bash": bashRenderer{}}))
+```
+
+A renderer reads what the session records of a call (the arguments, the
+state, the output, the tool's schema), never the tool, so it draws a
+live call, a historical one and an MCP tool's alike, and a call it
+declines is shown the default way.
 
 ## Usage
 

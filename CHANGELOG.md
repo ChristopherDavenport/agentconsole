@@ -7,6 +7,19 @@ versions may break the API.
 
 ## Unreleased
 
+- Added: per-tool rendering of calls. `console.WithToolRenderers` takes
+  a `toolview.Renderer` by tool name (new package `toolview`); a
+  renderer gives the head after the call's name and the body under its
+  line, as lines with roles the client styles, and may decline either,
+  which shows the call as before. It reads only `view.Call`, so it draws
+  a call streaming, under a permission, running and from a session's
+  history alike, and needs nothing from the tool: an MCP tool's calls
+  can be drawn too. Expanded (ctrl+o) the raw arguments are still shown
+  above the body, and the permission panel still shows them as given.
+- Added: `view.Call.Schema`, the parameters schema of the call's tool as
+  the config in force at the call holds it, so a renderer can tell the
+  tool it was written for from another of the same name.
+
 - Added: a steer typed while a run goes is listed over the input,
   "queued: …", from the moment it is sent until the run takes it into
   the conversation, and an input left for the next run as "queued for

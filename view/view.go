@@ -49,6 +49,7 @@
 package view
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"time"
@@ -151,6 +152,13 @@ type Call struct {
 	CallID string
 	Name   string
 	Args   string
+	// Schema is the parameters schema of the tool the call names, as the
+	// config in force where the call sits on the line holds it: the tool
+	// the call was made against, which a later config may have changed
+	// or dropped. A live call takes the config in force at the end of
+	// the line. It is nil when the config names no such function tool,
+	// and for a child call, which another agent's tools made.
+	Schema json.RawMessage
 	State  CallState
 	// Partial is the latest progress of a running tool.
 	Partial string
@@ -1111,6 +1119,7 @@ func (v *View) Model() Model {
 			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item}
 			if fc, ok := x.Item.(*openresponses.FunctionCall); ok {
 				row.Call = v.callView(fc, committed[x.ID])
+				row.Call.Schema = schemaOf(settings.Tools, fc.Name)
 			}
 			m.Rows = append(m.Rows, row)
 		case *agentsession.CompactionEntry:
@@ -1134,6 +1143,7 @@ func (v *View) Model() Model {
 		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item)}
 		if fc, ok := o.item.(*openresponses.FunctionCall); ok {
 			row.Call = v.callView(fc, nil)
+			row.Call.Schema = schemaOf(settings.Tools, fc.Name)
 		}
 		m.Rows = append(m.Rows, row)
 	}
@@ -1144,6 +1154,17 @@ func (v *View) Model() Model {
 		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
 	}
 	return m
+}
+
+// schemaOf is the parameters of the function tool named name in tools,
+// nil when there is none, copied: a Model shares nothing with the view.
+func schemaOf(tools openresponses.Tools, name string) json.RawMessage {
+	for _, t := range tools {
+		if f, ok := t.(*openresponses.FunctionTool); ok && f.Name == name {
+			return slices.Clone(f.Parameters)
+		}
+	}
+	return nil
 }
 
 // callView merges what the record holds of a call with its overlay.

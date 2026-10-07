@@ -12,6 +12,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/toolview"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -25,6 +26,9 @@ var (
 	runStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 	warnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	errStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	emphStyle      = lipgloss.NewStyle().Bold(true)
+	addedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	removedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	statusStyle    = lipgloss.NewStyle().Reverse(true)
 )
 
@@ -85,13 +89,14 @@ func hiddenOutputs(m view.Model) map[int]bool {
 const gutter = 2
 
 // renderRows renders the conversation, wrapped to width, each row with o
-// flipped by its entry's flips. With a row selected (sel is its entry),
+// flipped by its entry's flips, and each call by its tool's renderer in
+// tools, if it has one. With a row selected (sel is its entry),
 // every block gets a two-column gutter with a marker on the selected one.
 // spin is the spinner's frame, drawn at the right edge of the calls in
 // motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spin string, md *markdown) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -106,7 +111,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, width int, sel, spi
 		if hidden[i] {
 			continue
 		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]), spin, w, md)
+		b := renderRow(row, o.flipped(flips[row.EntryID]), tools, spin, w, md)
 		if b == "" {
 			continue
 		}
@@ -141,7 +146,7 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-func renderRow(row view.Row, o opts, spin string, width int, md *markdown) string {
+func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, width int, md *markdown) string {
 	if f := row.Fold; f != nil {
 		s := fmt.Sprintf("[compaction] context from %s on, summary %d chars", shortID(f.FirstKept), f.SummaryLen)
 		if f.Pinned > 0 {
@@ -193,7 +198,7 @@ func renderRow(row view.Row, o opts, spin string, width int, md *markdown) strin
 		return dimStyle.Render("▾ reasoning"+tail) + tag + "\n" + dimStyle.Render(text)
 	case *openresponses.FunctionCall:
 		if row.Call != nil {
-			return renderCall(*row.Call, o, tag, 0, spin, width)
+			return renderCall(*row.Call, o, tools, tag, 0, spin, width)
 		}
 		return toolStyle.Render("○ "+it.Name) + tag + " " + it.Arguments
 	case *openresponses.FunctionCallOutput:
@@ -234,8 +239,11 @@ func anyMoving(m view.Model) bool {
 // Its dot reads as the run line's does: ● in motion, ◆ waiting on a
 // permission, ○ at rest, so a call's name starts in the column the run's
 // state does. A call in motion is drawn in the run line's color, with
-// the spinner at the right edge, under the run line's.
-func renderCall(c view.Call, o opts, tag string, depth int, spin string, width int) string {
+// the spinner at the right edge, under the run line's. A call whose tool
+// has a renderer in tools shows the renderer's head after its name and
+// its body under the line, each where the renderer gives one; the dot,
+// the name, the state and the client's notes are the client's always.
+func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, width int) string {
 	pad := strings.Repeat("  ", depth)
 	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
 	switch {
@@ -251,11 +259,24 @@ func renderCall(c view.Call, o opts, tag string, depth int, spin string, width i
 		}
 		return line
 	}
+	r := tools[c.Name]
+	rhead, custom := toolHead(r, c)
+	body, hasBody := toolBody(r, c, o.output)
 	var b strings.Builder
 	if o.output {
 		// Expanded: the raw arguments on their own line, and the whole
-		// output, the way the model saw them.
-		b.WriteString(head(pad + name + state + tag))
+		// output, the way the model saw them. A renderer's head and body
+		// are shown with them, never instead of the arguments: what the
+		// call does is read from what it was given.
+		line := name
+		if custom {
+			line += " " + drawLine(rhead)
+		}
+		line += state + tag
+		if hasBody && c.State == view.CallEnded && !c.Committed {
+			line += dimStyle.Render(" (live)")
+		}
+		b.WriteString(head(pad + line))
 		if c.Args != "" {
 			b.WriteString("\n" + pad + "  args: " + c.Args)
 		}
@@ -266,7 +287,10 @@ func renderCall(c view.Call, o opts, tag string, depth int, spin string, width i
 		// how much of it there is, so a row stays one line however
 		// much output it carries.
 		line := name
-		if c.Args != "" {
+		switch {
+		case custom:
+			line += " " + drawLine(rhead)
+		case c.Args != "":
 			line += " " + compactArgs(c.Args)
 		}
 		if c.State != view.CallEnded {
@@ -277,6 +301,9 @@ func renderCall(c view.Call, o opts, tag string, depth int, spin string, width i
 		}
 		b.WriteString(head(pad + line + tag))
 	}
+	for _, l := range body {
+		b.WriteString("\n" + pad + "  " + drawLine(l))
+	}
 	switch c.State {
 	case view.CallDeferred:
 		q := c.Reason
@@ -285,7 +312,7 @@ func renderCall(c view.Call, o opts, tag string, depth int, spin string, width i
 		}
 		b.WriteString("\n" + pad + "  " + warnStyle.Render("? "+q))
 	case view.CallRunning:
-		if c.Partial != "" {
+		if !hasBody && c.Partial != "" {
 			// What a running call shows of its progress is its end:
 			// the lines it is writing now, not the ones it wrote at
 			// the start. Expanded, the whole window the tool last
@@ -305,13 +332,16 @@ func renderCall(c view.Call, o opts, tag string, depth int, spin string, width i
 	case view.CallCutOff:
 		b.WriteString("\n" + pad + "  " + warnStyle.Render("cut off before it was answered"))
 	case view.CallEnded:
-		if o.output {
+		switch {
+		case hasBody:
+			// The renderer's body stands for the output.
+		case o.output:
 			out := c.Output
 			if !c.Committed {
 				out += dimStyle.Render(" (live)")
 			}
 			b.WriteString("\n" + pad + "  ↳ " + indent(clip(out, o.output), pad+"    "))
-		} else if c.Output != "" {
+		case c.Output != "":
 			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
 			b.WriteString("\n" + pad + "  " + dimStyle.Render(countHint(n)))
 		}
@@ -320,7 +350,63 @@ func renderCall(c view.Call, o opts, tag string, depth int, spin string, width i
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
 	}
 	for _, ch := range c.Children {
-		b.WriteString("\n" + renderCall(ch, o, "", depth+1, spin, width))
+		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, width))
+	}
+	return b.String()
+}
+
+// toolHead is r's head for c, and whether r gave one. It gave none when
+// r is nil, declined, returned an empty line or panicked.
+func toolHead(r toolview.Renderer, c view.Call) (l toolview.Line, ok bool) {
+	if r == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			l, ok = nil, false
+		}
+	}()
+	l, ok = r.Head(c)
+	return l, ok && len(l) > 0
+}
+
+// toolBody is r's body for c, and whether r gave one. It gave none when
+// r is nil, declined or panicked; an empty body it gave is one, and
+// shows nothing under the line.
+func toolBody(r toolview.Renderer, c view.Call, expanded bool) (ls []toolview.Line, ok bool) {
+	if r == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			ls, ok = nil, false
+		}
+	}()
+	if ls, ok = r.Body(c, expanded); !ok {
+		return nil, false
+	}
+	return ls, true
+}
+
+// drawLine draws a renderer's line in the client's styles, a newline in
+// a span as a space.
+func drawLine(l toolview.Line) string {
+	var b strings.Builder
+	for _, s := range l {
+		t := strings.ReplaceAll(s.Text, "\n", " ")
+		switch s.Role {
+		case toolview.Dim:
+			t = dimStyle.Render(t)
+		case toolview.Emphasis:
+			t = emphStyle.Render(t)
+		case toolview.Added:
+			t = addedStyle.Render(t)
+		case toolview.Removed:
+			t = removedStyle.Render(t)
+		case toolview.Error:
+			t = errStyle.Render(t)
+		}
+		b.WriteString(t)
 	}
 	return b.String()
 }

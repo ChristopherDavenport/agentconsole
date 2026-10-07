@@ -10,10 +10,10 @@ committed, and live events carry only what is not committed yet.
 - Module path: `github.com/ChristopherDavenport/agentconsole`.
 - Go 1.26 is the floor.
 - The library surface is `client`, `client/native`, `client/kitbackend`,
-  `view` and `console`; `tui` and `inspect` stay under `internal/`. An
-  embedder (dax) imports the public ones and calls `console.Run`. Adding
-  an exported name is a decision for the plan's "Decided in
-  implementation", since embedders pin it.
+  `view`, `toolview` and `console`; `tui` and `inspect` stay under
+  `internal/`. An embedder (dax) imports the public ones and calls
+  `console.Run`. Adding an exported name is a decision for the plan's
+  "Decided in implementation", since embedders pin it.
   - `client`: the contract. `Backend`, `Control`, `Record`,
     `LiveEvent`. It knows the stack's types and no backend.
   - `client/native`: the in-process backend over an `agentturn.Agent`
@@ -26,6 +26,10 @@ committed, and live events carry only what is not committed yet.
   - `view`: the reconciler. A pure model: record `Change`s and
     `LiveEvent`s in, what a client renders out. No goroutines, no I/O,
     no terminal.
+  - `toolview`: per-tool renderers of calls, which an embedder hands
+    `console.Run`. A renderer reads a `view.Call` (the record's facts
+    about the call and its tool's schema), never the tool, and returns
+    lines with roles; the TUI styles them.
   - `console`: `Run(ctx, backend, ...Option)`, the program, the feeds,
     signals and the drain at exit.
   - `internal/inspect`: the record-detail panes, computed on demand from

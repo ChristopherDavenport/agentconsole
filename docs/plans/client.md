@@ -749,6 +749,8 @@ selects itself.
   that wanted its own line (the command alone, say) would need a
   per-tool renderer, which the client would then have to grow per tool,
   and dax's print front has shown the generic form is readable enough.
+  (Superseded: the embedder grows them, not the client. See "tool
+  renderers".)
 
 ## Decided in implementation, Bubble Tea v2
 
@@ -937,6 +939,61 @@ selects itself.
   typed. A steer that fails puts its text back in an empty input and
   shows the error. An input cannot be taken back out of the queue:
   agentturn has no unqueue.
+
+## Decided in implementation, tool renderers
+
+Issue #25. A coding session is mostly tool calls, and the key=value row
+reads a command, an edit or a read as the JSON the model wrote.
+
+- **The render never reaches the tool or the agent.** Pi and Claude Code
+  draw a call with code the tool carries, run in the process beside it.
+  That cannot work here: the client draws from the record, which may be
+  a session months old, a branch being viewed, or a store another
+  process writes, with no tool to ask. And it must work for a tool that
+  knows nothing of the client, an MCP server's. So a tool describes
+  nothing and nothing is recorded for display.
+- **A renderer reads the record's facts about a call.** `view.Call`
+  already held the name, the arguments, the state, the progress and the
+  output, from the record or the overlay. It gains `Schema`: the tool's
+  parameters as the config in force at the call holds it
+  (`Settings.Tools`, applied in path order), a live call taking the
+  config at the end of the line, nil for a tool the config does not name
+  and for a child call, which another agent's tools made. With it a
+  renderer can tell its tool from another of the same name (an old
+  session, an MCP server's prefix) and decline. Pre and post are one
+  thing: what a renderer can say from the arguments alone, before the
+  output exists, and with the output once it does.
+- **The embedder grows the renderers, not the client.**
+  `console.WithToolRenderers(toolview.Renderers)` takes them by tool
+  name; dax registers its own tools', and anyone can register one for an
+  MCP tool. The client ships none: built-ins matched by the shape of a
+  schema (a `command` string as a shell line) wait until two tools want
+  the same one.
+- **`toolview.Renderer` is a head and a body.** The head is what follows
+  the name on the call's line; the body is what shows under it. Each can
+  be declined (`ok` false), and is: arguments still streaming, of another
+  shape or for another schema. A declined head is the key=value form, a
+  declined body the client's own (the progress tail, the line count or
+  the whole output). A renderer that panics has declined. The dot, the
+  name, the state, the spinner and the client's notes (a deferred call's
+  question, why a call was blocked or cut off, the policy's verdict) are
+  the client's always; the body sits between the line and the notes.
+  Child calls are drawn by their tool's renderer too.
+- **Lines with roles, not styled strings.** A renderer returns
+  `toolview.Line`s of spans with a role (plain, dim, emphasis, added,
+  removed, error), and the TUI styles them, so the colors, the width and
+  the wrapping stay in `internal/tui/render.go` and a renderer serves any
+  client that renders `view.Model`.
+- **The raw arguments stay one keystroke away.** A renderer's head is
+  the call describing itself through code the embedder wrote, and a
+  decision is made on what will run. Expanded (ctrl+o) a call shows its
+  head, then the raw arguments, then the body; the permission panel
+  shows the arguments as given, untouched by any renderer.
+- **Renderers run on every layout.** A layout is per spinner frame, so a
+  renderer is meant to be quick and pure; nothing is cached for it.
+- **Exported names added:** the package `toolview` (`Renderer`,
+  `Renderers`, `Line`, `Span`, `Role` and its six values, `S`, `Text`,
+  `Line.String`), `view.Call.Schema` and `console.WithToolRenderers`.
 
 ## Open questions
 

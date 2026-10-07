@@ -15,6 +15,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
+	"github.com/ChristopherDavenport/agentconsole/toolview"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -118,6 +120,8 @@ type Model struct {
 	// cost prices one model call for the session pane; nil shows no
 	// cost.
 	cost client.Cost
+	// tools are the renderers of the tools' calls, by tool name.
+	tools toolview.Renderers
 
 	// screen is the conversation or the tree; pane the detail under the
 	// conversation; frozen a read-only look at another line, nil when the
@@ -163,6 +167,12 @@ type Option func(*Model)
 // it feeds the session pane's total. Without it the pane shows tokens
 // but no cost.
 func WithCost(fn client.Cost) Option { return func(m *Model) { m.cost = fn } }
+
+// WithToolRenderers sets the renderers of the tools' calls, by tool
+// name; a call to any other tool shows its arguments as key=value pairs.
+func WithToolRenderers(rs toolview.Renderers) Option {
+	return func(m *Model) { m.tools = maps.Clone(rs) }
+}
 
 // New returns the model for a backend. The caller starts [Attach] with
 // the program's Send; ctx ends the runs the model starts.
@@ -761,7 +771,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.width, m.curEntry, m.spinner.View(), m.md)
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md)
 	m.setContent(content)
 	m.spans = spans
 	switch {
