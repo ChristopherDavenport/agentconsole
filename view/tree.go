@@ -13,8 +13,9 @@ type Branch struct {
 	// Leaf is the item the branch rests on (Model.Leaves holds the same
 	// IDs).
 	Leaf string
-	// Label names the branch by its newest message: the role and its first
-	// words. A branch with no message on it is labelled "(no message)".
+	// Label names the branch by its newest message: who wrote it ("agent"
+	// for the assistant role) and its first words. A branch with no
+	// message on it is labelled "(no message)".
 	Label string
 	// Role is the role of that message.
 	Role string
@@ -91,7 +92,11 @@ func describe(s *agentsession.Session, tip string, current bool) Branch {
 			if m, ok := x.Item.(*openresponses.Message); ok && !haveMsg && x.IsVisible() {
 				haveMsg = true
 				b.Role = string(m.Role)
-				b.Label = string(m.Role) + ": " + firstWords(m.Text())
+				who := string(m.Role)
+				if m.Role == openresponses.RoleAssistant {
+					who = "agent"
+				}
+				b.Label = who + ": " + firstWords(m.Text())
 			}
 		case *agentsession.RunEntry:
 			if !haveRun {

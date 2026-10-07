@@ -17,7 +17,7 @@ type Entry struct {
 	ID   string
 	Type string
 	Time time.Time
-	// Title says what the entry is: "assistant message", "function call
+	// Title says what the entry is: "agent message", "function call
 	// upper", "compaction".
 	Title string
 	// KeptFromModel is set for an item the filter kept out of the
@@ -298,6 +298,9 @@ func itemText(item openresponses.Item) (string, bool) {
 func itemTitle(item openresponses.Item) string {
 	switch v := item.(type) {
 	case *openresponses.Message:
+		if v.Role == openresponses.RoleAssistant {
+			return "agent message"
+		}
 		return string(v.Role) + " message"
 	case *openresponses.ReasoningItem:
 		return "reasoning"

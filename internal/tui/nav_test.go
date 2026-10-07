@@ -103,11 +103,11 @@ func TestBranchThenSwitchBetweenTheConversationAndTheTree(t *testing.T) {
 	a, _ := branched(t)
 
 	a.key("ctrl+t")
-	s := a.waitFor("the tree", has("branches of session", "assistant: r2", "assistant: r3", "tree: up/down"))
-	if l := lineWith(s, "assistant: r3"); !strings.Contains(l, "* ") || !strings.Contains(l, "▶") {
+	s := a.waitFor("the tree", has("branches of session", "agent: r2", "agent: r3", "tree: up/down"))
+	if l := lineWith(s, "agent: r3"); !strings.Contains(l, "* ") || !strings.Contains(l, "▶") {
 		t.Errorf("the head's branch is not marked and selected: %q", l)
 	}
-	if l := lineWith(s, "assistant: r2"); strings.Contains(l, "* ") {
+	if l := lineWith(s, "agent: r2"); strings.Contains(l, "* ") {
 		t.Errorf("the abandoned branch is marked as the head: %q", l)
 	}
 	if strings.Contains(s, "> ") && strings.Contains(s, "say something") {
@@ -143,7 +143,7 @@ func TestContinueFromHereMovesTheHeadAndTheNextPromptContinuesFromIt(t *testing.
 
 	// View the abandoned branch, then continue from it.
 	a.key("ctrl+t")
-	a.waitFor("the tree", has("assistant: r2"))
+	a.waitFor("the tree", has("agent: r2"))
 	a.press("down", "enter")
 	a.waitFor("the abandoned branch", has("VIEWING branch", "r2"))
 	a.rune('c')
@@ -155,14 +155,14 @@ func TestContinueFromHereMovesTheHeadAndTheNextPromptContinuesFromIt(t *testing.
 	}
 	// The tree has the two lines, the head on the new one.
 	a.key("ctrl+t")
-	s = a.waitFor("the tree", has("assistant: r4", "assistant: r3"))
-	if l := lineWith(s, "assistant: r4"); !strings.Contains(l, "* ") {
+	s = a.waitFor("the tree", has("agent: r4", "agent: r3"))
+	if l := lineWith(s, "agent: r4"); !strings.Contains(l, "* ") {
 		t.Errorf("the new head is not marked: %q", l)
 	}
-	if l := lineWith(s, "assistant: r3"); strings.Contains(l, "* ") {
+	if l := lineWith(s, "agent: r3"); strings.Contains(l, "* ") {
 		t.Errorf("the old head is still marked: %q", l)
 	}
-	if n := strings.Count(s, "assistant: r"); n != 2 {
+	if n := strings.Count(s, "agent: r"); n != 2 {
 		t.Errorf("the tree lists %d branches, want 2:\n%s", n, s)
 	}
 }
@@ -221,7 +221,7 @@ func TestAForksOriginOpensReadOnly(t *testing.T) {
 	a.press("down", "enter") // the branch first, then the origin
 	s = a.waitFor("the origin opened", all(has("VIEWING origin", "origin later", "read only"), lacks("branches of session")))
 	// The cursor starts on the entry the fork was made at.
-	if l := lineWith(s, "▶"); !strings.Contains(l, "assistant") {
+	if l := lineWith(s, "▶"); !strings.Contains(l, "agent") {
 		t.Errorf("the cursor is not on the fork point (the origin's answer): %q\n%s", l, s)
 	}
 

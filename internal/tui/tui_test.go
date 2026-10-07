@@ -30,7 +30,7 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	a.submit("hi")
 	g.arrive(t, "one")
 	s := a.waitFor("the first chunk streaming", has("hel"+cursor, "(streaming)", "writing", "turn 1", "model scripted"))
-	if !strings.Contains(s, "you") || !strings.Contains(s, "hi") {
+	if !strings.Contains(s, "user") || !strings.Contains(s, "hi") {
 		t.Errorf("the prompt is not shown:\n%s", s)
 	}
 
@@ -39,8 +39,8 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	// The reply is markdown, and a paragraph's trailing space is not
 	// drawn.
 	s = a.waitFor("the text grown in place", has("hello"+cursor))
-	if n := strings.Count(s, "assistant"); n != 1 {
-		t.Errorf("assistant label shown %d times while streaming, want 1:\n%s", n, s)
+	if n := strings.Count(s, "agent"); n != 1 {
+		t.Errorf("agent label shown %d times while streaming, want 1:\n%s", n, s)
 	}
 
 	g.release("two")
@@ -48,8 +48,8 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	if n := strings.Count(s, "hello world"); n != 1 {
 		t.Errorf("hello world shown %d times, want 1:\n%s", n, s)
 	}
-	if n := strings.Count(s, "assistant"); n != 1 {
-		t.Errorf("assistant label shown %d times, want 1:\n%s", n, s)
+	if n := strings.Count(s, "agent"); n != 1 {
+		t.Errorf("agent label shown %d times, want 1:\n%s", n, s)
 	}
 }
 
@@ -90,7 +90,9 @@ func TestTheRunLineAndARunningCallSpinInTheirDots(t *testing.T) {
 
 	a.submit("go")
 	g.arrive(t, "tool")
-	s := a.waitFor("the call running", has(`upper text="abc" [running]`))
+	// The live event can say the call runs before the follower has read
+	// the call's entry; wait for the committed row.
+	s := a.waitFor("the call running", all(has(`upper text="abc" [running]`), lacks("(not committed yet)")))
 	// The run line is above the blank line, the input and its two bars.
 	frame := func(s string) (run string, spin rune) {
 		lines := strings.Split(s, "\n")
@@ -521,13 +523,13 @@ func TestUnverifiedAndScroll(t *testing.T) {
 	a.send(tea.WindowSizeMsg{Width: 60, Height: 10})
 	a.submit("hi")
 	a.waitFor("the end of the answer", has("idle"))
-	if s := a.screen(); strings.Contains(s, "you") {
+	if s := a.screen(); strings.Contains(s, "user") {
 		t.Errorf("a long answer should have scrolled the prompt off:\n%s", s)
 	}
 	a.key("ctrl+home")
-	a.waitFor("the top", has("you"))
+	a.waitFor("the top", has("user"))
 	a.key("ctrl+end")
-	a.waitFor("the bottom", lacks("you"))
+	a.waitFor("the bottom", lacks("user"))
 }
 
 func TestFeedFailureStaysOnTheStatusLine(t *testing.T) {

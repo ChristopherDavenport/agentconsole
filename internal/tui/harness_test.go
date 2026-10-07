@@ -449,9 +449,9 @@ func has(subs ...string) func(string) bool {
 }
 
 // prompted is whether the screen shows the user's prompt as its row,
-// "you" over the text, as the record has it.
+// "user" over the text, as the record has it.
 func prompted(text string) func(string) bool {
-	return regexp.MustCompile(`(?m)^you +\n` + regexp.QuoteMeta(text) + ` *$`).MatchString
+	return regexp.MustCompile(`(?m)^user +\n` + regexp.QuoteMeta(text) + ` *$`).MatchString
 }
 
 func lacks(subs ...string) func(string) bool {

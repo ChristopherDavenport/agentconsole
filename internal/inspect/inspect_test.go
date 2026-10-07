@@ -192,7 +192,7 @@ func TestAResponseVerifiesAndShowsItsModel(t *testing.T) {
 		t.Errorf("response = %+v", e.Response)
 	}
 	text := joined(e.Lines())
-	for _, want := range []string{"assistant message", "model:    scripted-1", "verified", e.ID} {
+	for _, want := range []string{"agent message", "model:    scripted-1", "verified", e.ID} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the detail lacks %q:\n%s", want, text)
 		}

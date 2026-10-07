@@ -107,10 +107,10 @@ func TestCtrlCCopiesWholeLinesBetween(t *testing.T) {
 
 	// From the label's line to the text's: whole lines between, columns
 	// on the two ends.
-	ya, yw := lineOf(a.screen(), "assistant"), lineOf(a.screen(), "hello world")
+	ya, yw := lineOf(a.screen(), "agent"), lineOf(a.screen(), "hello world")
 	a.dragCells(0, ya, 11, yw)
 	a.key("ctrl+c")
-	want := "assistant\nhello world"
+	want := "agent\nhello world"
 	if got := a.copied(); len(got) != 1 || got[0] != want {
 		t.Errorf("copied %q, want [%q]", got, want)
 	}

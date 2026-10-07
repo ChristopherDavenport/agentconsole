@@ -142,13 +142,13 @@ func TestClickingTheInputLeavesTheRows(t *testing.T) {
 func TestClickingATreeItemSelectsItAndAgainOpensIt(t *testing.T) {
 	a, _ := branched(t)
 	a.key("ctrl+t")
-	a.waitFor("the tree", has("assistant: r2", "assistant: r3"))
+	a.waitFor("the tree", has("agent: r2", "agent: r3"))
 
-	a.clickOn("assistant: r2")
+	a.clickOn("agent: r2")
 	s := a.screen()
-	if !strings.Contains(lineWith(s, "assistant: r2"), "▶") || strings.Contains(s, "VIEWING") {
+	if !strings.Contains(lineWith(s, "agent: r2"), "▶") || strings.Contains(s, "VIEWING") {
 		t.Fatalf("the click did not just select the branch:\n%s", s)
 	}
-	a.clickOn("assistant: r2")
+	a.clickOn("agent: r2")
 	a.waitFor("the branch opened", all(has("VIEWING branch", "two", "r2"), lacks("branches of session")))
 }
