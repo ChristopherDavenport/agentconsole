@@ -5,6 +5,13 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Changed: the model's messages are labelled "agent", not "assistant",
+  in the conversation, in the tree's branch labels (`view.Branch.Label`)
+  and in the detail pane's title. `view.Branch.Role` still holds the
+  record's role.
+
 ## v0.0.8 - 2026-10-06
 
 - Added: per-tool rendering of calls. `console.WithToolRenderers` takes

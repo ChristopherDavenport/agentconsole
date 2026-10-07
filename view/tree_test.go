@@ -24,7 +24,7 @@ func TestBranchesAreLabelledByTheirNewestMessage(t *testing.T) {
 	if m.Branches[0].Leaf != sid || m.Branches[0].Label != "user: never mind" || m.Branches[0].Role != "user" {
 		t.Errorf("side branch = %+v", m.Branches[0])
 	}
-	if m.Branches[1].Label != "assistant: sunny" || !m.Branches[1].Current {
+	if m.Branches[1].Label != "agent: sunny" || !m.Branches[1].Current {
 		t.Errorf("trunk branch = %+v", m.Branches[1])
 	}
 	if m.Branches[0].Current {

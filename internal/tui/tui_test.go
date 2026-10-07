@@ -39,8 +39,8 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	// The reply is markdown, and a paragraph's trailing space is not
 	// drawn.
 	s = a.waitFor("the text grown in place", has("hello"+cursor))
-	if n := strings.Count(s, "assistant"); n != 1 {
-		t.Errorf("assistant label shown %d times while streaming, want 1:\n%s", n, s)
+	if n := strings.Count(s, "agent"); n != 1 {
+		t.Errorf("agent label shown %d times while streaming, want 1:\n%s", n, s)
 	}
 
 	g.release("two")
@@ -48,8 +48,8 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	if n := strings.Count(s, "hello world"); n != 1 {
 		t.Errorf("hello world shown %d times, want 1:\n%s", n, s)
 	}
-	if n := strings.Count(s, "assistant"); n != 1 {
-		t.Errorf("assistant label shown %d times, want 1:\n%s", n, s)
+	if n := strings.Count(s, "agent"); n != 1 {
+		t.Errorf("agent label shown %d times, want 1:\n%s", n, s)
 	}
 }
 

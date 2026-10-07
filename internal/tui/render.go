@@ -169,15 +169,15 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 	}
 	switch it := row.Item.(type) {
 	case *openresponses.Message:
-		// The assistant writes markdown, and is shown it rendered; what
-		// the user typed is shown as typed.
+		// The agent writes markdown, and is shown it rendered; what the
+		// user typed is shown as typed.
 		var label string
 		body := it.Text()
 		switch it.Role {
 		case openresponses.RoleUser:
 			label = userStyle.Render("you")
 		case openresponses.RoleAssistant:
-			label = assistantStyle.Render("assistant")
+			label = assistantStyle.Render("agent")
 			body = md.render(body, width)
 		default:
 			label = dimStyle.Render(string(it.Role))
