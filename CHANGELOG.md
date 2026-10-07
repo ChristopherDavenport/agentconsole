@@ -23,6 +23,11 @@ versions may break the API.
   in motion, in place of ●, instead of at the right edge, where it was
   far from the eye. A call's dot goes back to ○ when it ends, and the
   run line's when the run does.
+- Changed: while a run goes, the run line says what it is doing, after
+  the turn's figures, in place of "running": "waiting" on the model,
+  "thinking", "writing", "calling read" while a call's arguments stream
+  or it waits to run, "running read" (or "running 3 tools") while tools
+  run, and "retrying" after a failed model call.
 
 - Added: a steer typed while a run goes is listed over the input,
   "queued: …", from the moment it is sent until the run takes it into

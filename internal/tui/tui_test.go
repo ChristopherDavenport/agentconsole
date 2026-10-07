@@ -29,7 +29,7 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 
 	a.submit("hi")
 	g.arrive(t, "one")
-	s := a.waitFor("the first chunk streaming", has("hel"+cursor, "(streaming)", "running", "turn 1", "model scripted"))
+	s := a.waitFor("the first chunk streaming", has("hel"+cursor, "(streaming)", "writing", "turn 1", "model scripted"))
 	if !strings.Contains(s, "you") || !strings.Contains(s, "hi") {
 		t.Errorf("the prompt is not shown:\n%s", s)
 	}
@@ -98,15 +98,14 @@ func TestTheRunLineAndARunningCallSpinInTheirDots(t *testing.T) {
 		return run, []rune(run)[0]
 	}
 	run, spin := frame(s)
-	if !strings.ContainsRune(spinFrames, spin) || !strings.HasPrefix(run, string(spin)+" running") {
+	if !strings.ContainsRune(spinFrames, spin) || !strings.HasPrefix(run, string(spin)+" ") {
 		t.Fatalf("the run line is not running with the spinner in its dot: %q", run)
 	}
-	if !strings.HasSuffix(strings.TrimRight(run, " "), ")") {
-		t.Errorf("something follows the run line's figures: %q", run)
+	if !strings.HasSuffix(strings.TrimRight(run, " "), " running upper") {
+		t.Errorf("the run line does not end on the tool running: %q", run)
 	}
 	// The call's row reads as the run line does: the same spinner in its
-	// dot, its text in the column "running" starts in, nothing at the
-	// right edge.
+	// dot, nothing at the right edge.
 	row := strings.TrimRight(strings.Split(s, "\n")[lineOf(s, `upper text="abc"`)], " ")
 	if want := string(spin) + ` upper text="abc" [running]`; row != want {
 		t.Errorf("the running call is not dotted as the run line is: %q, want %q", row, want)
@@ -119,6 +118,50 @@ func TestTheRunLineAndARunningCallSpinInTheirDots(t *testing.T) {
 	if strings.ContainsAny(s, spinFrames) {
 		t.Errorf("a spinner is left after the run:\n%s", s)
 	}
+}
+
+func TestTheRunLineSaysWhatTheLoopIsDoing(t *testing.T) {
+	g := newGates()
+	cfg := cfgWith(func(ctx context.Context, em *openresponses.Emitter) error {
+		if err := g.hold(ctx, "waiting"); err != nil {
+			return err
+		}
+		r, err := em.Reasoning()
+		if err != nil {
+			return err
+		}
+		if err := r.Text("hmm"); err != nil {
+			return err
+		}
+		if err := g.hold(ctx, "thinking"); err != nil {
+			return err
+		}
+		if err := r.Close(); err != nil {
+			return err
+		}
+		return say(g, map[int]string{0: "writing"}, "hel", "lo")(ctx, em)
+	})
+	a := newApp(t, cfg)
+	t.Cleanup(func() {
+		for _, name := range []string{"waiting", "thinking", "writing"} {
+			g.release(name)
+		}
+	})
+	// The run line is above the blank line, the input and its two bars.
+	phase := func(want string) func(string) bool {
+		return func(s string) bool {
+			ls := strings.Split(s, "\n")
+			return strings.HasSuffix(strings.TrimRight(ls[len(ls)-5], " "), " "+want)
+		}
+	}
+
+	a.submit("go")
+	for _, name := range []string{"waiting", "thinking", "writing"} {
+		g.arrive(t, name)
+		a.waitFor("the run line "+name, phase(name))
+		g.release(name)
+	}
+	a.waitFor("the run over", all(has("hello", "○ idle")))
 }
 
 func TestTheRunLineShowsTheTurnsTimeAndTokens(t *testing.T) {
@@ -135,7 +178,7 @@ func TestTheRunLineShowsTheTurnsTimeAndTokens(t *testing.T) {
 	a.submit("go")
 	g.arrive(t, "tool")
 	// The first model call is on the record by the time its call runs.
-	figures := regexp.MustCompile(`^[` + spinFrames + `] running \((\d+)s · 1\.5k↑ / 40↓\) *$`)
+	figures := regexp.MustCompile(`^[` + spinFrames + `] \((\d+)s · 1\.5k↑ / 40↓\) running upper *$`)
 	s := a.waitFor("the turn's figures", func(s string) bool {
 		ls := strings.Split(s, "\n")
 		return figures.MatchString(ls[len(ls)-5])
@@ -405,7 +448,7 @@ func TestEnterWhileRunningSteers(t *testing.T) {
 
 	a.submit("start")
 	g.arrive(t, "mid")
-	a.waitFor("running", has("running"))
+	a.waitFor("writing", has("writing"))
 	a.submit("also this")
 	g.release("mid")
 	s := a.waitFor("the steer on the record and answered", all(has("also this", "second", "idle")))
@@ -421,7 +464,7 @@ func TestCtrlCAbortsARunAndQuitsWhenIdle(t *testing.T) {
 
 	a.submit("start")
 	g.arrive(t, "mid")
-	a.waitFor("running", has("partial"+cursor, "running"))
+	a.waitFor("writing", has("partial"+cursor, "writing"))
 	a.key("ctrl+c")
 	a.waitFor("the run ended", has("idle"))
 	if a.quitted() {
@@ -549,7 +592,7 @@ func TestInterruptFromOutsideActsLikeCtrlC(t *testing.T) {
 	t.Cleanup(func() { g.release("mid") })
 	a.submit("start")
 	g.arrive(t, "mid")
-	a.waitFor("running", has("partial"+cursor, "running"))
+	a.waitFor("writing", has("partial"+cursor, "writing"))
 	a.send(tui.InterruptMsg{})
 	a.waitFor("the run aborted", has("idle"))
 	if a.quitted() {

@@ -906,7 +906,7 @@ func (m *Model) frame() string {
 		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
 	}
 	// A blank line keeps the run line off what is above it.
-	parts = append(parts, "", runLine(state, runFigures(m.view, state, now), m.spinner.View(), m.width))
+	parts = append(parts, "", runLine(state, runPhase(m.view), runFigures(m.view, state, now), m.spinner.View(), m.width))
 	// What waits to join the conversation sits under the run it waits
 	// on, over the input it was typed in.
 	parts = append(parts, m.queuedLines()...)

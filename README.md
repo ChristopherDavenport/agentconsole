@@ -97,11 +97,13 @@ abort or the quit; with nothing selected, Ctrl-C is the interrupt it
 always was.
 The status line keeps the session's time working (its
 runs' time, summed), a running total of tokens used and, when the host supplies a price source, what the session
-has cost. The line above the input is the current turn's: whether a run
-is going, in color, how long it has run and the tokens it took in and
-gave out, its dot a spinner while one does; a tool call in motion carries
-the same spinner in its dot and the same color, and its dot goes back to
-○ when it ends. When a tool call needs permission, y
+has cost. The line above the input is the current turn's: how long it
+has run and the tokens it took in and gave out, and while a run goes,
+what it is doing (waiting on the model, thinking, writing, calling or
+running a tool, retrying), in color, its dot a spinner; idle, or waiting
+on a permission, it says so. A tool call in motion carries the same
+spinner in its dot and the same color, and its dot goes back to ○ when
+it ends. When a tool call needs permission, y
 approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 

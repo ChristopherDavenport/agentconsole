@@ -517,11 +517,16 @@ func turnState(m view.Model, busy, aborting bool) runState {
 }
 
 // runLine is the line over the input (or the hint that takes its place),
-// about the current turn as the status line is about the session: the
-// run's state in words and color, its figures after it, and while the
-// run goes, the spinner in place of its dot. It is one line at any
-// width: the figures go first, then the words are cut.
-func runLine(s runState, figures, spin string, width int) string {
+// about the current turn as the status line is about the session. While
+// the run goes it is the spinner in place of its dot, the turn's figures
+// and then what the run is doing (phase, from [runPhase]), in the run's
+// color: the word changes as the loop goes on, so it comes last and the
+// figures stay put. Otherwise it is the state in words and color and the
+// figures after it. It is one line at any width: the phase is cut down
+// to the room the figures leave it, and below minPhase columns the
+// figures go first; the state's words are cut only when the figures are
+// gone.
+func runLine(s runState, phase, figures, spin string, width int) string {
 	var word string
 	style := runStyle
 	switch s {
@@ -530,18 +535,83 @@ func runLine(s runState, figures, spin string, width int) string {
 	case stateRequiresAction:
 		word, style = "◆ requires action", warnStyle
 	case stateAborting:
-		word, style = dot(spin)+" aborting", warnStyle
+		phase, style = "aborting", warnStyle
 	default:
-		word = dot(spin) + " running"
+		if phase == "" {
+			phase = "running"
+		}
 	}
-	room := width
+	if s == stateRunning || s == stateAborting {
+		lead := dot(spin) + " "
+		if figures != "" {
+			if room := width - lipgloss.Width(lead+figures+" "); room >= minPhase || room >= lipgloss.Width(phase) {
+				return style.Render(lead) + dimStyle.Render(figures+" ") + style.Render(truncate(phase, room))
+			}
+		}
+		return style.Render(truncate(lead+phase, width))
+	}
 	if figures != "" {
 		figures = " " + figures
 	}
-	if lipgloss.Width(word+figures) > room {
+	if lipgloss.Width(word+figures) > width {
 		figures = ""
 	}
-	return style.Render(truncate(word, room)) + dimStyle.Render(figures)
+	return style.Render(truncate(word, width)) + dimStyle.Render(figures)
+}
+
+// minPhase is the fewest columns the run line cuts its phase down to
+// before it drops the figures instead.
+const minPhase = 8
+
+// runPhase is what a going run is doing, read from the live view, the
+// first of: tools running ("running read", "running 3 tools"), calls
+// the model made and that have not run yet, their arguments streaming
+// or done ("calling read"), the model writing a message or thinking
+// (reasoning streams), a failed model call being tried again, and
+// waiting on the model. Only the conversation's own calls count; a
+// call's children are under a tool that is running already.
+func runPhase(m view.Model) string {
+	var running, calling []string
+	writing, thinking := false, false
+	for _, row := range m.Rows {
+		if c := row.Call; c != nil {
+			switch c.State {
+			case view.CallRunning:
+				running = append(running, c.Name)
+			case view.CallOpen:
+				calling = append(calling, c.Name)
+			}
+			continue
+		}
+		if !row.Live || !row.Open {
+			continue
+		}
+		switch it := row.Item.(type) {
+		case *openresponses.Message:
+			writing = writing || it.Role == openresponses.RoleAssistant
+		case *openresponses.ReasoningItem:
+			thinking = true
+		}
+	}
+	tools := func(verb string, names []string) string {
+		if len(names) == 1 {
+			return verb + " " + names[0]
+		}
+		return fmt.Sprintf("%s %d tools", verb, len(names))
+	}
+	switch {
+	case len(running) > 0:
+		return tools("running", running)
+	case len(calling) > 0:
+		return tools("calling", calling)
+	case writing:
+		return "writing"
+	case thinking:
+		return "thinking"
+	case m.Turn.Attempt > 0:
+		return "retrying"
+	}
+	return "waiting"
 }
 
 // dot is the dot of a run or a call in motion: the spinner's frame, or
