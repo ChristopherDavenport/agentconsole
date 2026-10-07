@@ -90,7 +90,9 @@ func TestTheRunLineAndARunningCallSpinInTheirDots(t *testing.T) {
 
 	a.submit("go")
 	g.arrive(t, "tool")
-	s := a.waitFor("the call running", has(`upper text="abc" [running]`))
+	// The live event can say the call runs before the follower has read
+	// the call's entry; wait for the committed row.
+	s := a.waitFor("the call running", all(has(`upper text="abc" [running]`), lacks("(not committed yet)")))
 	// The run line is above the blank line, the input and its two bars.
 	frame := func(s string) (run string, spin rune) {
 		lines := strings.Split(s, "\n")
