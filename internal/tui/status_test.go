@@ -107,20 +107,61 @@ func TestElapsed(t *testing.T) {
 
 func TestTheRunLineIsOneLineAtAnyWidth(t *testing.T) {
 	figures := "(19s · 1.3M↑ / 534k↓)"
-	for _, width := range []int{80, 30, 20, 8} {
-		got := ansi.Strip(runLine(stateRunning, figures, "⠹", width))
-		if strings.Contains(got, "\n") || lipgloss.Width(got) > width {
-			t.Errorf("at %d: %q", width, got)
-		}
-		if !strings.HasPrefix(got, "⠹ ") {
-			t.Errorf("at %d the spinner is not in the dot: %q", width, got)
+	phase := "running mcp__github__search_code"
+	for width, want := range map[int]string{
+		80: "⠹ " + figures + " " + phase,
+		40: "⠹ " + figures + " running mcp__git", // the phase cut to the room left
+		30: "⠹ running mcp__github__search_",     // too little room: the figures go
+		8:  "⠹ runnin",
+	} {
+		got := ansi.Strip(runLine(stateRunning, phase, figures, "⠹", width))
+		if got != want || lipgloss.Width(got) > width {
+			t.Errorf("at %d: %q, want %q", width, got, want)
 		}
 	}
-	if got := ansi.Strip(runLine(stateRunning, figures, "⠹", 40)); got != "⠹ running "+figures {
-		t.Errorf("the figures do not follow the state: %q", got)
+	if got := ansi.Strip(runLine(stateRunning, "", "", "⠹", 40)); got != "⠹ running" {
+		t.Errorf("with no phase or figures: %q", got)
 	}
-	if got := ansi.Strip(runLine(stateRunning, figures, "⠹", 20)); got != "⠹ running" {
-		t.Errorf("too narrow, the figures go first: %q", got)
+	if got := ansi.Strip(runLine(stateAborting, "writing", figures, "⠹", 40)); got != "⠹ "+figures+" aborting" {
+		t.Errorf("aborting: %q", got)
+	}
+	if got := ansi.Strip(runLine(stateRequiresAction, "", figures, "", 40)); got != "◆ requires action "+figures {
+		t.Errorf("requires action: %q", got)
+	}
+	if got := ansi.Strip(runLine(stateRequiresAction, "", figures, "", 30)); got != "◆ requires action" {
+		t.Errorf("requires action, too narrow, the figures go first: %q", got)
+	}
+}
+
+func TestTheRunPhaseIsWhatTheLoopIsDoing(t *testing.T) {
+	call := func(name string, s view.CallState) view.Row {
+		return view.Row{Item: &openresponses.FunctionCall{Name: name}, Call: &view.Call{Name: name, State: s}}
+	}
+	streaming := func(it openresponses.Item) view.Row { return view.Row{Live: true, Open: true, Item: it} }
+	writing := streaming(&openresponses.Message{Role: openresponses.RoleAssistant})
+	thinking := streaming(&openresponses.ReasoningItem{})
+	ended := call("grep", view.CallEnded)
+	for _, c := range []struct {
+		name    string
+		rows    []view.Row
+		attempt int
+		want    string
+	}{
+		{"nothing streamed yet", []view.Row{ended}, 0, "waiting"},
+		{"a model call failed", nil, 1, "retrying"},
+		{"reasoning streams", []view.Row{thinking}, 1, "thinking"},
+		{"a message streams", []view.Row{thinking, writing}, 0, "writing"},
+		{"a reasoning item that ended", []view.Row{{Live: true, Item: &openresponses.ReasoningItem{}}}, 0, "waiting"},
+		{"a call's arguments stream", []view.Row{writing, call("read", view.CallOpen)}, 0, "calling read"},
+		{"calls not run yet", []view.Row{call("read", view.CallOpen), call("grep", view.CallOpen)}, 0, "calling 2 tools"},
+		{"a tool runs", []view.Row{ended, call("read", view.CallRunning), call("grep", view.CallOpen)}, 0, "running read"},
+		{"tools run", []view.Row{call("read", view.CallRunning), call("grep", view.CallRunning)}, 0, "running 2 tools"},
+		{"a deferred call", []view.Row{call("bash", view.CallDeferred)}, 0, "waiting"},
+	} {
+		m := view.Model{Rows: c.rows, Turn: view.Turn{State: view.Running, Attempt: c.attempt}}
+		if got := runPhase(m); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

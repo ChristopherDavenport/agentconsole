@@ -820,6 +820,19 @@ selects itself.
   far right was seldom seen. A frame is one column, as ● is, so the
   words after it hold still; a call's dot becomes ○ when it ends, and
   the run line's when the run does.
+- **While the run goes, the run line says what it is doing.** The
+  spinner says the run is moving, so the word "running" said nothing
+  more; the word is now the loop's phase, read from the live view in
+  the TUI with nothing new in `view` or the contract: "running read"
+  (or "running 3 tools") while a tool runs, "calling read" while the
+  model's call is streaming or not dispatched yet, "writing" while a
+  message streams, "thinking" while reasoning does, "retrying" after a
+  failed model call, and "waiting" otherwise, on the model. They are
+  taken in that order when more than one holds. Only the conversation's
+  calls count, not a call's children. The phase comes after the figures
+  so that, as it changes, the figures stay put; "aborting" takes its
+  place, and idle and requires action are as they were. A phase as short
+  as one frame shows for that frame: nothing holds a word on screen.
 - **The turn's figures are the record's.** `view.Model.Run` (of the new
   exported type `view.Run`) is the last run whose start entry is on the
   viewed line: when its start and end entries were written, and the

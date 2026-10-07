@@ -174,7 +174,7 @@ func TestContinueFromHereIsRefusedWhileARunGoes(t *testing.T) {
 	a.exchange("one", "r1")
 	a.submit("two")
 	g.arrive(t, "mid")
-	a.waitFor("running", has("running"))
+	a.waitFor("writing", has("writing"))
 	a.key("ctrl+p")
 	a.waitFor("the cursor", has("▶"))
 	a.key("ctrl+b")

@@ -82,13 +82,13 @@ func TestCtrlCCopiesWhileARunGoes(t *testing.T) {
 
 	a.submit("hi")
 	g.arrive(t, "hold")
-	a.waitFor("the first chunk streaming", all(has("hel"+cursor, "running"), prompted("hi")))
+	a.waitFor("the first chunk streaming", all(has("hel"+cursor, "writing"), prompted("hi")))
 	a.drag("hel", 0, 3)
 	a.key("ctrl+c")
 	if got := a.copied(); len(got) != 1 || got[0] != "hel" {
 		t.Errorf("copied %q, want [\"hel\"]", got)
 	}
-	if s := a.screen(); strings.Contains(s, "aborting") || !strings.Contains(s, "running") {
+	if s := a.screen(); strings.Contains(s, "aborting") || !strings.Contains(s, "writing") {
 		t.Errorf("ctrl+c aborted the run instead of copying:\n%s", s)
 	}
 	if a.quitted() {
@@ -208,7 +208,7 @@ func TestTheSelectionStaysOnItsTextWhileARunStreams(t *testing.T) {
 	g.arrive(t, "hold")
 	// The prompt's row drawn above it first: a row inserted above a
 	// selection moves its text but not the selection (see the plan).
-	a.waitFor("the first chunk streaming", all(has("first words"+cursor, "running"), promptRow("hi")))
+	a.waitFor("the first chunk streaming", all(has("first words"+cursor, "writing"), promptRow("hi")))
 	y := lineOf(a.screen(), "first words")
 	a.drag("first words", 0, 11)
 
