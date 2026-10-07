@@ -92,7 +92,7 @@ const gutter = 2
 // flipped by its entry's flips, and each call by its tool's renderer in
 // tools, if it has one. With a row selected (sel is its entry),
 // every block gets a two-column gutter with a marker on the selected one.
-// spin is the spinner's frame, drawn at the right edge of the calls in
+// spin is the spinner's frame, drawn in the dot of the calls in
 // motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
@@ -198,7 +198,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		return dimStyle.Render("▾ reasoning"+tail) + tag + "\n" + dimStyle.Render(text)
 	case *openresponses.FunctionCall:
 		if row.Call != nil {
-			return renderCall(*row.Call, o, tools, tag, 0, spin, width)
+			return renderCall(*row.Call, o, tools, tag, 0, spin)
 		}
 		return toolStyle.Render("○ "+it.Name) + tag + " " + it.Arguments
 	case *openresponses.FunctionCallOutput:
@@ -235,29 +235,22 @@ func anyMoving(m view.Model) bool {
 	return false
 }
 
-// renderCall renders a call and the calls under it, width columns wide.
-// Its dot reads as the run line's does: ● in motion, ◆ waiting on a
-// permission, ○ at rest, so a call's name starts in the column the run's
-// state does. A call in motion is drawn in the run line's color, with
-// the spinner at the right edge, under the run line's. A call whose tool
+// renderCall renders a call and the calls under it.
+// Its dot reads as the run line's does: the spinner (spin) in motion, ◆
+// waiting on a permission, ○ at rest, so a call's name starts in the
+// column the run's state does. A call in motion is drawn in the run
+// line's color. A call whose tool
 // has a renderer in tools shows the renderer's head after its name and
 // its body under the line, each where the renderer gives one; the dot,
 // the name, the state and the client's notes are the client's always.
-func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, width int) string {
+func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string) string {
 	pad := strings.Repeat("  ", depth)
 	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
 	switch {
 	case moving(c):
-		name, state = runStyle.Render("● "+c.Name), runStyle.Render(state)
+		name, state = runStyle.Render(dot(spin)+" "+c.Name), runStyle.Render(state)
 	case c.State == view.CallDeferred:
 		name = warnStyle.Render("◆ " + c.Name)
-	}
-	// head puts the spinner on the head line of a call in motion.
-	head := func(line string) string {
-		if moving(c) {
-			return atRight(line, runStyle.Render(spin), width)
-		}
-		return line
 	}
 	r := tools[c.Name]
 	rhead, custom := toolHead(r, c)
@@ -276,7 +269,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		if hasBody && c.State == view.CallEnded && !c.Committed {
 			line += dimStyle.Render(" (live)")
 		}
-		b.WriteString(head(pad + line))
+		b.WriteString(pad + line)
 		if c.Args != "" {
 			b.WriteString("\n" + pad + "  args: " + c.Args)
 		}
@@ -299,7 +292,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		if c.State == view.CallEnded && !c.Committed {
 			line += dimStyle.Render(" (live)")
 		}
-		b.WriteString(head(pad + line + tag))
+		b.WriteString(pad + line + tag)
 	}
 	for _, l := range body {
 		b.WriteString("\n" + pad + "  " + drawLine(l))
@@ -350,7 +343,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
 	}
 	for _, ch := range c.Children {
-		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, width))
+		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin))
 	}
 	return b.String()
 }
@@ -526,8 +519,8 @@ func turnState(m view.Model, busy, aborting bool) runState {
 // runLine is the line over the input (or the hint that takes its place),
 // about the current turn as the status line is about the session: the
 // run's state in words and color, its figures after it, and while the
-// run goes, the spinner at the right edge. It is one line at any width:
-// the figures go first, then the words are cut.
+// run goes, the spinner in place of its dot. It is one line at any
+// width: the figures go first, then the words are cut.
 func runLine(s runState, figures, spin string, width int) string {
 	var word string
 	style := runStyle
@@ -537,26 +530,28 @@ func runLine(s runState, figures, spin string, width int) string {
 	case stateRequiresAction:
 		word, style = "◆ requires action", warnStyle
 	case stateAborting:
-		word, style = "● aborting", warnStyle
+		word, style = dot(spin)+" aborting", warnStyle
 	default:
-		word = "● running"
+		word = dot(spin) + " running"
 	}
-	moving := s == stateRunning || s == stateAborting
 	room := width
-	if moving {
-		room = width - 1 - lipgloss.Width(spin)
-	}
 	if figures != "" {
 		figures = " " + figures
 	}
 	if lipgloss.Width(word+figures) > room {
 		figures = ""
 	}
-	left := style.Render(truncate(word, room)) + dimStyle.Render(figures)
-	if !moving {
-		return left
+	return style.Render(truncate(word, room)) + dimStyle.Render(figures)
+}
+
+// dot is the dot of a run or a call in motion: the spinner's frame, or
+// ● without one. Each frame is one column, as ● is, so the words after it
+// stay put as it turns.
+func dot(spin string) string {
+	if spin == "" {
+		return "●"
 	}
-	return atRight(left, runStyle.Render(spin), width)
+	return spin
 }
 
 // runFigures is what the run line says of the current turn, in parens:
@@ -619,20 +614,6 @@ func elapsed(d time.Duration) string {
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// atRight puts spin at the right edge of a width-wide line, so the
-// spinners of the run line and of the calls in motion stand in one
-// column. A line too long for it to fit beside is wrapped first, and the
-// spinner goes on its first row.
-func atRight(line, spin string, width int) string {
-	room := width - 1 - lipgloss.Width(spin)
-	if room < 1 {
-		return line
-	}
-	rows := strings.Split(wrap(line, room), "\n")
-	rows[0] = padTo(rows[0], room) + " " + spin
-	return strings.Join(rows, "\n")
 }
 
 // statusText is the session's view: its time working (worked, from

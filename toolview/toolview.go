@@ -39,8 +39,9 @@ type Renderer interface {
 	// Head is what follows the tool's name on the call's line: what the
 	// call does, from its arguments alone, so it reads the same while
 	// the arguments stream, under a permission and once the call has
-	// ended. The client draws the name, the state and the spinner
-	// around it. ok is false to show the arguments as the client does.
+	// ended. The client draws the dot (a spinner in motion), the name
+	// and the state around it. ok is false to show the arguments as the
+	// client does.
 	Head(c view.Call) (head Line, ok bool)
 	// Body is what shows under the call's line: the progress of a
 	// running call, the result of one that ended, or what a call waiting

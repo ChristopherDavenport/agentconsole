@@ -81,7 +81,7 @@ func TestReasoningIsCollapsedUntilToggled(t *testing.T) {
 // spinFrames are the spinner's frames, one rune each.
 const spinFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-func TestTheRunLineAndARunningCallTurnOneSpinner(t *testing.T) {
+func TestTheRunLineAndARunningCallSpinInTheirDots(t *testing.T) {
 	g := newGates()
 	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
 	cfg.Tools = []agenttool.Tool{upperTool(g)}
@@ -95,24 +95,21 @@ func TestTheRunLineAndARunningCallTurnOneSpinner(t *testing.T) {
 	frame := func(s string) (run string, spin rune) {
 		lines := strings.Split(s, "\n")
 		run = lines[len(lines)-5]
-		r := []rune(run)
-		return run, r[len(r)-1]
+		return run, []rune(run)[0]
 	}
 	run, spin := frame(s)
-	if !strings.HasPrefix(run, "● running") || !strings.ContainsRune(spinFrames, spin) {
-		t.Fatalf("the run line is not running with the spinner at its end: %q", run)
+	if !strings.ContainsRune(spinFrames, spin) || !strings.HasPrefix(run, string(spin)+" running") {
+		t.Fatalf("the run line is not running with the spinner in its dot: %q", run)
 	}
-	if lipgloss.Width(run) != 100 {
-		t.Errorf("the spinner is not at the right edge: %q", run)
+	if !strings.HasSuffix(strings.TrimRight(run, " "), ")") {
+		t.Errorf("something follows the run line's figures: %q", run)
 	}
-	// The call's row reads as the run line does: a dot, the text in the
-	// column "running" starts in, and the same spinner at the same edge.
-	row := strings.Split(s, "\n")[lineOf(s, `upper text="abc"`)]
-	if !strings.HasPrefix(row, `● upper text="abc" [running]`) {
-		t.Errorf("the running call is not dotted as the run line is: %q", row)
-	}
-	if r := []rune(row); r[len(r)-1] != spin || lipgloss.Width(row) != lipgloss.Width(run) {
-		t.Errorf("the running call's spinner is not under the run line's %q:\n%s\n%s", spin, row, run)
+	// The call's row reads as the run line does: the same spinner in its
+	// dot, its text in the column "running" starts in, nothing at the
+	// right edge.
+	row := strings.TrimRight(strings.Split(s, "\n")[lineOf(s, `upper text="abc"`)], " ")
+	if want := string(spin) + ` upper text="abc" [running]`; row != want {
+		t.Errorf("the running call is not dotted as the run line is: %q, want %q", row, want)
 	}
 	a.waitFor("the spinner turning", func(s string) bool { _, r := frame(s); return r != spin })
 
@@ -138,7 +135,7 @@ func TestTheRunLineShowsTheTurnsTimeAndTokens(t *testing.T) {
 	a.submit("go")
 	g.arrive(t, "tool")
 	// The first model call is on the record by the time its call runs.
-	figures := regexp.MustCompile(`^● running \((\d+)s · 1\.5k↑ / 40↓\) +[` + spinFrames + `]$`)
+	figures := regexp.MustCompile(`^[` + spinFrames + `] running \((\d+)s · 1\.5k↑ / 40↓\) *$`)
 	s := a.waitFor("the turn's figures", func(s string) bool {
 		ls := strings.Split(s, "\n")
 		return figures.MatchString(ls[len(ls)-5])

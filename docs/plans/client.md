@@ -811,10 +811,15 @@ selects itself.
 - **The turn has a line of its own; the status line is the session's.**
   The run's state left the status line for a run line above the input:
   its words in color, the current turn's figures after them, and a
-  spinner at the right edge while the run goes. The status line keeps
+  spinner in place of its dot while the run goes. The status line keeps
   the session's figures (tokens, cost, model, turn, session). A tool
-  call in motion carries the run line's dot, color and spinner, its
-  spinner in the run line's column.
+  call in motion carries the run line's spinner in its dot and the run
+  line's color.
+- **The spinner turns in the dot, not at the right edge.** The eye is on
+  the bottom left, on the run line and the input, so a spinner at the
+  far right was seldom seen. A frame is one column, as ● is, so the
+  words after it hold still; a call's dot becomes ○ when it ends, and
+  the run line's when the run does.
 - **The turn's figures are the record's.** `view.Model.Run` (of the new
   exported type `view.Run`) is the last run whose start entry is on the
   viewed line: when its start and end entries were written, and the
@@ -975,7 +980,7 @@ reads a command, an edit or a read as the JSON the model wrote.
   shape or for another schema. A declined head is the key=value form, a
   declined body the client's own (the progress tail, the line count or
   the whole output). A renderer that panics has declined. The dot, the
-  name, the state, the spinner and the client's notes (a deferred call's
+  name, the state, the dot (a spinner in motion) and the client's notes (a deferred call's
   question, why a call was blocked or cut off, the policy's verdict) are
   the client's always; the body sits between the line and the notes.
   Child calls are drawn by their tool's renderer too.
