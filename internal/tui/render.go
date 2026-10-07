@@ -175,7 +175,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		body := it.Text()
 		switch it.Role {
 		case openresponses.RoleUser:
-			label = userStyle.Render("you")
+			label = userStyle.Render("user")
 		case openresponses.RoleAssistant:
 			label = assistantStyle.Render("agent")
 			body = md.render(body, width)

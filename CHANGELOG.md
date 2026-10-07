@@ -9,7 +9,8 @@ versions may break the API.
 
 - Changed: the model's messages are labelled "agent", not "assistant",
   in the conversation, in the tree's branch labels (`view.Branch.Label`)
-  and in the detail pane's title. `view.Branch.Role` still holds the
+  and in the detail pane's title, and the user's messages in the
+  conversation "user", not "you", as the tree and the pane name them. `view.Branch.Role` still holds the
   record's role.
 
 ## v0.0.8 - 2026-10-06

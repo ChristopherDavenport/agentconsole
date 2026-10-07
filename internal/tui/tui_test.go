@@ -30,7 +30,7 @@ func TestStreamingTextUpdatesInPlaceThenCommitsOnce(t *testing.T) {
 	a.submit("hi")
 	g.arrive(t, "one")
 	s := a.waitFor("the first chunk streaming", has("hel"+cursor, "(streaming)", "writing", "turn 1", "model scripted"))
-	if !strings.Contains(s, "you") || !strings.Contains(s, "hi") {
+	if !strings.Contains(s, "user") || !strings.Contains(s, "hi") {
 		t.Errorf("the prompt is not shown:\n%s", s)
 	}
 
@@ -523,13 +523,13 @@ func TestUnverifiedAndScroll(t *testing.T) {
 	a.send(tea.WindowSizeMsg{Width: 60, Height: 10})
 	a.submit("hi")
 	a.waitFor("the end of the answer", has("idle"))
-	if s := a.screen(); strings.Contains(s, "you") {
+	if s := a.screen(); strings.Contains(s, "user") {
 		t.Errorf("a long answer should have scrolled the prompt off:\n%s", s)
 	}
 	a.key("ctrl+home")
-	a.waitFor("the top", has("you"))
+	a.waitFor("the top", has("user"))
 	a.key("ctrl+end")
-	a.waitFor("the bottom", lacks("you"))
+	a.waitFor("the bottom", lacks("user"))
 }
 
 func TestFeedFailureStaysOnTheStatusLine(t *testing.T) {
