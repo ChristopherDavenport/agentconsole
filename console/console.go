@@ -31,6 +31,7 @@ import (
 
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
+	"github.com/ChristopherDavenport/agentconsole/toolview"
 )
 
 // DefaultDrainTimeout bounds the wait for an aborted run to write its
@@ -46,6 +47,7 @@ type config struct {
 	height  int
 	warn    func(string)
 	cost    client.Cost
+	tools   toolview.Renderers
 }
 
 // Option configures [Run].
@@ -90,6 +92,14 @@ func WithWarn(fn func(string)) Option { return func(c *config) { c.warn = fn } }
 // false for a model it has no price for.
 func WithCost(fn client.Cost) Option { return func(c *config) { c.cost = fn } }
 
+// WithToolRenderers draws the calls of the tools named in rs with their
+// renderers, live and from the record alike; a call to any other tool
+// shows its name and its arguments as key=value pairs. A later call
+// replaces the set.
+func WithToolRenderers(rs toolview.Renderers) Option {
+	return func(c *config) { c.tools = rs }
+}
+
 // Run runs the terminal client over be until the user quits, ctx is
 // done, or the program fails, and returns the program's error.
 //
@@ -118,7 +128,7 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 	if cfg.out != nil {
 		out = cfg.out
 	}
-	m := tui.New(ctx, be, tui.WithCost(cfg.cost), tui.WithCopier(tui.Clipboard(out)))
+	m := tui.New(ctx, be, tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out)))
 	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
 	// ctrl+c) is made the same thing: the program's own handling would
 	// end it with an error, without aborting the run.
