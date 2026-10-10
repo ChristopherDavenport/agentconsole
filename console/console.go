@@ -29,6 +29,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/ChristopherDavenport/openresponses"
+
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
@@ -48,6 +50,7 @@ type config struct {
 	warn    func(string)
 	cost    client.Cost
 	tools   toolview.Renderers
+	submit  func(context.Context, Line) (Submit, error)
 }
 
 // Option configures [Run].
@@ -100,6 +103,39 @@ func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(c *config) { c.tools = rs }
 }
 
+// Line is a line the user submitted in the client's input.
+type Line struct {
+	// Text is what was typed, without the space around it.
+	Text string
+	// Running is whether a run was going when the line was taken up.
+	Running bool
+}
+
+// Submit is what the client does with a submitted line. Prompt starts a
+// run with its items; Steer queues its items into the run that goes, or
+// the next one; Reply is shown over the input until the next line is
+// submitted, and is not on the record. A reply may come with a prompt or
+// a steer; a Submit with both a prompt and a steer is refused, and an
+// empty one does nothing.
+type Submit struct {
+	Prompt []openresponses.Item
+	Steer  []openresponses.Item
+	Reply  string
+}
+
+// WithSubmit hands each line the user submits to fn, which decides what
+// it is: the program running the client owns its input, so a line can be
+// a command to that program rather than anything the agent sees. fn runs
+// off the program's goroutine, one line at a time in the order they
+// were submitted; a line submitted meanwhile waits, shown over the
+// input. An error fn returns is shown, and the line is given back to the
+// input; so is a prompt while a run goes, which the agent would refuse.
+// Without WithSubmit, a line is a prompt when no run goes and a steer
+// while one does.
+func WithSubmit(fn func(ctx context.Context, l Line) (Submit, error)) Option {
+	return func(c *config) { c.submit = fn }
+}
+
 // Run runs the terminal client over be until the user quits, ctx is
 // done, or the program fails, and returns the program's error.
 //
@@ -128,7 +164,14 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 	if cfg.out != nil {
 		out = cfg.out
 	}
-	m := tui.New(ctx, be, tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out)))
+	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out))}
+	if fn := cfg.submit; fn != nil {
+		topts = append(topts, tui.WithSubmit(func(ctx context.Context, l tui.Line) (tui.Submission, error) {
+			s, err := fn(ctx, Line(l))
+			return tui.Submission(s), err
+		}))
+	}
+	m := tui.New(ctx, be, topts...)
 	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
 	// ctrl+c) is made the same thing: the program's own handling would
 	// end it with an error, without aborting the run.

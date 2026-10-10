@@ -211,3 +211,23 @@ func TestRunWarnsWhenARunWillNotEnd(t *testing.T) {
 		t.Error("no warning for a run that did not end")
 	}
 }
+
+// TestRunHandsALineToTheProgramRunningIt: with WithSubmit the program
+// running the client decides what a line is. A command it answers with a
+// reply never reaches the agent; a prompt it hands back does.
+func TestRunHandsALineToTheProgramRunningIt(t *testing.T) {
+	submit := func(_ context.Context, l console.Line) (console.Submit, error) {
+		if strings.HasPrefix(l.Text, "/") {
+			return console.Submit{Reply: "ran " + l.Text}, nil
+		}
+		return console.Submit{Prompt: []openresponses.Item{openresponses.UserText(l.Text)}}, nil
+	}
+	r := start(t, scripted.New(scripted.Say("po", "ng")), console.WithSubmit(submit))
+	r.type_("/help\r")
+	r.waitScreen("ran /help")
+	if r.agent.State().Running || len(r.agent.State().Transcript) != 0 {
+		t.Fatalf("the command reached the agent: %+v", r.agent.State())
+	}
+	r.type_("ping\r")
+	r.waitScreen("pong")
+}

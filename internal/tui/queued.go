@@ -22,8 +22,8 @@ type steerQueue struct {
 }
 
 type steerItem struct {
-	text string
-	item openresponses.Item
+	text  string
+	items []openresponses.Item
 }
 
 // steerDoneMsg is a steer handed to the backend; err says it was not
@@ -33,12 +33,13 @@ type steerDoneMsg struct {
 	err  error
 }
 
-// steer queues item into the run in a command. What waits is shown from
-// the record, once the queued entry Control.Steer writes lands.
-func (m *Model) steer(text string, item openresponses.Item) tea.Cmd {
+// steer queues items, typed as text, into the run in a command. What
+// waits is shown from the record, once the queued entry Control.Steer
+// writes lands.
+func (m *Model) steer(text string, items ...openresponses.Item) tea.Cmd {
 	q, ctl, ctx := m.steers, m.ctl, m.ctx
 	q.mu.Lock()
-	q.items = append(q.items, steerItem{text: text, item: item})
+	q.items = append(q.items, steerItem{text: text, items: items})
 	q.mu.Unlock()
 	m.inflight.Add(1)
 	return func() tea.Msg {
@@ -49,7 +50,7 @@ func (m *Model) steer(text string, item openresponses.Item) tea.Cmd {
 		next := q.items[0]
 		q.items = q.items[1:]
 		q.mu.Unlock()
-		if err := ctl.Steer(ctx, next.item); err != nil {
+		if err := ctl.Steer(ctx, next.items...); err != nil {
 			return steerDoneMsg{text: next.text, err: err}
 		}
 		return steerDoneMsg{}
