@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.11 - 2026-10-10
 
 - Changed: agentconsole is the view and is not the controller (#33,
   #34). It takes the session through a `client.Record` and agentturn's
