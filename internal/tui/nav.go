@@ -11,6 +11,7 @@ import (
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/openresponses"
 
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -27,7 +28,7 @@ import (
 // agent's head does not move, the feed keeps running, and Esc returns to
 // the live view. The head moves on an explicit action, "continue from
 // here" (c on a branch in the tree or a frozen view, ctrl+b on the
-// selected row), which calls [client.HeadMover.ContinueFrom]; the next
+// selected row), which sends a [client.ContinueFrom] intent; the next
 // prompt then continues from that entry, and the live view follows the
 // head, since the follower reports it.
 
@@ -415,17 +416,12 @@ func (m *Model) continueFrom(entry string) tea.Cmd {
 		m.relayout()
 		return nil
 	}
-	if m.head == nil {
-		m.err = "this client cannot move the agent's head; the tree is read only"
-		m.relayout()
-		return nil
-	}
-	ctl, ctx := m.head, m.ctx
-	m.busy = true // the head moves under the writer: no prompt meanwhile
+	act, ctx := m.act, m.ctx
+	m.moving = true // the head moves under the writer: no prompt meanwhile
 	m.inflight.Add(1)
 	return func() tea.Msg {
 		defer m.inflight.Done()
-		return continueMsg{entry: entry, err: ctl.ContinueFrom(ctx, entry)}
+		return continueMsg{entry: entry, err: act(ctx, client.ContinueFrom{EntryID: entry})}
 	}
 }
 

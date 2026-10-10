@@ -6,8 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ChristopherDavenport/agentturn"
-
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -24,7 +22,7 @@ type FeedErrMsg struct {
 	Err    error
 }
 
-// Attach follows the record rec and the live stream of c ([client.Live])
+// Attach follows the record rec and the live stream of src ([client.Live])
 // into a [view.View] and delivers each resulting [view.Model] through
 // send, as a [ModelMsg]; with a program, send is its Send method.
 //
@@ -39,7 +37,7 @@ type FeedErrMsg struct {
 // The live stream subscribes before Attach returns, so a run started
 // right after misses no event. The returned function waits for both
 // goroutines, which stop when ctx is done.
-func Attach(ctx context.Context, c agentturn.Control, rec client.Record, send func(tea.Msg)) (wait func()) {
+func Attach(ctx context.Context, rec client.Record, src client.Source, send func(tea.Msg)) (wait func()) {
 	var (
 		mu sync.Mutex
 		v  = view.New()
@@ -51,7 +49,7 @@ func Attach(ctx context.Context, c agentturn.Control, rec client.Record, send fu
 		apply()
 		send(ModelMsg{Model: v.Model()})
 	}
-	live := client.Live(ctx, c)
+	live := client.Live(ctx, src)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()

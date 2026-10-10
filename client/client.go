@@ -1,18 +1,21 @@
-// Package client is what a terminal client reads an agent through. The
-// agent is driven through agentturn's control contract,
-// [agentturn.Control], whose Subscribe is the live stream: what is not
-// committed yet. The session is read through a [Record]: what is.
+// Package client is what a terminal client reads an agent through and
+// what it says to it. The view takes two things in: an event [Source],
+// the agent's live stream (what is not committed yet), and a [Record],
+// its session (what is). It sends one thing out: [Intent]s, plain values
+// a [Controller] acts on. The view holds nothing it can act on; whoever
+// gives it a Controller decides what an intent does, and what follows
+// reaches the view as events and record entries, never as a return value.
 //
 // The rule behind the split is that the record is the truth for everything
 // committed and live events carry only what is not. Package
 // [github.com/ChristopherDavenport/agentconsole/view] turns the two
 // streams into what a client renders, and package
 // [github.com/ChristopherDavenport/agentconsole/console] runs the
-// terminal client over a control and a record.
+// terminal client over them.
 //
-// Nothing here runs an agent. The control is the loop's or the kit's
-// (agentkit's Kit.Control in process, agentturn's front/control Dial over
-// a wire), and the record is a store's.
+// agentturn's types are the vocabulary: its events, its answers. An
+// [agentturn.Control] is a Source, and [Direct] maps intents onto one,
+// the only call of a Control in agentconsole's library packages.
 package client
 
 import (
@@ -20,6 +23,7 @@ import (
 	"iter"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
@@ -27,18 +31,18 @@ import (
 // it has no price for.
 type Cost func(model string, usage openresponses.Usage) (float64, bool)
 
-// HeadMover is a control that moves the agent's head, which
-// [agentturn.Control] does not: agentkit's Control does. A client
-// asserts it on the control it was given, and without it shows the
-// session's tree read only.
-type HeadMover interface {
-	// ContinueFrom moves the agent's head to the entry: the next prompt
-	// continues the conversation from there, on a branch of the
-	// session. It is how a client acts on what it saw in the tree, and
-	// the one control that moves the record's head. It is refused while
-	// a run goes. The move is on the record, so a follower sees the head
-	// move and a reopened session resumes there.
-	ContinueFrom(ctx context.Context, entryID string) error
+// Source is where the view's live events come from: agentturn's events
+// and the agent's state. An [agentturn.Control] is one (in process,
+// agentkit's Kit.Control; over a wire, agentturn's front/control Dial);
+// the view needs nothing else of it.
+type Source interface {
+	// Subscribe calls fn with each event, in order, until unsubscribe,
+	// as [agentturn.Control.Subscribe] does: a question still waiting is
+	// sent a new subscriber first, and no other past event.
+	Subscribe(fn func(context.Context, agentturn.Event) error) (unsubscribe func())
+	// State is the agent's state now: whether a run goes, the calls
+	// that wait.
+	State() agentturn.State
 }
 
 // Record is the agent's session as a client follows it.

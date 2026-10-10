@@ -15,12 +15,15 @@ an agent run in process. The ACP backend is a later step. The design is in
 
 ## As a library
 
-The client is a view: it drives an agent through agentturn's control
-contract (`agentturn.Control`) and reads its session through a
-`client.Record`, and runs nothing itself. A coding agent embeds it by
-handing `console.Run` the two. For an agent assembled with agentkit,
-the kit's `Control` does what a front needs around each run (the
-recorder on the run's context, the engine's release of held calls,
+The client is a view, not a controller. It reads the session through a
+`client.Record` and the agent's events through a `client.Source`, and
+sends what the user asks (a prompt, a steer, an answer, a reply, an
+abort, a head move) as intents to a `client.Controller`, which decides
+what they do. A coding agent embeds it by handing `console.Run` the
+three. For an agent driven through agentturn's control contract, the
+control is the source and `client.Direct` maps intents onto it; with
+agentkit, the kit's `Control` does what a front needs around each run
+(the recorder on the run's context, the engine's release of held calls,
 the head move with the skill grants):
 
 ```go
@@ -47,24 +50,26 @@ rec, err := client.RecordOf(kit.Recorder())
 if err != nil {
 	return err
 }
-return console.Run(ctx, ctl, rec) // returns when the user quits; the store is then safe to close
+return console.Run(ctx, rec, ctl, client.Direct(ctl)) // returns when the user quits; the store is then safe to close
 ```
 
 Any `agentturn.Control` will do: a bare `*agentturn.Agent` with its
 `session.Recorder` attached, or a remote agent through agentturn's
 `front/control` (`control.Dial`), whose session a store client reads.
-A control that also moves the agent's head (`client.HeadMover`, which
-agentkit's `Control` is) lets the tree continue from an entry; without
-it the tree is read only. The public packages are `console`, `client`,
-`view` and `toolview`; the terminal model and the record panes are
-internal, and none of them imports agentkit.
+`Direct` moves the head when the control has a `ContinueFrom` (agentkit's
+`Control` has) and refuses it otherwise, which the tree shows. A product
+with intents of its own to handle (answering some questions by rule,
+its own commands, recording who answered) writes its own `Controller`
+and may pass the rest to `Direct`. The public packages are `console`,
+`client`, `view` and `toolview`; the terminal model and the record panes
+are internal, and none of them imports agentkit.
 
 A call to a tool shows its name and its arguments as `key=value` pairs.
 To draw a tool's calls its own way (a command as a shell line, an edit
 as a diff), give the client a `toolview.Renderer` for it:
 
 ```go
-console.Run(ctx, ctl, rec, console.WithToolRenderers(toolview.Renderers{"bash": bashRenderer{}}))
+console.Run(ctx, rec, ctl, client.Direct(ctl), console.WithToolRenderers(toolview.Renderers{"bash": bashRenderer{}}))
 ```
 
 A renderer reads what the session records of a call (the arguments, the

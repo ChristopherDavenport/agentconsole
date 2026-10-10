@@ -47,8 +47,8 @@ func TestRunsUnderARealProgram(t *testing.T) {
 	defer pw.Close()
 	out := termtest.New(80, 20)
 	defer out.Close()
-	p := tea.NewProgram(tui.New(ctx, ag, record), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20), tea.WithColorProfile(colorprofile.ANSI))
-	wait := tui.Attach(ctx, ag, record, p.Send)
+	p := tea.NewProgram(tui.New(ctx, record, ag, client.Direct(ag)), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20), tea.WithColorProfile(colorprofile.ANSI))
+	wait := tui.Attach(ctx, record, ag, p.Send)
 	done := make(chan error, 1)
 	go func() { _, err := p.Run(); done <- err }()
 

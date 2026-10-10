@@ -7,18 +7,31 @@ versions may break the API.
 
 ## Unreleased
 
-- Changed: agentconsole is the view and runs nothing (#33). It drives an
-  agent through agentturn's control contract, `agentturn.Control`
-  (agentkit's `Kit.Control` in process, agentturn's `front/control`
-  `Dial` over a wire), and reads its session through a `client.Record`:
-  `console.Run(ctx, control, record, ...)`. The view reads agentturn's
-  events (`view.View.Live` takes an `agentturn.Event`), copied by
-  `client.Copy` and queued by `client.Live`, so it sees what they carry:
-  whether a pending call was only held, the part of a call a question is
-  about, whether a held call was dispatched before, what stopped a run.
-- Added: `client.HeadMover`, the control that moves the agent's head
-  (agentkit's `Control` is one); without it the tree is read only.
-  `client.RecordOf`, a `Record` over a `session.Recorder`'s store.
+- Changed: agentconsole is the view and is not the controller (#33,
+  #34). It takes the session through a `client.Record` and agentturn's
+  events through a `client.Source` (`Subscribe` and `State`, which an
+  `agentturn.Control` has), and sends what the user asks as intents to a
+  `client.Controller`: `console.Run(ctx, record, source, controller,
+  ...)`. The TUI keeps no runs of its own and nothing blocks on one:
+  whether a run goes, and a run's error, are the view's, from the
+  events. The view reads agentturn's events (`view.View.Live` takes an
+  `agentturn.Event`), copied by `client.Copy` and queued by
+  `client.Live`, so it sees what they carry: whether a pending call was
+  only held, the part of a call a question is about, whether a held call
+  was dispatched before, what stopped a run (`view.Turn.Cause`) and what
+  failed it (`view.Turn.Err`).
+- Added: the intents, plain values in `client`: `Prompt`, `Queue`
+  (steer or follow-up), `Abort`, `Answer` (the permission panel's),
+  `Reply` (a question's, the note included) and `ContinueFrom`. A
+  `client.Controller` returns promptly, nil or a refusal the client
+  shows. `client.Direct(control)` maps them onto an `agentturn.Control`:
+  a prompt or an answer returns once its run has started, or with the
+  error that kept it from starting; `ContinueFrom` goes to a control
+  with a `ContinueFrom` method (agentkit's) and is refused with
+  `client.ErrNoHeadMove` otherwise. A product writes its own controller
+  for intents it handles itself.
+- Added: `client.RecordOf`, a `Record` over a `session.Recorder`'s
+  store.
 - Added: the permission panel shows the part of a compound call the
   policy asked about (`view.Permission.Subject`) and says when a call
   was started before it was held and may have run

@@ -1,12 +1,15 @@
 // Package tui is the terminal client: a Bubble Tea model over the view
 // reconciler. It renders what [view.Model] says, committed rows plainly
 // and in-flight rows marked as such, and turns keys into
-// [agentturn.Control] calls.
+// [client.Intent]s it sends its [client.Controller]. It holds nothing it
+// can act on and keeps no runs of its own: whether a run goes is the
+// view's, from the events, with a mark between sending a prompt or an
+// answer and seeing its run start.
 //
 // # Concurrency
 //
-// Control.Prompt and Control.Resume block until the run ends, so they run
-// in tea.Cmds and report with a [runDoneMsg]. The view is fed by
+// The controller returns promptly; each intent is sent in a tea.Cmd and
+// reported with an [intentDoneMsg] when it is refused. The view is fed by
 // [Attach] on goroutines of its own and reaches the model only as
 // [ModelMsg] values, which share nothing with the view. The model itself
 // is touched by the program's goroutine alone.
@@ -48,9 +51,14 @@ const who = "human"
 // sideways.
 const inputMaxRows = 5
 
-// runDoneMsg says a Prompt or Answer returned: the run ended, or never
-// started.
-type runDoneMsg struct{ err error }
+// intentDoneMsg says the controller took an intent, or refused it with
+// err. kind names the intent for the error line.
+type intentDoneMsg struct {
+	kind string
+	// run is set for a Prompt or an Answer, which the sent mark waits on.
+	run bool
+	err error
+}
 
 // replyDoneMsg is a reply to a question sent, or the error sending it.
 type replyDoneMsg struct {
@@ -60,11 +68,9 @@ type replyDoneMsg struct {
 
 // Model is the Bubble Tea model.
 type Model struct {
-	ctx context.Context
-	ctl agentturn.Control
-	// head moves the agent's head, when the control can
-	// ([client.HeadMover]); nil leaves the tree read only.
-	head     client.HeadMover
+	ctx      context.Context
+	src      client.Source
+	act      client.Controller
 	verified bool
 
 	view view.Model // the latest the feed sent
@@ -90,10 +96,17 @@ type Model struct {
 	width, height int
 	ready         bool
 
-	// busy is set from the moment a Prompt or Answer is started until it
-	// returns, which the view's own state lags at both ends.
-	busy     bool
+	// sent is set from the moment a Prompt or an Answer is sent until
+	// the view shows a run started after it (its run ID moves off
+	// sentFrom) or the controller refuses it. moving is set while a head
+	// move is sent. aborting is set from an Abort until the view shows
+	// no run.
+	sent     bool
+	sentFrom string
+	moving   bool
 	aborting bool
+	// runErr is the last run's error the view reported, shown once.
+	runErr error
 	// err is the last run's error, cleared by the next action. feedErr is
 	// the record or live stream that stopped: the view is frozen from then
 	// on and nothing the user does revives it, so it is never cleared.
@@ -102,8 +115,8 @@ type Model struct {
 	err     string
 	feedErr string
 
-	// inflight counts the Prompt, Resume and Queue commands that have
-	// not returned, for [Model.Drain].
+	// inflight counts the intents sent that the controller has not
+	// answered, for [Model.Drain].
 	inflight sync.WaitGroup
 	// steers hands what is typed while a run goes to Control.Queue, in
 	// the order it was typed.
@@ -189,11 +202,11 @@ func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(m *Model) { m.tools = maps.Clone(rs) }
 }
 
-// New returns the model for an agent driven through c, whose session rec
-// follows. The caller starts [Attach] with the program's Send; ctx ends
-// the runs the model starts. When c is a [client.HeadMover] the tree
-// continues from an entry; otherwise it is read only.
-func New(ctx context.Context, c agentturn.Control, rec client.Record, options ...Option) *Model {
+// New returns the model of the agent whose session rec follows and whose
+// events src gives, which sends what the user asks to act. The caller
+// starts [Attach] with the program's Send; ctx is the context of every
+// intent.
+func New(ctx context.Context, rec client.Record, src client.Source, act client.Controller, options ...Option) *Model {
 	in := textarea.New()
 	in.Prompt = "> "
 	in.Placeholder = "say something (ctrl+/ for keys)"
@@ -205,7 +218,8 @@ func New(ctx context.Context, c agentturn.Control, rec client.Record, options ..
 	in.Focus()
 	m := &Model{
 		ctx:      ctx,
-		ctl:      c,
+		src:      src,
+		act:      act,
 		verified: rec.Verified(),
 		rec:      rec,
 		vp:       viewport.New(),
@@ -226,9 +240,6 @@ func New(ctx context.Context, c agentturn.Control, rec client.Record, options ..
 		inspOpts = append(inspOpts, inspect.WithCost(m.cost))
 	}
 	m.insp = inspect.New(rec, inspOpts...)
-	if h, ok := c.(client.HeadMover); ok {
-		m.head = h
-	}
 	return m
 }
 
@@ -247,7 +258,46 @@ func inputStyles(isDark bool) textarea.Styles {
 // is dark, which the terminal is asked for.
 func (m *Model) Init() tea.Cmd { return tea.Batch(textarea.Blink, tea.RequestBackgroundColor) }
 
-func (m *Model) running() bool { return m.busy || m.view.Turn.State == view.Running }
+func (m *Model) running() bool {
+	return m.sent || m.moving || m.view.Turn.State == view.Running
+}
+
+// intend sends in to the controller in a command; the result comes back
+// as an [intentDoneMsg] named kind.
+func (m *Model) intend(kind string, in client.Intent) tea.Cmd {
+	act, ctx := m.act, m.ctx
+	_, run := in.(client.Prompt)
+	if _, ok := in.(client.Answer); ok {
+		run = true
+	}
+	if run {
+		m.sent, m.sentFrom = true, m.view.Turn.RunID
+	}
+	m.inflight.Add(1)
+	return func() tea.Msg {
+		defer m.inflight.Done()
+		return intentDoneMsg{kind: kind, run: run, err: act(ctx, in)}
+	}
+}
+
+// settle reads the run's state off a new view: the sent mark goes once a
+// run started after it, aborting once no run goes, and a run's error is
+// shown once.
+func (m *Model) settle() {
+	t := m.view.Turn
+	if m.sent && (t.State == view.Running || t.RunID != m.sentFrom) {
+		m.sent = false
+	}
+	if m.aborting && !m.running() {
+		m.aborting = false
+	}
+	if t.Err != nil && t.Err != m.runErr {
+		m.runErr = t.Err
+		if !errors.Is(t.Err, context.Canceled) {
+			m.err = "run: " + t.Err.Error()
+		}
+	}
+}
 
 // spin starts the spinner's ticks when a run goes and they are not
 // coming already. They stop at the first tick after the run.
@@ -303,6 +353,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ModelMsg:
 		m.view = msg.Model
+		m.settle()
 		m.syncPermissions()
 		m.syncQuestions()
 		m.keepCursor()
@@ -341,7 +392,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, m.wantPane()
 	case continueMsg:
-		m.busy = false
+		m.moving = false
 		m.err = ""
 		if msg.err != nil {
 			m.err = "continue from here: " + msg.err.Error()
@@ -377,26 +428,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.feedErr = msg.Stream + " stream: " + msg.Err.Error()
 		m.relayout()
 		return m, nil
-	case runDoneMsg:
-		m.busy, m.aborting = false, false
-		// The answers stay: the view may not have caught up with the run
-		// yet and still list the permissions just answered. They are
-		// dropped when the view stops listing them (syncPermissions), or
-		// here when the answer failed and has to be given again.
-		if msg.err != nil {
+	case intentDoneMsg:
+		if msg.err == nil {
+			return m, nil
+		}
+		// A refusal: nothing was started. The answers given have to be
+		// given again, and the sent mark goes; the answers otherwise
+		// stay until the view stops listing their permissions
+		// (syncPermissions), since it lags the run's start.
+		if msg.run {
+			m.sent = false
 			clear(m.decided)
 		}
-		m.refusing = false
-		m.err = ""
-		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
-			m.err = "run: " + msg.err.Error()
+		if msg.kind == "abort" {
+			m.aborting = false
 		}
+		m.refusing = false
+		m.err = msg.kind + ": " + msg.err.Error()
 		m.in.Focus()
 		m.relayout()
-		// The run's end unpins the session pane, which waits for it;
-		// ask for its data now, since the final ModelMsg may have been
-		// handled while the run's Prompt was still returning, with the
-		// pane still pinned.
 		return m, m.wantPane()
 	case tea.BackgroundColorMsg:
 		m.in.SetStyles(inputStyles(msg.IsDark()))
@@ -473,27 +523,36 @@ type InterruptMsg struct{}
 func (m *Model) interrupt() (tea.Model, tea.Cmd) {
 	if m.running() && !m.aborting {
 		m.aborting = true
-		m.ctl.Abort()
+		cmd := m.intend("abort", client.Abort{})
 		m.relayout()
-		return m, nil
+		return m, cmd
 	}
 	return m, tea.Quit
 }
 
-// Drain waits until every Prompt and Answer the model started has
-// returned, or timeout, and reports whether they all did. A host calls it
-// after the program ends and the run was aborted, before it closes the
-// store the run is writing its end to. Call it only once the program has
-// stopped sending messages to the model.
+// Drain waits until the controller has answered every intent the model
+// sent and the source reports no run going, or timeout, and reports
+// whether both happened. A host calls it after the program ends and the
+// run was aborted, before it closes the store the run is writing its end
+// to. Call it only once the program has stopped sending messages to the
+// model.
 func (m *Model) Drain(timeout time.Duration) bool {
 	done := make(chan struct{})
 	go func() { m.inflight.Wait(); close(done) }()
+	deadline := time.After(timeout)
 	select {
 	case <-done:
-		return true
-	case <-time.After(timeout):
+	case <-deadline:
 		return false
 	}
+	for m.src.State().Running {
+		select {
+		case <-deadline:
+			return false
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	return true
 }
 
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -705,8 +764,12 @@ func (m *Model) reply(q agentturn.Question, r agenttool.Answer) (tea.Model, tea.
 	m.replied[q.ID] = true
 	m.err = ""
 	m.relayout()
-	ctl := m.ctl
-	return m, func() tea.Msg { return replyDoneMsg{id: q.ID, err: ctl.Reply(q.ID, r)} }
+	act, ctx := m.act, m.ctx
+	m.inflight.Add(1)
+	return m, func() tea.Msg {
+		defer m.inflight.Done()
+		return replyDoneMsg{id: q.ID, err: act(ctx, client.Reply{ID: q.ID, Answer: r})}
+	}
 }
 
 func refusal(p view.Permission, reason string) agentturn.Answer {
@@ -733,16 +796,10 @@ func (m *Model) decide(a agentturn.Answer) (tea.Model, tea.Cmd) {
 	for _, p := range m.view.Permissions {
 		answers = append(answers, m.decided[p.CallID])
 	}
-	m.busy = true
 	m.err = ""
+	cmd := m.intend("answer", client.Answer{Answers: answers})
 	m.relayout()
-	ctl, ctx := m.ctl, m.ctx
-	m.inflight.Add(1)
-	return m, tea.Batch(func() tea.Msg {
-		defer m.inflight.Done()
-		_, err := ctl.Resume(ctx, answers...)
-		return runDoneMsg{err: err}
-	}, m.spin())
+	return m, tea.Batch(cmd, m.spin())
 }
 
 // send takes the input: what the submit function makes of it, or without
@@ -946,7 +1003,7 @@ func (m *Model) frame() string {
 	if !m.ready {
 		return "starting..."
 	}
-	state, now := turnState(m.view, m.busy, m.aborting), time.Now()
+	state, now := turnState(m.view, m.sent || m.moving, m.aborting), time.Now()
 	status := feedNote(m.feedErr) + statusText(m.view, sessionTime(m.view, state, now), m.verified, m.cost)
 	if m.note != "" {
 		status += " | " + m.note

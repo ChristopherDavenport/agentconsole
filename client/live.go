@@ -11,20 +11,20 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 )
 
-// Live subscribes to c when it is called, not when the result is first
-// ranged over, so a client that calls it and then starts a run misses
-// nothing, and yields what the view reads of each event, copied
+// Live subscribes to src when it is called, not when the result is
+// first ranged over, so a client that calls it and then starts a run
+// misses nothing, and yields what the view reads of each event, copied
 // ([Copy]) inside the subscriber. Past events are not replayed, except
-// the questions still waiting, which [agentturn.Control.Subscribe] sends
-// a new subscriber first; a run already going is read from c's State.
+// the questions still waiting, which a Source sends a new subscriber
+// first; a run already going is read from src's State.
 //
 // Events queue without bound until the caller takes them: an in-process
 // agent's delivery is a barrier, and a slow client must not stall the
 // run or the recorder. The subscription ends when ctx is done or the
 // caller stops ranging.
-func Live(ctx context.Context, c agentturn.Control) iter.Seq2[agentturn.Event, error] {
+func Live(ctx context.Context, src Source) iter.Seq2[agentturn.Event, error] {
 	q := &queue{wake: make(chan struct{}, 1)}
-	unsub := c.Subscribe(func(_ context.Context, ev agentturn.Event) error {
+	unsub := src.Subscribe(func(_ context.Context, ev agentturn.Event) error {
 		if ev, ok := Copy(ev); ok {
 			q.push(ev)
 		}

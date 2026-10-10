@@ -111,7 +111,7 @@ func run() error {
 		return err
 	}
 
-	err = console.Run(ctx, ctl, record)
+	err = console.Run(ctx, record, ctl, client.Direct(ctl))
 	if err == nil {
 		fmt.Fprintln(os.Stderr, "session", rec.SessionID())
 	}

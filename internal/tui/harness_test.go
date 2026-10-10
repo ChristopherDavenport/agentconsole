@@ -306,12 +306,12 @@ func newAppFrom(t *testing.T, start starter, build func(context.Context, *sessio
 	if wrap != nil {
 		driven = wrap(ctl)
 	}
-	a.m = tui.New(ctx, driven, record, append([]tui.Option{tui.WithCopier(func(text string) {
+	a.m = tui.New(ctx, record, driven, client.Direct(driven), append([]tui.Option{tui.WithCopier(func(text string) {
 		a.copyMu.Lock()
 		defer a.copyMu.Unlock()
 		a.copies = append(a.copies, text)
 	})}, opts...)...)
-	a.wait = tui.Attach(ctx, driven, record, func(msg tea.Msg) {
+	a.wait = tui.Attach(ctx, record, driven, func(msg tea.Msg) {
 		if _, ok := msg.(tui.ModelMsg); ok {
 			time.Sleep(time.Duration(a.feedDelay.Load()))
 		}

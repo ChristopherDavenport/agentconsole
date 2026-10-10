@@ -75,7 +75,7 @@ func startKit(t *testing.T, kopts []agentkit.Option, opts ...console.Option) *ri
 	r := &rig{t: t, agent: ag, ctl: ctl, in: pw, out: termtest.New(80, 20), done: make(chan error, 1)}
 	t.Cleanup(func() { r.out.Close() })
 	opts = append([]console.Option{console.WithInput(pr), console.WithOutput(r.out), console.WithoutSignalHandler(), console.WithWindowSize(80, 20)}, opts...)
-	go func() { r.done <- console.Run(ctx, ctl, record, opts...) }()
+	go func() { r.done <- console.Run(ctx, record, ctl, client.Direct(ctl), opts...) }()
 	return r
 }
 

@@ -14,19 +14,24 @@ committed, and live events carry only what is not committed yet.
   the public ones and calls `console.Run`. Adding an exported name is a
   decision for the plan's "Decided in implementation", since embedders
   pin it.
-- agentconsole is the view and runs nothing. The agent is driven through
-  agentturn's control contract, `agentturn.Control` (agentkit's
-  `Kit.Control` in process, agentturn's `front/control` `Dial` over a
-  wire), and its live stream is that contract's `Subscribe`. What a run
-  needs around it (the recorder on its context, the engine's release of
-  held calls, a question's elicitor, the head move's skill grants) is
-  the kit's. No library package imports agentkit; the binary and tests
-  do.
-  - `client`: what the client reads through. `Record` (the session),
-    `HeadMover` (the optional control that moves the head), `Live`
-    (a control's events, copied, queued), `Copy` (what the view keeps of
-    an event), `RecordOf` (a `Record` over a `session.Recorder`'s
-    store), `Cost`.
+- agentconsole is the view and is not the controller. It takes the
+  record (`client.Record`) and agentturn's events (`client.Source`) in,
+  and sends what the user asks out as intents (`client.Intent`) to a
+  `client.Controller`, which decides what they do; it holds nothing it
+  can act on. agentturn's events and answers are its vocabulary, types
+  only. `client.Direct` maps intents onto an `agentturn.Control`
+  (agentkit's `Kit.Control` in process, agentturn's `front/control`
+  `Dial` over a wire) and is the only call of a Control in the library
+  packages. What a run needs around it (the recorder on its context, the
+  engine's release of held calls, a question's elicitor, the head move's
+  skill grants) is the kit's. No library package imports agentkit; the
+  binary and tests do.
+  - `client`: what the client reads through and says. `Record` (the
+    session), `Source` (the events and the state), the intents
+    (`Prompt`, `Queue`, `Abort`, `Answer`, `Reply`, `ContinueFrom`) and
+    `Controller`, `Direct`, `Live` (a source's events, copied, queued),
+    `Copy` (what the view keeps of an event), `RecordOf` (a `Record`
+    over a `session.Recorder`'s store), `Cost`.
   - `view`: the reconciler. A pure model: record `Change`s and
     agentturn's events in, what a client renders out. No goroutines, no
     I/O, no terminal.
@@ -34,7 +39,7 @@ committed, and live events carry only what is not committed yet.
     `console.Run`. A renderer reads a `view.Call` (the record's facts
     about the call and its tool's schema), never the tool, and returns
     lines with roles; the TUI styles them.
-  - `console`: `Run(ctx, control, record, ...Option)`, the program, the feeds,
+  - `console`: `Run(ctx, record, source, controller, ...Option)`, the program, the feeds,
     signals and the drain at exit. The input is the embedder's:
     `WithSubmit` hands it each submitted line to decide what it is.
   - `internal/inspect`: the record-detail panes, computed on demand from
@@ -78,8 +83,11 @@ committed, and live events carry only what is not committed yet.
 
 - The view is fed on goroutines under one lock (`tui.Attach`); the model
   only ever receives `ModelMsg` values and touches no view state.
-- `Prompt` and `Resume` block: they run in tea.Cmds and end with a
-  `runDoneMsg`.
+- The TUI keeps no runs of its own. An intent is sent in a tea.Cmd and
+  the controller answers promptly: taken, or refused with an error the
+  TUI shows. Whether a run goes is the view's, from the events and the
+  source's State, with a mark between sending a prompt or an answer and
+  seeing its run start. Nothing blocks on a run.
 - Tests drive `Update` and read `View()` against a real agent with a
   scripted model; no teatest.
 - Anything that reads the session beyond the feed's steps (the tree's
@@ -87,8 +95,9 @@ committed, and live events carry only what is not committed yet.
   `Record.Read`. Calling the feed from `Update` would deadlock: a step
   sends its model while holding the feed's lock, and the program's
   goroutine would be waiting for that lock.
-- Viewing is local and continuing moves the head (`HeadMover.ContinueFrom`,
-  a rebase and a leaf label, when the control has it): see the plan.
+- Viewing is local and continuing sends a `ContinueFrom` intent (with
+  `Direct`, the control's head move, a rebase and a leaf label, when it
+  has one); a refusal is shown. See the plan.
 
 ## Everyday commands
 
@@ -119,8 +128,9 @@ where the Go environment sets `-mod=mod`.
 Headless, offline and under `-race`: a scripted model (an
 `openresponses.Streamer` built on the emitter), a store from
 `agentsession`, a real `agentturn.Agent` with a real recorder, driven
-through a kit's `Control` (or bare, or over `front/control` in
-`httptest`). Assert
+through `client.Direct` over a kit's `Control` (or a bare agent, or
+`front/control` in `httptest`); or no agent at all, a source fed events
+by hand and a controller that keeps the intents. Assert
 the rendered model at each step, not the event stream. A test that runs
 the program over a pipe reads the screen through `internal/termtest`,
 never the bytes written: the renderer writes only the cells that change,

@@ -107,6 +107,9 @@ type Turn struct {
 	// that ended it, a refusal), and "" otherwise. It is the live end's:
 	// the record does not hold it.
 	Cause agentturn.StopCause
+	// Err is what failed the last run, when it ended with
+	// [agentturn.ReasonError], and nil otherwise: the live end's.
+	Err error
 	// Attempt is the number of the model call that failed and is being
 	// retried, 0 when none is.
 	Attempt int
@@ -977,7 +980,7 @@ func (v *View) flush(runID string) {
 }
 
 // Live applies a live event: one of agentturn's, as
-// [agentturn.Control.Subscribe] delivers it and [client.Copy] copies it.
+// a [client.Source] delivers it and [client.Copy] copies it.
 // The view keeps what it is given, so an event must share nothing the
 // agent goes on changing. An event the view does not read is ignored.
 func (v *View) Live(ev agentturn.Event) {
@@ -1165,6 +1168,10 @@ func (v *View) permit(p Permission) {
 
 func (v *View) runEnded(e *agentturn.RunEnd) {
 	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld, v.turn.Cause = e.RunID, 0, 0, e.Withheld, e.Cause
+	v.turn.Err = nil
+	if e.Reason == agentturn.ReasonError {
+		v.turn.Err = e.Err
+	}
 	v.turn.State = Idle
 	v.liveFacts = e
 	v.liveEnded[e.RunID] = true

@@ -1056,22 +1056,67 @@ reads a command, an edit or a read as the JSON the model wrote.
   (agentturn's `front/control` commands), and the client sends nothing
   but what `fn` returns. The head move (`Control.ContinueFrom`) is not
   input and stays on the contract until the kit's control carries it.
-  (It does now: see "the view over agentturn's control".)
+  (It is an intent now: see "the view over agentturn's events, intents
+  out".)
 
-## Decided in implementation, the view over agentturn's control
+## Decided in implementation, the view over agentturn's events, intents out
 
-agentconsole#33, from dax's `docs/plans/proposals/agentconsole-view.md`.
-The client is the view and runs nothing: what `client/native` and
-`client/kitbackend` did around a run is agentturn's and agentkit's now.
+agentconsole#33 and #34, from dax's
+`docs/plans/proposals/agentconsole-view.md`. The client is the view and
+is not the controller: it takes the record and agentturn's events in,
+sends intents out to whoever controls it, and holds nothing it can act
+on. What `client/native` and `client/kitbackend` did around a run is
+agentturn's and agentkit's now.
 
-- **`console.Run(ctx, c agentturn.Control, rec client.Record, ...)`.**
-  `tui.New` and `tui.Attach` take the same two. `client.Backend`,
-  `client.Control`, `client.LiveEvent` and its event types,
-  `FromEvent`, `Question`, `Reply` and the two backend packages are
-  gone. `Record` stays as it was: the view's own reading of the record.
+- **Why intents.** dax drives every front through its own controller:
+  `Drive` answers some questions by rule, its slash commands are its
+  own, an answer is recorded as the person's, and `dax attach` forwards
+  to `control.Dial`. A view that held an `agentturn.Control` would make
+  each of those a wrapper around the control the view calls; with
+  intents the product's controller is the one place they are decided,
+  and the view is the same over any of them.
+- **`console.Run(ctx, rec client.Record, src client.Source, act
+  client.Controller, ...)`.** `tui.New` and `tui.Attach` take the same.
+  `client.Source` is `Subscribe` and `State`, which an
+  `agentturn.Control` has; the view names only the Source.
+  `client.Backend`, `client.Control`, `client.LiveEvent` and its event
+  types, `FromEvent`, `Question`, `Reply` and the two backend packages
+  are gone. `Record` stays as it was: the view's own reading of the
+  record.
+- **Intents are plain values.** `client.Prompt{Items}`,
+  `Queue{Mode, Items}` (a steer or a follow-up), `Abort{}`,
+  `Answer{Answers}` (the permission panel's answers, the run's resume),
+  `Reply{ID, Answer}` (a question's answer, its Note the user's words)
+  and `ContinueFrom{EntryID}`. A `client.Controller` is
+  `func(ctx, Intent) error` and returns promptly: nil says the intent
+  was taken, an error is a refusal the TUI shows. What happens next
+  arrives as events and record entries, never as a return value.
+- **The TUI keeps no runs.** Runs are not tea.Cmds that block on
+  Prompt or Resume any more. Whether a run goes is the view's (the
+  events, `Turn.State`), with one mark of the TUI's own: sent, from a
+  Prompt or an Answer until the view shows a run started after it (its
+  run ID moved) or the controller refused it. A run's error is the
+  view's too (`Turn.Err`, from a run end with `ReasonError`), shown once.
+  An abort is the `Abort` intent; aborting lasts until the view shows no
+  run. `Drain` waits for the intents sent to be answered and for the
+  source's State to say no run goes; `Run` sends `Abort` at exit before
+  it drains.
+- **`client.Direct(c agentturn.Control)`** is the default controller
+  and the only call of a Control in the library packages. Prompt and
+  Answer start `c.Prompt` and `c.Resume` on a goroutine under the
+  intent's context and return once the run has started (a run_start
+  seen through a subscription to c) or the call failed before starting
+  (`agentturn.ErrRunning`, say); an error after the start reaches the
+  view in the run's end. Queue, Abort and Reply are c's own.
+  ContinueFrom goes to c when it has a `ContinueFrom(ctx, entryID)`
+  method (agentkit's `Control` has) and is refused with
+  `client.ErrNoHeadMove` otherwise. A run_start seen first may be
+  another client's run, in which case a refusal of this one is lost; it
+  is the price of returning before the run ends, and over one agent with
+  one person at the keys it does not arise.
 - **The view reads agentturn's events.** `View.Live` takes an
-  `agentturn.Event`. The live stream is `Control.Subscribe`, through
-  `client.Live(ctx, c)`, which subscribes when called, copies each
+  `agentturn.Event`. The live stream is the Source's `Subscribe`, through
+  `client.Live(ctx, src)`, which subscribes when called, copies each
   event in the subscriber (`client.Copy`) and queues without bound, as
   native's `Live` did. `Copy` clones items (the agent's accumulators)
   and leaves out what the view does not read and could be large: a run
@@ -1084,42 +1129,44 @@ The client is the view and runs nothing: what `client/native` and
 - **Questions are agentturn's.** `Model.Questions` is
   `[]agentturn.Question`, deduplicated by ID, since a subscriber that
   attaches while one waits is sent it again; `QuestionClosed` takes one
-  off. The TUI answers with `Control.Reply(id, agenttool.Answer)`: `y`
+  off. The TUI answers with a `Reply` intent: `y`
   allows, `a` allows with a note, `n` refuses with an optional reason,
   the typed words being the answer's `Note` either way. A nested
   call's question names the call (`AskedCall`) and, when its decision
   has one, the part asked about. A question with a form to fill
   (`Elicitation.Schema`) can only be refused here, and a URL question
   shows its URL.
-- **Moving the head is optional.** `client.HeadMover`
-  (`ContinueFrom(ctx, entryID)`) is asserted on the control;
-  agentkit's `Control` has it. Without it the tree is read only and
-  `c` says so, which is what a client over `front/control` gets until
-  the head move is a command there.
+- **Moving the head is an intent.** The tree's continue key sends
+  `ContinueFrom` and shows a refusal: `Direct` over a bare agent or
+  over `front/control` refuses it until the head move is a command
+  there.
 - **The permission panel reads the run's end.** A pending call whose
   decision only held it beside another call's question
   (`ToolDecision.Held`) is not asked about while the live end of the
   viewed line's last run is in hand, on the live path and once the
   record's end entry has landed: the answers to the batch decide it,
-  and agentkit's `Control.Resume` releases it through the engine. This
+  and agentkit's `Control.Resume`, behind `Direct`, releases it through
+  the engine. This
   is the first part of agentconsole#9. Without that end (a restart),
   the record cannot tell a held call from an asked one, and every
-  pending call is asked about, as `Control.Resume` needs. A question
+  pending call is asked about, as agentkit's `Control.Resume` needs. A question
   shows its decision's `Subject`, the part of a compound call it is
   about, unless the reason names it already; the record does not hold
   it, so a permission read from the record alone has none. A call
   dispatched before it was held (`PendingCall.Dispatched`, or a
   dispatch entry on the record) says it may have run
-  (`Permission.MayHaveRun`). Answers go through `Control.Resume`.
+  (`Permission.MayHaveRun`). The answers leave as one `Answer` intent.
 - **The stop cause is the turn's.** `Turn.Cause` is the live end's
   `StopCause`, cleared by the next run; the status line says "last run
   stopped: ..." for it, after "last reply withheld" which it does not
   repeat.
-- **Steer and follow-up are `Queue`.** A steer is
-  `Control.Queue(ctx, agentturn.QueueSteer, ...)`. `console.Submit` and
+- **Steer and follow-up are `Queue`.** A steer is a `Queue` intent with
+  `agentturn.QueueSteer`. `console.Submit` and
   `tui.Submission` gain `FollowUp`, queued with `QueueFollowUp`; a
   submission with more than one of a prompt, a steer and a follow-up is
-  refused. The queued entry is written before `Queue` returns by
+  refused. `WithSubmit` stays as it was: the embedder decides what a
+  typed line is, and the TUI turns the submission into `Prompt` or
+  `Queue` intents. The queued entry is written before `Queue` returns by
   agentkit's `Control`; a bare agent writes it at its queued event.
 - **`client.RecordOf(rec)`** is the glue left: a `Record` over a
   `session.Recorder`'s store, followed on the same store value, verified,
@@ -1127,9 +1174,12 @@ The client is the view and runs nothing: what `client/native` and
   `Record`, and `control.Dial` is a `Control`.
 - **The binary drives a `Kit.Control`.** `cmd/agentconsole` builds a kit
   over the recorder it opened (`agentkit.WithRecorder`), attaches the
-  recorder and hands `console.Run` the kit's control. No library package
-  imports agentkit; the tests do, and run the TUI over a kit's control,
-  over a bare agent and over `front/control` in `httptest`.
+  recorder and hands `console.Run` the kit's control as the source and
+  `client.Direct` of it as the controller. No library package imports
+  agentkit; the tests do, and run the TUI through `Direct` over a kit's
+  control, over a bare agent and over `front/control` in `httptest`,
+  and with no agent at all: a source fed events by hand and a
+  controller that keeps the intents.
 - **Left for later.** A response's usage before its entry lands (the
   status line counts the record's alone, so a running turn's tokens
   appear once its response entry does) and a turn's inputs

@@ -9,6 +9,8 @@ import (
 
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 // Line is a line the user submitted in the input.
@@ -128,14 +130,8 @@ func (m *Model) submitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 
 // prompt starts a run with items.
 func (m *Model) prompt(items ...openresponses.Item) tea.Cmd {
-	m.busy = true
-	ctl, ctx := m.ctl, m.ctx
-	m.inflight.Add(1)
-	return tea.Batch(func() tea.Msg {
-		defer m.inflight.Done()
-		_, err := ctl.Prompt(ctx, items...)
-		return runDoneMsg{err: err}
-	}, m.spin())
+	cmd := m.intend("run", client.Prompt{Items: items})
+	return tea.Batch(cmd, m.spin())
 }
 
 // nonEmpty counts the lists that hold an item.
