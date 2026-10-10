@@ -5,6 +5,19 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Added: `console.WithSubmit`, which hands each line the user submits to
+  the program running the client, which decides what it is: a prompt
+  (`Submit.Prompt`), a steer (`Submit.Steer`) or neither, with a reply
+  shown over the input (`Submit.Reply`). `console.Line` carries the text
+  and whether a run was going. The function runs off the program's
+  goroutine, one line at a time; a line submitted meanwhile is shown
+  waiting, and an error is shown with the line given back to the input.
+  Without the option a line is a prompt or a steer, as before. The
+  client gives a slash no meaning of its own: a product's commands are
+  the product's.
+
 ## v0.0.9 - 2026-10-06
 
 - Changed: the model's messages are labelled "agent", not "assistant",

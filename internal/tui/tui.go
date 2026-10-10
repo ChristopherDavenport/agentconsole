@@ -105,6 +105,16 @@ type Model struct {
 	// the order it was typed.
 	steers *steerQueue
 
+	// submit decides what a submitted line is (WithSubmit); nil makes it
+	// a prompt or a steer. waiting are the lines it has not been handed
+	// yet, handling whether it has one now and handled that line, and
+	// answer the rows of its last reply (submit.go).
+	submit   func(context.Context, Line) (Submission, error)
+	waiting  []string
+	handling bool
+	handled  string
+	answer   []string
+
 	// decided are the answers given so far to the permissions out, by call.
 	decided map[string]agentturn.Answer
 	// refusing is set while the reason for a refusal is typed.
@@ -351,6 +361,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.relayout()
 		return m, nil
+	case submitDoneMsg:
+		return m.submitDone(msg)
 	case FeedErrMsg:
 		m.feedErr = msg.Stream + " stream: " + msg.Err.Error()
 		m.relayout()
@@ -702,28 +714,26 @@ func (m *Model) decide(a agentturn.Answer) (tea.Model, tea.Cmd) {
 	}, m.spin())
 }
 
-// send takes the input: a prompt when idle, a steer while a run goes.
+// send takes the input: what the submit function makes of it, or without
+// one a prompt when idle and a steer while a run goes.
 func (m *Model) send() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.in.Value())
 	if text == "" {
 		return m, nil
 	}
 	m.in.Reset()
+	if m.submit != nil {
+		return m.submitted(text)
+	}
 	item := openresponses.UserText(text)
+	m.err = ""
 	if m.running() {
-		m.err = ""
 		m.relayout()
 		return m, m.steer(text, item)
 	}
-	m.busy = true
-	m.err = ""
+	cmd := m.prompt(item)
 	m.relayout()
-	ctl, ctx := m.ctl, m.ctx
-	m.inflight.Add(1)
-	return m, tea.Batch(func() tea.Msg {
-		defer m.inflight.Done()
-		return runDoneMsg{err: ctl.Prompt(ctx, item)}
-	}, m.spin())
+	return m, cmd
 }
 
 // relayout sizes the parts and refills the viewport, keeping it at the
@@ -751,7 +761,7 @@ func (m *Model) relayout() {
 	if m.err != "" {
 		used++
 	}
-	used += len(m.queuedLines())
+	used += len(m.queuedLines()) + len(m.submitLines())
 	m.vp.SetWidth(m.width)
 	m.vp.SetHeight(max(m.height-used, 1))
 	if m.screen == screenKeys {
@@ -910,6 +920,9 @@ func (m *Model) frame() string {
 	// What waits to join the conversation sits under the run it waits
 	// on, over the input it was typed in.
 	parts = append(parts, m.queuedLines()...)
+	// What the submit function has not answered, and its last reply,
+	// sit over the input too: neither is on the record.
+	parts = append(parts, m.submitLines()...)
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))

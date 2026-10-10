@@ -1013,6 +1013,50 @@ reads a command, an edit or a read as the JSON the model wrote.
   `Renderers`, `Line`, `Span`, `Role` and its six values, `S`, `Text`,
   `Line.String`), `view.Call.Schema` and `console.WithToolRenderers`.
 
+## Decided in implementation, submitted lines
+
+- **The input is the embedder's.** What a submitted line means is the
+  product's to say, not the client's: dax has commands of its own
+  (model, reasoning, MCP servers, session info) that its REPL takes as
+  slash lines, and a line typed into this client used to go to the
+  agent whatever it said. `console.WithSubmit(fn)` hands each line to
+  the program running the client, as `console.Line` (the text and
+  whether a run was going), and `fn` returns a `console.Submit`: a
+  prompt, a steer, or neither, with a reply shown over the input. The
+  client gives a slash no meaning: a command is the product's, and so
+  is how it is spelled. Without the option nothing changes.
+- **The client still starts the run.** `fn` returns a decision rather
+  than calling `Control.Prompt` itself, so the client sets its busy
+  state before the run's first event, as it does for a prompt it starts
+  on its own; the spinner, the steer queue and ctrl+c read it. A product
+  that does more (switch the model, then prompt) does the rest in `fn`.
+  A submission with both a prompt and a steer is refused: the line
+  would reach the model twice. So is a prompt while a run goes: the
+  agent would refuse it, and its refusal, ending like a run, would clear
+  the busy state of the run that goes.
+- **One line at a time, in order.** `fn` runs in a command, off the
+  program's goroutine, since a product's command may block (starting an
+  MCP server). A line submitted while one is with `fn` waits, and is
+  handed over once the one before has been acted on, so a prompt the
+  first started makes `Running` true for the second. Both show over the
+  input ("sending: ...", "waiting: ..."), dimmed, since neither is on the
+  record. An error is shown and the line given back to an empty input,
+  as a failed steer's is.
+- **A reply is not on the record.** It is the product's answer to its
+  own command, shown dimmed over the input until the next line is
+  submitted, at most a third of the screen (twelve rows), the rest
+  counted. It never enters the conversation, which is the record's.
+- **It outlives the contract.** The client is narrowing to a view of the
+  record over agentturn's control contract (dax's
+  `docs/plans/proposals/agentconsole-view.md`): `Run` taking a control
+  and a record in place of a `Backend`. `WithSubmit` is an option of
+  `Run`, not a method of the contract, and its prompt and steer go
+  through whichever control the client drives, so it carries over
+  unchanged; over a wire a product's commands are its own to send
+  (agentturn's `front/control` commands), and the client sends nothing
+  but what `fn` returns. The head move (`Control.ContinueFrom`) is not
+  input and stays on the contract until the kit's control carries it.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
