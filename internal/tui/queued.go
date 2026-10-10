@@ -7,14 +7,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
-// steerQueue keeps the steers typed and not yet handed to the backend.
-// Each is written to the record by Control.Steer, off the program's
-// goroutine, and one command per steer pops the oldest while it holds
-// send, so two typed in quick succession reach the record in the order
-// they were typed.
+// steerQueue keeps the steers and follow-ups typed and not yet handed
+// to the controller. Each is sent as a Queue intent, off the program's
+// goroutine, and one command per input pops the oldest while it holds
+// send, so two typed in quick succession are queued in the order they
+// were typed.
 type steerQueue struct {
 	send  sync.Mutex
 	mu    sync.Mutex
@@ -23,23 +26,25 @@ type steerQueue struct {
 
 type steerItem struct {
 	text  string
+	mode  agentturn.QueueMode
 	items []openresponses.Item
 }
 
-// steerDoneMsg is a steer handed to the backend; err says it was not
+// steerDoneMsg is a steer or follow-up handed to the controller; err says it was not
 // queued, and text is what was typed.
 type steerDoneMsg struct {
 	text string
 	err  error
 }
 
-// steer queues items, typed as text, into the run in a command. What
-// waits is shown from the record, once the queued entry Control.Steer
-// writes lands.
-func (m *Model) steer(text string, items ...openresponses.Item) tea.Cmd {
-	q, ctl, ctx := m.steers, m.ctl, m.ctx
+// steer queues items, typed as text, into the run in a command, as mode
+// says: a steer or a follow-up. What waits is shown from the record,
+// once the queued entry lands (agentkit's Control writes it before its
+// Queue returns).
+func (m *Model) steer(text string, mode agentturn.QueueMode, items ...openresponses.Item) tea.Cmd {
+	q, act, ctx := m.steers, m.act, m.ctx
 	q.mu.Lock()
-	q.items = append(q.items, steerItem{text: text, items: items})
+	q.items = append(q.items, steerItem{text: text, mode: mode, items: items})
 	q.mu.Unlock()
 	m.inflight.Add(1)
 	return func() tea.Msg {
@@ -50,7 +55,7 @@ func (m *Model) steer(text string, items ...openresponses.Item) tea.Cmd {
 		next := q.items[0]
 		q.items = q.items[1:]
 		q.mu.Unlock()
-		if err := ctl.Steer(ctx, next.items...); err != nil {
+		if err := act(ctx, client.Queue{Mode: next.mode, Items: next.items}); err != nil {
 			return steerDoneMsg{text: next.text, err: err}
 		}
 		return steerDoneMsg{}

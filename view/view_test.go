@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
@@ -55,10 +56,10 @@ func itemEntry(item openresponses.Item, resp string) *agentsession.ItemEntry {
 
 func (l *log) stream(run, resp string, item openresponses.Item, done bool) {
 	if done {
-		l.v.Live(&client.ItemCompleted{RunID: run, ResponseID: resp, Item: item})
+		l.v.Live(&agentturn.ItemEnd{RunID: run, ResponseID: resp, Item: item})
 		return
 	}
-	l.v.Live(&client.ItemUpdated{RunID: run, ResponseID: resp, Item: item})
+	l.v.Live(&agentturn.ItemUpdate{RunID: run, ResponseID: resp, Item: item})
 }
 
 func liveRows(m Model) (n int) {
@@ -72,7 +73,7 @@ func liveRows(m Model) (n int) {
 
 func TestOverlayIsDroppedWhenItsEntryLands(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "hel"), false)
 	if m := l.v.Model(); len(m.Rows) != 1 || !m.Rows[0].Live || !m.Rows[0].Open {
 		t.Fatalf("streaming: %+v", m.Rows)
@@ -90,13 +91,13 @@ func TestOverlayIsDroppedWhenItsEntryLands(t *testing.T) {
 
 func TestEntryBeforeTheLiveEventLeavesNoGhost(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "hel"), false)
 	l.append(itemEntry(msg("m1", "assistant", "hello"), "resp1"))
 	// The follower beat the live consumer: what the stream still has to
 	// say about the item is stale.
 	l.stream("run1", "resp1", msg("m1", "assistant", "hello"), true)
-	l.v.Live(&client.ItemOpened{RunID: "run1", ResponseID: "resp1", Item: msg("m1", "assistant", "hello")})
+	l.v.Live(&agentturn.ItemStart{RunID: "run1", ResponseID: "resp1", Item: msg("m1", "assistant", "hello")})
 	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
 		t.Fatalf("rows = %+v, want the committed one alone", m.Rows)
 	}
@@ -104,9 +105,9 @@ func TestEntryBeforeTheLiveEventLeavesNoGhost(t *testing.T) {
 
 func TestUnnamedItemKeepsItsOverlayUntilResponseEnd(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "", msg("m1", "assistant", "hi"), true)
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp1"}})
 	m := l.v.Model()
 	if len(m.Rows) != 1 || !m.Rows[0].Live || m.Rows[0].ResponseID != "resp1" {
 		t.Fatalf("after response_end, before the entry: %+v", m.Rows)
@@ -125,11 +126,11 @@ func TestRunEndFlushesOnlyWhenTheRecordHasTheEndToo(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			l := newLog(t)
-			l.v.Live(&client.RunStarted{RunID: "run1"})
+			l.v.Live(&agentturn.RunStart{RunID: "run1"})
 			l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
 			l.stream("run1", "resp1", msg("m1", "assistant", "orphan"), true)
 			end := func() { l.append(agentsession.NewRunEnd("run1", "done", "", nil)) }
-			live := func() { l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone}) }
+			live := func() { l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonDone}) }
 			if entryFirst {
 				end()
 				if liveRows(l.v.Model()) != 1 {
@@ -156,10 +157,10 @@ func TestRunEndFlushesOnlyWhenTheRecordHasTheEndToo(t *testing.T) {
 // before their entries exist.
 func TestNextRunDoesNotDropWhatTheRecordHasNotDelivered(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "pending entry"), true)
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
-	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
 	if m := l.v.Model(); len(m.Rows) != 1 {
 		t.Fatalf("run1's row was dropped before its entry landed: %+v", m.Rows)
 	}
@@ -175,8 +176,8 @@ func TestNextRunDoesNotDropWhatTheRecordHasNotDelivered(t *testing.T) {
 // Settling a run leaves no state behind.
 func TestSettledRunLeavesNoState(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonDone})
 	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
 	if len(l.v.liveEnded) != 0 || len(l.v.endSeen) != 0 {
 		t.Errorf("settled run left state: %d live ends, %d entry ends", len(l.v.liveEnded), len(l.v.endSeen))
@@ -187,10 +188,10 @@ func TestSettledRunLeavesNoState(t *testing.T) {
 // the run after it, which lands behind everything the first wrote.
 func TestNextRunStartEntrySettlesARunWithNoEndEntry(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "lost"), true)
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonError})
-	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonError})
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
 	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
 	if m := l.v.Model(); liveRows(m) != 0 {
 		t.Fatalf("the orphan outlived the next run's start entry: %+v", m.Rows)
@@ -218,7 +219,7 @@ func TestRunEndStateIsBounded(t *testing.T) {
 
 func TestAnonymousAndOutputItemsAreNotOverlaid(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "", openresponses.UserText("no id"), true)
 	l.stream("run1", "", openresponses.NewFunctionCallOutput("c1", "out"), true)
 	if m := l.v.Model(); len(m.Rows) != 0 {
@@ -229,20 +230,20 @@ func TestAnonymousAndOutputItemsAreNotOverlaid(t *testing.T) {
 func TestCallLifecycleAndKeys(t *testing.T) {
 	l := newLog(t)
 	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "upper", Arguments: `{"text":"a"}`}
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", call, true)
-	l.v.Live(&client.ToolOpened{RunID: "run1", CallID: "c1", Name: "upper", Args: call.Arguments})
+	l.v.Live(&agentturn.ToolStart{RunID: "run1", CallID: "c1", Name: "upper", Args: json.RawMessage(call.Arguments)})
 	if m := l.v.Model(); m.Rows[0].Call == nil || m.Rows[0].Call.State != CallOpen {
 		t.Fatalf("opened: %+v", m.Rows[0].Call)
 	}
-	l.v.Live(&client.ToolDispatched{RunID: "run1", CallID: "c1", Name: "upper"})
-	l.v.Live(&client.ToolProgress{RunID: "run1", CallID: "c1", Name: "upper", Partial: "50%"})
-	l.v.Live(&client.ToolOpened{RunID: "run1", CallID: "c2", Name: "child", Parent: "c1"})
+	l.v.Live(&agentturn.ToolDispatch{RunID: "run1", CallID: "c1", Name: "upper"})
+	l.v.Live(&agentturn.ToolUpdate{RunID: "run1", CallID: "c1", Name: "upper", Partial: agenttool.Text("50%")})
+	l.v.Live(&agentturn.ToolStart{RunID: "run1", CallID: "c2", Name: "child", Parent: "c1"})
 	m := l.v.Model()
 	if c := m.Rows[0].Call; c.State != CallRunning || c.Partial != "50%" || len(c.Children) != 1 || c.Children[0].Name != "child" {
 		t.Fatalf("running: %+v", c)
 	}
-	l.v.Live(&client.ToolFinished{RunID: "run1", CallID: "c1", Name: "upper", Result: "A"})
+	l.v.Live(&agentturn.ToolEnd{RunID: "run1", CallID: "c1", Name: "upper", Result: agenttool.Text("A")})
 	if c := l.v.Model().Rows[0].Call; c.State != CallEnded || c.Output != "A" || c.Committed {
 		t.Fatalf("ended, not committed: %+v", c)
 	}
@@ -260,7 +261,7 @@ func TestCallLifecycleAndKeys(t *testing.T) {
 		t.Fatalf("output landed: %+v / %+v", m.Rows, m.Rows[0].Call)
 	}
 	// And a late event for the answered call is stale.
-	l.v.Live(&client.ToolFinished{RunID: "run1", CallID: "c1", Name: "upper", Result: "A"})
+	l.v.Live(&agentturn.ToolEnd{RunID: "run1", CallID: "c1", Name: "upper", Result: agenttool.Text("A")})
 	if len(l.v.calls) != 0 {
 		t.Fatal("a late tool event revived an answered call")
 	}
@@ -269,17 +270,16 @@ func TestCallLifecycleAndKeys(t *testing.T) {
 func TestPermissionsLifecycle(t *testing.T) {
 	l := newLog(t)
 	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", call, true)
 	callEntry := l.append(itemEntry(call, "resp1"))
 	l.append(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete files?"))
-	l.v.Live(&client.ToolOpened{RunID: "run1", CallID: "c1", Name: "rm", Args: `{}`})
-	l.v.Live(&client.ToolFinished{RunID: "run1", CallID: "c1", Name: "rm", Deferred: true, Reason: "delete files?"})
+	l.v.Live(&agentturn.ToolStart{RunID: "run1", CallID: "c1", Name: "rm", Args: json.RawMessage(`{}`)})
+	l.v.Live(&agentturn.ToolEnd{RunID: "run1", CallID: "c1", Name: "rm", Deferred: true, Reason: "delete files?"})
 	if m := l.v.Model(); len(m.Permissions) != 1 || m.Permissions[0].Question != "delete files?" || m.Rows[0].Call.State != CallDeferred {
 		t.Fatalf("deferred: %+v", l.v.Model())
 	}
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{}`}, Reason: agentturn.PendingDeferred}}})
 	l.append(agentsession.NewRunEnd("run1", "input_required", "", []string{"c1"}))
 	m := l.v.Model()
 	if m.Turn.State != RequiresAction || len(m.Permissions) != 1 || m.Permissions[0].Question != "delete files?" {
@@ -290,7 +290,7 @@ func TestPermissionsLifecycle(t *testing.T) {
 	}
 
 	// The answer's run starts: nothing waits any more.
-	l.v.Live(&client.RunStarted{RunID: "run2", Resume: true})
+	l.v.Live(&agentturn.RunStart{RunID: "run2", Source: agentturn.SourceResume})
 	if m := l.v.Model(); len(m.Permissions) != 0 || m.Turn.State != Running {
 		t.Fatalf("resumed: %+v", m)
 	}
@@ -300,8 +300,7 @@ func TestPermissionClearedByTheOutputOfAnotherSource(t *testing.T) {
 	l := newLog(t)
 	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}
 	l.append(itemEntry(call, "resp1"))
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Reason: agentturn.PendingDeferred}}})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm"}, Reason: agentturn.PendingDeferred}}})
 	if m := l.v.Model(); m.Turn.State != RequiresAction {
 		t.Fatalf("turn = %v", m.Turn.State)
 	}
@@ -314,15 +313,15 @@ func TestPermissionClearedByTheOutputOfAnotherSource(t *testing.T) {
 
 func TestModelRetryDropsTheFailedTurnsItems(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1, Model: "m"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1, Request: openresponses.Request{Model: "m"}})
 	l.stream("run1", "resp1", msg("m1", "assistant", "partial"), false)
-	l.v.Live(&client.ModelRetrying{RunID: "run1", Turn: 1, Attempt: 1})
+	l.v.Live(&agentturn.ModelRetry{RunID: "run1", Turn: 1, Attempt: 1})
 	m := l.v.Model()
 	if liveRows(m) != 0 || m.Turn.Attempt != 1 {
 		t.Fatalf("after the retry: %+v, turn %+v", m.Rows, m.Turn)
 	}
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1, Model: "m"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1, Request: openresponses.Request{Model: "m"}})
 	if l.v.Model().Turn.Attempt != 0 {
 		t.Fatal("the attempt count outlived the retry")
 	}
@@ -330,7 +329,7 @@ func TestModelRetryDropsTheFailedTurnsItems(t *testing.T) {
 
 func TestResetRebuildsAndPrunesTheOverlay(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	kept := l.append(itemEntry(msg("m0", "user", "kept"), ""))
 	_ = kept
 	l.append(itemEntry(msg("m1", "assistant", "lost on reset"), "resp1"))
@@ -426,7 +425,7 @@ func marked(t *testing.T, item openresponses.Item, resp string) *agentsession.Cu
 // flagged, since it is not part of what the model saw.
 func TestItemKeptFromTheModelIsARow(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	r := &openresponses.ReasoningItem{ID: "rs1"}
 	l.stream("run1", "resp1", r, true)
 	if m := l.v.Model(); len(m.Rows) != 1 || !m.Rows[0].Live {
@@ -447,13 +446,13 @@ func TestItemKeptFromTheModelIsARow(t *testing.T) {
 // make it match what an earlier response landed.
 func TestReusedItemIDIsNotLandedBeforeTheStreamNamesItsResponse(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.stream("run1", "resp1", msg("msg_0", "assistant", "first"), true)
 	l.append(itemEntry(msg("msg_0", "assistant", "first"), "resp1"))
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp1"}})
 
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 2})
 	l.stream("run1", "", msg("msg_0", "assistant", "second"), false)
 	m := l.v.Model()
 	if len(m.Rows) != 2 || !m.Rows[1].Live || text(m.Rows[1].Item) != "second" {
@@ -475,11 +474,11 @@ func TestReusedItemIDIsNotLandedBeforeTheStreamNamesItsResponse(t *testing.T) {
 // after the stream has moved on.
 func TestEntryDoesNotDropAnotherResponsesOverlay(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.stream("run1", "resp1", msg("msg_0", "assistant", "first"), true)
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp1"}})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 2})
 	l.stream("run1", "", msg("msg_0", "assistant", "second"), false)
 	if liveRows(l.v.Model()) != 2 {
 		t.Fatal("setup: want both rows live")
@@ -497,24 +496,24 @@ func TestEntryDoesNotDropAnotherResponsesOverlay(t *testing.T) {
 // reusing the ID is shown.
 func TestUnnamedItemWhoseEntryLandedFirst(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.stream("run1", "resp1", msg("msg_0", "assistant", "one"), true)
 	l.append(itemEntry(msg("msg_0", "assistant", "one"), "resp1"))
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp1"}})
 
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 2})
 	l.append(itemEntry(msg("msg_0", "assistant", "two"), "resp2"))
 	l.stream("run1", "", msg("msg_0", "assistant", "two"), true)
 	if m := l.v.Model(); len(m.Rows) != 2 || liveRows(m) != 0 {
 		t.Fatalf("ghost of the entry that landed first: %+v", m.Rows)
 	}
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp2"})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp2"}})
 	if m := l.v.Model(); len(m.Rows) != 2 {
 		t.Fatalf("after response end: %+v", m.Rows)
 	}
 
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 3})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 3})
 	l.stream("run1", "", msg("msg_0", "assistant", "three"), false)
 	if m := l.v.Model(); len(m.Rows) != 3 || !m.Rows[2].Live {
 		t.Fatalf("the third reuse of the ID was hidden: %+v", m.Rows)
@@ -557,10 +556,9 @@ func TestBookmarkLabelDoesNotHideTheTip(t *testing.T) {
 func TestCutOffCallsAreNotPermissions(t *testing.T) {
 	l := newLog(t)
 	call := &openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "rm", Arguments: `{}`}
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.append(itemEntry(call, "resp1"))
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonAborted,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingAborted}}})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonAborted, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{}`}, Reason: agentturn.PendingAborted}}})
 	m := l.v.Model()
 	if m.Turn.State != Idle || len(m.Permissions) != 0 {
 		t.Fatalf("turn %v with permissions %+v, want idle and none", m.Turn.State, m.Permissions)
@@ -572,7 +570,7 @@ func TestCutOffCallsAreNotPermissions(t *testing.T) {
 		t.Errorf("call state = %v, want cut off", m.Rows[0].Call.State)
 	}
 	// The next run answers or abandons them: nothing is cut off then.
-	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
 	if m := l.v.Model(); len(m.CutOff) != 0 || m.Rows[0].Call.State == CallCutOff {
 		t.Errorf("cut off after the next run started: %+v", m.CutOff)
 	}
@@ -580,11 +578,8 @@ func TestCutOffCallsAreNotPermissions(t *testing.T) {
 
 func TestOnlyDeferredCallsOfAnInputRequiredRunAreQuestions(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []client.Pending{
-		{CallID: "c1", Name: "rm", Reason: agentturn.PendingDeferred},
-		{CallID: "c2", Name: "ls", Reason: agentturn.PendingAborted},
-	}})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm"}, Reason: agentturn.PendingDeferred}, {Call: &openresponses.FunctionCall{CallID: "c2", Name: "ls"}, Reason: agentturn.PendingAborted}}})
 	m := l.v.Model()
 	if len(m.Permissions) != 1 || m.Permissions[0].CallID != "c1" || len(m.CutOff) != 1 || m.CutOff[0].CallID != "c2" || m.Turn.State != RequiresAction {
 		t.Fatalf("permissions %+v, cut off %+v, turn %v", m.Permissions, m.CutOff, m.Turn.State)
@@ -597,14 +592,14 @@ func TestOnlyDeferredCallsOfAnInputRequiredRunAreQuestions(t *testing.T) {
 // of the run.
 func TestOpenRowGoesWhenItsResponseEnds(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.stream("run1", "resp1", msg("done", "assistant", "finished"), true)
 	l.stream("run1", "resp1", msg("held", "assistant", "withheld text"), false)
 	if liveRows(l.v.Model()) != 2 {
 		t.Fatal("setup")
 	}
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp1"}})
 	m := l.v.Model()
 	if liveRows(m) != 1 || client.ItemID(m.Rows[0].Item) != "done" {
 		t.Fatalf("rows after the response ended: %+v", m.Rows)
@@ -652,8 +647,7 @@ func TestAttachedViewShowsPendingPermissionsFromTheRecord(t *testing.T) {
 	}
 
 	// Live events refine it rather than double it: the same run ending.
-	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{"path":"/"}`, Reason: agentturn.PendingDeferred}}})
+	v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{"path":"/"}`}, Reason: agentturn.PendingDeferred}}})
 	if m := v.Model(); len(m.Permissions) != 1 || m.Permissions[0].Question != "delete the root?" {
 		t.Fatalf("after the live end: %+v", m.Permissions)
 	}
@@ -683,7 +677,7 @@ func TestAttachedViewShowsCutOffCallsFromTheRecord(t *testing.T) {
 func TestRecordPendingDoesNotOverrideALaterLiveRun(t *testing.T) {
 	s, _ := pendingLog(t, agentsession.ReasonInputRequired)
 	v := New()
-	v.Live(&client.RunStarted{RunID: "run2"})
+	v.Live(&agentturn.RunStart{RunID: "run2"})
 	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
 	if m := v.Model(); m.Turn.State != Running || len(m.Permissions) != 0 {
 		t.Fatalf("turn %v, permissions %+v: the record's older run overrode the live one", m.Turn.State, m.Permissions)
@@ -739,9 +733,8 @@ func TestHeadToAnotherBranchDropsItsPermissions(t *testing.T) {
 	add(agentsession.NewRunEnd("run1", agentsession.ReasonInputRequired, "", []string{"c1"}))
 
 	v := New()
-	v.Live(&client.RunStarted{RunID: "run1"})
-	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	v.Live(&agentturn.RunStart{RunID: "run1"})
+	v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{}`}, Reason: agentturn.PendingDeferred}}})
 	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
 	if m := v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
 		t.Fatalf("setup: %+v, %v", m.Permissions, m.Turn.State)
@@ -773,9 +766,8 @@ func TestHeadToAnotherBranchDropsItsPermissions(t *testing.T) {
 // whose end entry has not been delivered keeps what it said.
 func TestLiveRunEndIsKeptWhileTheRecordIsBehind(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Reason: agentturn.PendingDeferred}}})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm"}, Reason: agentturn.PendingDeferred}}})
 	l.v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: l.s})
 	if m := l.v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
 		t.Fatalf("the lagging record wiped the live permission: %+v, %v", m.Permissions, m.Turn.State)
@@ -787,11 +779,11 @@ func TestLiveRunEndIsKeptWhileTheRecordIsBehind(t *testing.T) {
 // later item reusing an ID is another item.
 func TestResponseEntrySettlesItsResponse(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.append(itemEntry(msg("msg_0", "assistant", "first"), "resp1"))
 	l.append(&agentsession.ResponseEntry{ResponseID: "resp1", Status: openresponses.ResponseStatusCompleted})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 2})
 	l.stream("run1", "", msg("msg_0", "assistant", "second"), false)
 	if m := l.v.Model(); len(m.Rows) != 2 || !m.Rows[1].Live {
 		t.Fatalf("the reused ID was hidden: %+v", m.Rows)
@@ -804,8 +796,8 @@ func TestResponseEntrySettlesItsResponse(t *testing.T) {
 // entry's and leave no second row.
 func TestResponseEntryAheadOfTheLiveStreamLeavesNoGhost(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.append(itemEntry(msg("msg_0", "assistant", "hi"), "resp1"))
 	l.append(&agentsession.ResponseEntry{ResponseID: "resp1", Status: openresponses.ResponseStatusCompleted})
 	l.stream("run1", "", msg("msg_0", "assistant", "hi"), false)
@@ -813,8 +805,8 @@ func TestResponseEntryAheadOfTheLiveStreamLeavesNoGhost(t *testing.T) {
 	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
 		t.Fatalf("ghost: %+v", m.Rows)
 	}
-	l.v.Live(&client.ResponseCompleted{RunID: "run1", ResponseID: "resp1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 2})
+	l.v.Live(&agentturn.ResponseEnd{RunID: "run1", Response: &openresponses.Response{ID: "resp1"}})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 2})
 	l.stream("run1", "", msg("msg_0", "assistant", "again"), false)
 	if m := l.v.Model(); len(m.Rows) != 2 {
 		t.Fatalf("after the stream moved on: %+v", m.Rows)
@@ -826,9 +818,9 @@ func TestResponseEntryAheadOfTheLiveStreamLeavesNoGhost(t *testing.T) {
 // history in must not settle that run.
 func TestResetReplayDoesNotSettleALiveEndedRun(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "pending"), true)
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonDone})
 
 	old := agentsession.New(agentsession.Header{})
 	for _, e := range []agentsession.Entry{
@@ -871,10 +863,9 @@ func TestHeadBeforeTheRunEndEntryKeepsTheLivePermission(t *testing.T) {
 	add(agentsession.NewDecision("c1", callEntry, agentsession.VerdictHold, "policy").WithReason("delete?"))
 
 	v := New()
-	v.Live(&client.RunStarted{RunID: "run1"})
-	v.Live(&client.ToolFinished{RunID: "run1", CallID: "c1", Name: "rm", Deferred: true, Reason: "delete?"})
-	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	v.Live(&agentturn.RunStart{RunID: "run1"})
+	v.Live(&agentturn.ToolEnd{RunID: "run1", CallID: "c1", Name: "rm", Deferred: true, Reason: "delete?"})
+	v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{}`}, Reason: agentturn.PendingDeferred}}})
 	for _, kind := range []agentsession.ChangeKind{agentsession.Snapshot, agentsession.Reset, agentsession.Head} {
 		v.Record(agentsession.Change{Kind: kind, Session: s, Leaf: callEntry})
 		if m := v.Model(); len(m.Permissions) != 1 || m.Turn.State != RequiresAction {
@@ -930,8 +921,8 @@ func TestRecordAheadByAWholeRunLeavesNoGhost(t *testing.T) {
 	l.append(itemEntry(msg("msg_0", "assistant", "m3 done"), "resp2"))
 	l.append(&agentsession.ResponseEntry{ResponseID: "resp2", Status: openresponses.ResponseStatusCompleted})
 	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.stream("run1", "", msg("msg_0", "assistant", "m3 do"), false)
 	l.stream("run1", "", msg("msg_0", "assistant", "m3 done"), true)
 	if m := l.v.Model(); len(m.Rows) != 1 || liveRows(m) != 0 {
@@ -950,8 +941,8 @@ func TestResetThenTheSameEntriesAgainLeavesNoGhost(t *testing.T) {
 	l.append(&agentsession.ResponseEntry{ResponseID: "resp2", Status: openresponses.ResponseStatusCompleted})
 	// The log is replaced by one that lacks both; the stream is mid-item.
 	l.v.Record(agentsession.Change{Kind: agentsession.Reset, Session: agentsession.New(agentsession.Header{})})
-	l.v.Live(&client.RunStarted{RunID: "run1"})
-	l.v.Live(&client.TurnStarted{RunID: "run1", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run1", Turn: 1})
 	l.stream("run1", "", msg("msg_0", "assistant", "m3 do"), false)
 	fresh := agentsession.New(agentsession.Header{})
 	l.s = fresh
@@ -966,8 +957,8 @@ func TestResetThenTheSameEntriesAgainLeavesNoGhost(t *testing.T) {
 // by their text: the live row of one is not the other's entry.
 func TestEntriesWithNoResponseAreMatchedByText(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run2"})
-	l.v.Live(&client.TurnStarted{RunID: "run2", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run2", Turn: 1})
 	l.stream("run2", "", msg("msg_0", "assistant", "m7 do"), false)
 	l.append(itemEntry(msg("msg_0", "assistant", "m3 done"), ""))
 	if m := l.v.Model(); len(m.Rows) != 2 || liveRows(m) != 1 {
@@ -980,10 +971,10 @@ func TestEntriesWithNoResponseAreMatchedByText(t *testing.T) {
 // took the log back, settles nothing.
 func TestAnOlderRunsStartEntryDoesNotSettleALaterRun(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run2"})
-	l.v.Live(&client.RunStarted{RunID: "run3"}) // as seen by the stream
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
+	l.v.Live(&agentturn.RunStart{RunID: "run3"}) // as seen by the stream
 	l.stream("run3", "resp3", msg("m13", "assistant", "pending"), true)
-	l.v.Live(&client.RunEnded{RunID: "run3", Reason: agentturn.ReasonDone})
+	l.v.Live(&agentturn.RunEnd{RunID: "run3", Reason: agentturn.ReasonDone})
 	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
 	if liveRows(l.v.Model()) != 1 {
 		t.Fatal("run2's start entry flushed run3's overlay")
@@ -1016,9 +1007,8 @@ func TestLiveRunEndForAnotherBranchShowsNoPermission(t *testing.T) {
 	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
 	v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: u})
 	// The stream's end of run1 arrives after the head moved off its line.
-	v.Live(&client.RunStarted{RunID: "run1"})
-	v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	v.Live(&agentturn.RunStart{RunID: "run1"})
+	v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{}`}, Reason: agentturn.PendingDeferred}}})
 	if m := v.Model(); len(m.Permissions) != 0 || m.Turn.State != Idle {
 		t.Fatalf("the viewed line holds no such call: %+v, %v", m.Permissions, m.Turn.State)
 	}
@@ -1074,8 +1064,8 @@ func TestLiveRowsAreOnlyShownUnderTheirOwnLine(t *testing.T) {
 	l.append(agentsession.NewRunEnd("run1", "done", "", nil))
 	l.append(agentsession.NewRunStart("run2", agentsession.SourceInput, ""))
 	u2 := l.append(itemEntry(msg("u2", "user", "two"), ""))
-	l.v.Live(&client.RunStarted{RunID: "run2"})
-	l.v.Live(&client.TurnStarted{RunID: "run2", Turn: 1})
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
+	l.v.Live(&agentturn.TurnStart{RunID: "run2", Turn: 1})
 	l.stream("run2", "resp2", msg("a2", "assistant", "streaming now"), false)
 	if m := l.v.Model(); len(m.Rows) != 4 || !m.Rows[3].Live {
 		t.Fatalf("setup: %+v", m.Rows)
@@ -1105,10 +1095,10 @@ func TestLiveRowsAreOnlyShownUnderTheirOwnLine(t *testing.T) {
 // build one, since every run it plays writes its end.)
 func TestReplayedStartOfALaterRunSettlesNothing(t *testing.T) {
 	l := newLog(t)
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp1", msg("m1", "assistant", "pending"), true)
-	l.v.Live(&client.RunEnded{RunID: "run1", Reason: agentturn.ReasonDone})
-	l.v.Live(&client.RunStarted{RunID: "run2"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonDone})
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
 	crashed := agentsession.New(agentsession.Header{})
 	for _, e := range []agentsession.Entry{
 		agentsession.NewRunStart("run1", agentsession.SourceInput, ""), // no end entry
@@ -1148,9 +1138,8 @@ func TestLiveEndOfARunOnAnotherBranchBeforeItsEndEntryShowsNoPermission(t *testi
 		t.Fatal(err)
 	}
 	v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: u1})
-	v.Live(&client.RunStarted{RunID: "run2"})
-	v.Live(&client.RunEnded{RunID: "run2", Reason: agentturn.ReasonInputRequired,
-		Pending: []client.Pending{{CallID: "c1", Name: "rm", Args: `{}`, Reason: agentturn.PendingDeferred}}})
+	v.Live(&agentturn.RunStart{RunID: "run2"})
+	v.Live(&agentturn.RunEnd{RunID: "run2", Reason: agentturn.ReasonInputRequired, Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1", Name: "rm", Arguments: `{}`}, Reason: agentturn.PendingDeferred}}})
 	if m := v.Model(); len(m.Permissions) != 0 || m.Turn.State != Idle {
 		t.Fatalf("the viewed line holds no such call: %+v, %v", m.Permissions, m.Turn.State)
 	}
@@ -1169,7 +1158,7 @@ func TestACallCarriesItsToolsSchemaWhereItSits(t *testing.T) {
 	l.append(itemEntry(&openresponses.FunctionCall{ID: "fc1", CallID: "c1", Name: "upper", Arguments: `{}`}, "resp1"))
 	l.append(itemEntry(&openresponses.FunctionCall{ID: "fc2", CallID: "c2", Name: "other", Arguments: `{}`}, "resp1"))
 	l.append(&agentsession.ConfigEntry{ToolsAdded: openresponses.Tools{tool(`{"v":2}`)}})
-	l.v.Live(&client.RunStarted{RunID: "run1"})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "resp2", &openresponses.FunctionCall{ID: "fc3", CallID: "c3", Name: "upper", Arguments: `{}`}, true)
 
 	m := l.v.Model()

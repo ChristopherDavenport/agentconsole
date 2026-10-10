@@ -15,16 +15,16 @@ import (
 // the steps were applied.
 type ModelMsg struct{ Model view.Model }
 
-// FeedErrMsg reports that a stream of the backend failed. The feed of
+// FeedErrMsg reports that the record or the live stream failed. The feed of
 // that stream has stopped.
 type FeedErrMsg struct {
 	Stream string
 	Err    error
 }
 
-// Attach follows the backend's record and live stream into a
-// [view.View] and delivers each resulting [view.Model] through send, as
-// a [ModelMsg]; with a program, send is its Send method.
+// Attach follows the record rec and the live stream of src ([client.Live])
+// into a [view.View] and delivers each resulting [view.Model] through
+// send, as a [ModelMsg]; with a program, send is its Send method.
 //
 // The view is not safe for concurrent use, and the two streams arrive on
 // goroutines of their own, so every step is applied under one lock, and
@@ -34,10 +34,10 @@ type FeedErrMsg struct {
 // until the follow takes its next step, so the change has to be applied
 // before the iterator is resumed, and the program runs behind it.
 //
-// Live subscribes before Attach returns, so a run started right after
-// misses no event. The returned function waits for both goroutines,
-// which stop when ctx is done.
-func Attach(ctx context.Context, be client.Backend, send func(tea.Msg)) (wait func()) {
+// The live stream subscribes before Attach returns, so a run started
+// right after misses no event. The returned function waits for both
+// goroutines, which stop when ctx is done.
+func Attach(ctx context.Context, rec client.Record, src client.Source, send func(tea.Msg)) (wait func()) {
 	var (
 		mu sync.Mutex
 		v  = view.New()
@@ -49,7 +49,7 @@ func Attach(ctx context.Context, be client.Backend, send func(tea.Msg)) (wait fu
 		apply()
 		send(ModelMsg{Model: v.Model()})
 	}
-	live := be.Live(ctx)
+	live := client.Live(ctx, src)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -65,7 +65,7 @@ func Attach(ctx context.Context, be client.Backend, send func(tea.Msg)) (wait fu
 	}()
 	go func() {
 		defer wg.Done()
-		for ch, err := range be.Record().Follow(ctx, "") {
+		for ch, err := range rec.Follow(ctx, "") {
 			if err != nil {
 				if ctx.Err() == nil {
 					send(FeedErrMsg{Stream: "record", Err: err})

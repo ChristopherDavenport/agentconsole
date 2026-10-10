@@ -15,7 +15,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 
-	"github.com/ChristopherDavenport/agentconsole/client/native"
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -23,6 +23,7 @@ import (
 // TestRunsUnderARealProgram drives the model with a tea.Program over a
 // pipe: bytes in as a terminal would send them, a reply streamed through
 // Attach and Send, and ctrl+c, with the agent idle, ending the program.
+// The control is a bare agent, which is an agentturn.Control too.
 func TestRunsUnderARealProgram(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -37,7 +38,7 @@ func TestRunsUnderARealProgram(t *testing.T) {
 	}
 	ag := agentturn.New(cfgWith(say(nil, nil, "**pong** [docs](https://example.com/docs)")))
 	defer rec.Attach(ag)()
-	be, err := native.New(ag, rec)
+	record, err := client.RecordOf(rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +47,8 @@ func TestRunsUnderARealProgram(t *testing.T) {
 	defer pw.Close()
 	out := termtest.New(80, 20)
 	defer out.Close()
-	p := tea.NewProgram(tui.New(ctx, be), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20), tea.WithColorProfile(colorprofile.ANSI))
-	wait := tui.Attach(ctx, be, p.Send)
+	p := tea.NewProgram(tui.New(ctx, record, ag, client.Direct(ag)), tea.WithInput(pr), tea.WithOutput(out), tea.WithContext(ctx), tea.WithWindowSize(80, 20), tea.WithColorProfile(colorprofile.ANSI))
+	wait := tui.Attach(ctx, record, ag, p.Send)
 	done := make(chan error, 1)
 	go func() { _, err := p.Run(); done <- err }()
 

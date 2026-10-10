@@ -7,7 +7,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 // Line is a line the user submitted in the input.
@@ -19,13 +22,15 @@ type Line struct {
 }
 
 // Submission is what the model does with a line, as the submit function
-// decided: a prompt starts a run, a steer queues into the one going, and
-// a reply is shown over the input. A reply may come with either; an
-// empty submission does nothing.
+// decided: a prompt starts a run, a steer queues into the one going, a
+// follow-up queues for when the run would stop, and a reply is shown
+// over the input. A reply may come with any one of them; an empty
+// submission does nothing.
 type Submission struct {
-	Prompt []openresponses.Item
-	Steer  []openresponses.Item
-	Reply  string
+	Prompt   []openresponses.Item
+	Steer    []openresponses.Item
+	FollowUp []openresponses.Item
+	Reply    string
 }
 
 // WithSubmit hands each line the user submits to fn, which decides what
@@ -44,9 +49,9 @@ type submitDoneMsg struct {
 	err  error
 }
 
-// errPromptAndSteer is a submission that asks for both: the line would go
-// to the model twice.
-var errPromptAndSteer = errors.New("both a prompt and a steer")
+// errPromptAndSteer is a submission that asks for more than one of a
+// prompt, a steer and a follow-up: the line would go to the model twice.
+var errPromptAndSteer = errors.New("more than one of a prompt, a steer and a follow-up")
 
 // errPromptRunning is a prompt while a run goes, which the agent would
 // refuse; its refusal would end the busy state of the run that goes.
@@ -91,7 +96,7 @@ func (m *Model) submitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 	err := msg.err
 	switch {
 	case err != nil:
-	case len(msg.s.Prompt) > 0 && len(msg.s.Steer) > 0:
+	case nonEmpty(msg.s.Prompt, msg.s.Steer, msg.s.FollowUp) > 1:
 		err = errPromptAndSteer
 	case len(msg.s.Prompt) > 0 && m.running():
 		err = errPromptRunning
@@ -113,7 +118,9 @@ func (m *Model) submitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 		case len(msg.s.Prompt) > 0:
 			cmds = append(cmds, m.prompt(msg.s.Prompt...))
 		case len(msg.s.Steer) > 0:
-			cmds = append(cmds, m.steer(msg.text, msg.s.Steer...))
+			cmds = append(cmds, m.steer(msg.text, agentturn.QueueSteer, msg.s.Steer...))
+		case len(msg.s.FollowUp) > 0:
+			cmds = append(cmds, m.steer(msg.text, agentturn.QueueFollowUp, msg.s.FollowUp...))
 		}
 	}
 	cmds = append(cmds, m.handleNext())
@@ -123,13 +130,19 @@ func (m *Model) submitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 
 // prompt starts a run with items.
 func (m *Model) prompt(items ...openresponses.Item) tea.Cmd {
-	m.busy = true
-	ctl, ctx := m.ctl, m.ctx
-	m.inflight.Add(1)
-	return tea.Batch(func() tea.Msg {
-		defer m.inflight.Done()
-		return runDoneMsg{err: ctl.Prompt(ctx, items...)}
-	}, m.spin())
+	cmd := m.intend("run", client.Prompt{Items: items})
+	return tea.Batch(cmd, m.spin())
+}
+
+// nonEmpty counts the lists that hold an item.
+func nonEmpty(lists ...[]openresponses.Item) int {
+	n := 0
+	for _, l := range lists {
+		if len(l) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // answerMaxRows is the most rows a reply takes over the input, and a

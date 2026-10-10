@@ -9,6 +9,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
@@ -731,10 +732,30 @@ func statusText(m view.Model, worked string, verified bool, cost client.Cost) st
 	if !verified {
 		parts = append(parts, "unverified")
 	}
-	if m.Turn.Withheld {
+	switch {
+	case m.Turn.Withheld:
 		parts = append(parts, "last reply withheld")
+	case m.Turn.Cause != "":
+		parts = append(parts, "last run stopped: "+causeText(m.Turn.Cause))
 	}
 	return strings.Join(parts, " | ")
+}
+
+// causeText says in words what stopped a run.
+func causeText(c agentturn.StopCause) string {
+	switch c {
+	case agentturn.StopMaxTurns:
+		return "turn limit"
+	case agentturn.StopHook:
+		return "by a hook"
+	case agentturn.StopGuard:
+		return "by a guard"
+	case agentturn.StopTerminate, agentturn.StopPartialTerminate:
+		return "a tool ended it"
+	case agentturn.StopRefused:
+		return "a refusal ended it"
+	}
+	return string(c)
 }
 
 // compactTokens shortens a token count for the status and run lines: the

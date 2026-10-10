@@ -7,14 +7,12 @@ require (
 	charm.land/bubbletea/v2 v2.0.10
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/ChristopherDavenport/agentkit v0.0.7
-	github.com/ChristopherDavenport/agentmemory v0.0.10
-	github.com/ChristopherDavenport/agentpolicy v0.0.11
+	github.com/ChristopherDavenport/agentkit v0.0.10
+	github.com/ChristopherDavenport/agentpolicy v0.0.15
 	github.com/ChristopherDavenport/agentsession v0.0.21
-	github.com/ChristopherDavenport/agentskill v0.0.11
-	github.com/ChristopherDavenport/agenttool v0.0.15
-	github.com/ChristopherDavenport/agentturn v0.0.16
-	github.com/ChristopherDavenport/agentturn/session v0.0.16
+	github.com/ChristopherDavenport/agenttool v0.0.22
+	github.com/ChristopherDavenport/agentturn v0.0.22
+	github.com/ChristopherDavenport/agentturn/session v0.0.22
 	github.com/ChristopherDavenport/openresponses v0.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8
@@ -24,8 +22,10 @@ require (
 )
 
 require (
-	github.com/ChristopherDavenport/agentsmd v0.0.2 // indirect
-	github.com/ChristopherDavenport/agenttool/mcpclient v0.0.15 // indirect
+	github.com/ChristopherDavenport/agentmemory v0.0.10 // indirect
+	github.com/ChristopherDavenport/agentskill v0.0.11 // indirect
+	github.com/ChristopherDavenport/agentsmd v0.0.3 // indirect
+	github.com/ChristopherDavenport/agenttool/mcpclient v0.0.22 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

@@ -1,18 +1,31 @@
-// Package console runs the terminal client over a [client.Backend]. It
-// is the one call an embedding program makes: build a backend (package
-// native for an agentturn.Agent, package kitbackend for an agentkit.Kit),
-// then Run.
+// Package console runs the terminal client: a view of an agent's record
+// and its events, which sends what the user asks as intents to a
+// controller. It is the one call an embedding program makes: give the
+// client a [client.Record] of the session, a [client.Source] of the
+// agent's events and a [client.Controller], then Run. For an agent driven
+// through agentturn's control contract (agentkit's Kit.Control in
+// process, agentturn's front/control Dial over a wire), the control is
+// the source and [client.Direct] the controller:
 //
-//	be, err := kitbackend.New(kit)
+//	agent := agentturn.New(kit.Config(), kit.AgentOptions()...)
+//	defer kit.Attach(agent)()
+//	ctl, err := kit.Control(agent)
 //	if err != nil {
 //		return err
 //	}
-//	defer be.Close()
-//	return console.Run(ctx, be)
+//	rec, err := client.RecordOf(kit.Recorder())
+//	if err != nil {
+//		return err
+//	}
+//	return console.Run(ctx, rec, ctl, client.Direct(ctl))
+//
+// A product with intents of its own to handle (answering some questions
+// by rule, recording an answer as a person's, forwarding to an agent
+// elsewhere) writes its own controller, and may hand the rest to Direct.
 //
 // Run owns the terminal for as long as it runs and does what the
-// agentconsole binary does: it follows the backend's record and live
-// streams into the view, turns an interrupt signal into the same thing
+// agentconsole binary does: it follows the record and the source's live
+// stream into the view, turns an interrupt signal into the same thing
 // ctrl+c is in raw mode (abort a run, quit when idle), and, once the
 // program ends, aborts a run that is still going and waits for it to
 // write its end before it returns, so the store can be closed behind it.
@@ -113,14 +126,16 @@ type Line struct {
 
 // Submit is what the client does with a submitted line. Prompt starts a
 // run with its items; Steer queues its items into the run that goes, or
-// the next one; Reply is shown over the input until the next line is
-// submitted, and is not on the record. A reply may come with a prompt or
-// a steer; a Submit with both a prompt and a steer is refused, and an
-// empty one does nothing.
+// the next one; FollowUp queues its items for when the run would stop,
+// or the next one; Reply is shown over the input until the next line is
+// submitted, and is not on the record. A reply may come with any one of
+// a prompt, a steer and a follow-up; a Submit with more than one is
+// refused, and an empty one does nothing.
 type Submit struct {
-	Prompt []openresponses.Item
-	Steer  []openresponses.Item
-	Reply  string
+	Prompt   []openresponses.Item
+	Steer    []openresponses.Item
+	FollowUp []openresponses.Item
+	Reply    string
 }
 
 // WithSubmit hands each line the user submits to fn, which decides what
@@ -136,20 +151,22 @@ func WithSubmit(fn func(ctx context.Context, l Line) (Submit, error)) Option {
 	return func(c *config) { c.submit = fn }
 }
 
-// Run runs the terminal client over be until the user quits, ctx is
-// done, or the program fails, and returns the program's error.
+// Run runs the terminal client over the session rec follows and the
+// events src gives, sending what the user asks to act, until the user
+// quits, ctx is done, or the program fails, and returns the program's
+// error. ctx is the context of every intent; with [client.Direct] a run
+// is under it.
 //
-// The backend's Record must be one the client can follow and read, and
-// its Live must subscribe when called (the contract says so):
-// Run attaches before it starts the program, so no event of the first
-// run is missed. Run does not close anything it did not open. The
-// backend, its store and the agent's recorder are the caller's, and
-// are safe to close once Run returns: the run it was driving has ended
-// or the drain timeout passed.
+// rec must be one the client can follow and read. Run subscribes to src
+// before it starts the program, so no event of the first run is missed.
+// Run does not close anything it did not open. The agent, its store and
+// its recorder are the caller's, and are safe to close once Run returns:
+// the run that went has ended, as src reports, or the drain timeout
+// passed.
 //
 // A canceled ctx ends the program with an error, as bubbletea's
 // WithContext does.
-func Run(ctx context.Context, be client.Backend, opts ...Option) error {
+func Run(ctx context.Context, rec client.Record, src client.Source, act client.Controller, opts ...Option) error {
 	cfg := config{drain: DefaultDrainTimeout, signals: true, warn: func(s string) { fmt.Fprintln(os.Stderr, "agentconsole:", s) }}
 	for _, o := range opts {
 		o(&cfg)
@@ -171,7 +188,7 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 			return tui.Submission(s), err
 		}))
 	}
-	m := tui.New(ctx, be, topts...)
+	m := tui.New(ctx, rec, src, act, topts...)
 	// In raw mode ctrl+c is a key. A signal from outside (kill, a parent's
 	// ctrl+c) is made the same thing: the program's own handling would
 	// end it with an error, without aborting the run.
@@ -201,12 +218,14 @@ func Run(ctx context.Context, be client.Backend, opts ...Option) error {
 			}
 		}()
 	}
-	wait := tui.Attach(ctx, be, p.Send)
+	wait := tui.Attach(ctx, rec, src, p.Send)
 	_, err := p.Run()
 	// A run may still be going (a second ctrl+c quits without waiting for
 	// an abort to land). Let it write its end before the caller closes
 	// the store; the context's cancel is the last resort.
-	be.Control().Abort()
+	// The abort's refusal has nowhere to be shown now; the drain says
+	// whether the run ended.
+	_ = act(ctx, client.Abort{})
 	if !m.Drain(cfg.drain) {
 		cfg.warn("a run did not end; closing the session as it is")
 	}

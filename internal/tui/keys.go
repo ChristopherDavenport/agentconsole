@@ -40,8 +40,8 @@ var keyGroups = []keyGroup{
 		{"Ctrl-B", "continue from the selected row"},
 		{"Esc", "clear the cursor and close the pane"},
 	}},
-	{"Permissions", [][2]string{
-		{"y", "approve the call"},
+	{"Permissions and questions", [][2]string{
+		{"y  a", "approve, or answer yes; a, on a question: with a note typed, Enter sends"},
 		{"n", "refuse it; type an optional reason, Enter refuses, Esc goes back"},
 	}},
 	{"Tree (Ctrl-T)", [][2]string{

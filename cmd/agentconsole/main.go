@@ -1,7 +1,9 @@
 // Command agentconsole is a terminal client that runs an agent in
 // process: a model behind an OpenAI-compatible Responses endpoint
-// (Ollama's /v1 by default), with its session recorded in a store the
-// client follows.
+// (Ollama's /v1 by default), assembled with agentkit and driven through
+// its Kit.Control, with its session recorded in a store the client
+// follows. It is the example of an embedder; the library packages do
+// not import agentkit.
 package main
 
 import (
@@ -11,12 +13,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/ChristopherDavenport/agentkit"
 	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/client/native"
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/console"
 )
 
@@ -65,38 +68,52 @@ func run() error {
 	if key := os.Getenv(*apiKeyEnv); key != "" {
 		clientOpts = append(clientOpts, openresponses.WithAPIKey(key))
 	}
-	cfg := agentturn.Config{
-		Model:        openresponses.NewClient(*baseURL, clientOpts...).AsAdapter(),
-		ModelName:    *model,
-		Instructions: *instructions,
-		MaxTurns:     *maxTurns,
+	kopts := []agentkit.Option{
+		agentkit.WithModel(openresponses.NewClient(*baseURL, clientOpts...).AsAdapter(), *model),
+		agentkit.WithMaxTurns(*maxTurns),
+		agentkit.WithRecorder(rec),
+	}
+	if *instructions != "" {
+		kopts = append(kopts, agentkit.WithInstructions(*instructions))
 	}
 	switch *tools {
 	case "none":
 	case "clock":
-		cfg.Tools = []agenttool.Tool{agenttool.New("clock", "the current date and time", func(context.Context, clockArgs) (string, error) {
+		kopts = append(kopts, agentkit.WithTools(agenttool.New("clock", "the current date and time", func(context.Context, clockArgs) (string, error) {
 			return time.Now().Format(time.RFC1123), nil
-		})}
+		})))
 	default:
 		return fmt.Errorf("unknown --tools %q, want none or clock", *tools)
 	}
 	if *confirm {
-		cfg.BeforeToolCall = func(_ context.Context, info agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+		kopts = append(kopts, agentkit.WithBeforeToolCall(func(_ context.Context, info agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
 			return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "Run " + info.Call.Name + "?"}, nil
-		}
+		}))
 	}
+	kit, err := agentkit.New(ctx, kopts...)
+	if err != nil {
+		return err
+	}
+	defer kit.Close()
 
-	ag := agentturn.New(cfg, seed...)
+	// The kit records into rec, which the client attaches: the recorder
+	// subscribes ahead of the client, so an event's entry is in the store
+	// before the client sees the event.
+	ag := agentturn.New(kit.Config(), append(kit.AgentOptions(), seed...)...)
 	detach := rec.Attach(ag)
 	defer detach()
-	be, err := native.New(ag, rec)
+	ctl, err := kit.Control(ag)
+	if err != nil {
+		return err
+	}
+	record, err := client.RecordOf(rec)
 	if err != nil {
 		return err
 	}
 
-	err = console.Run(ctx, be)
+	err = console.Run(ctx, record, ctl, client.Direct(ctl))
 	if err == nil {
-		fmt.Fprintln(os.Stderr, "session", be.SessionID())
+		fmt.Fprintln(os.Stderr, "session", rec.SessionID())
 	}
 	return err
 }

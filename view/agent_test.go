@@ -1,4 +1,4 @@
-package native_test
+package view_test
 
 import (
 	"context"
@@ -46,7 +46,7 @@ func TestEchoRoundTrip(t *testing.T) {
 	if m.Config != "echo" {
 		t.Errorf("config model = %q, want echo", m.Config)
 	}
-	if !r.be.Record().Verified() {
+	if !r.record.Verified() {
 		t.Error("the native record is not verified")
 	}
 }
@@ -192,7 +192,7 @@ func TestDeferredCallAsksAndAnswerResumes(t *testing.T) {
 	}
 
 	r.finish(r.start(func() error {
-		return r.ctl.Answer(r.ctx, agentturn.Approve("call_1").WithBy("test"))
+		return answer(r, agentturn.Approve("call_1").WithBy("test"))
 	}))
 	m = r.waitFor("the run resumed to its end", func(m view.Model) bool {
 		c := callRow(m, "call_1")
@@ -224,7 +224,7 @@ func TestRefusingADeferredCall(t *testing.T) {
 	r.finish(r.prompt("go"))
 	r.waitFor("the permission", func(m view.Model) bool { return len(m.Permissions) == 1 })
 	r.finish(r.start(func() error {
-		return r.ctl.Answer(r.ctx, agentturn.Refuse(openresponses.NewFunctionCallOutput("call_1", "not allowed")))
+		return answer(r, agentturn.Refuse(openresponses.NewFunctionCallOutput("call_1", "not allowed")))
 	}))
 	m := r.waitFor("the refusal committed", func(m view.Model) bool {
 		c := callRow(m, "call_1")
@@ -500,7 +500,7 @@ func TestLateAttachedViewSeesThePermission(t *testing.T) {
 	r.waitFor("the permission", func(m view.Model) bool { return len(m.Permissions) == 1 })
 
 	late := view.New()
-	for ch, err := range r.be.Record().Follow(r.ctx, "") {
+	for ch, err := range r.record.Follow(r.ctx, "") {
 		if err != nil {
 			t.Fatal(err)
 		}

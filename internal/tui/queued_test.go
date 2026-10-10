@@ -7,9 +7,8 @@ import (
 	"testing"
 
 	"github.com/ChristopherDavenport/agenttool"
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
-
-	"github.com/ChristopherDavenport/agentconsole/client"
 )
 
 // TestASteerIsShownQueuedUntilTheRunTakesIt steers twice while a tool is
@@ -49,7 +48,7 @@ func TestASteerIsShownQueuedUntilTheRunTakesIt(t *testing.T) {
 // its prompt.
 func TestAnInputQueuedWhileIdleWaitsForTheNextRun(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "ok")))
-	if err := a.be.Control().Steer(context.Background(), openresponses.UserText("later")); err != nil {
+	if err := a.ctl.Queue(context.Background(), agentturn.QueueSteer, openresponses.UserText("later")); err != nil {
 		t.Fatal(err)
 	}
 	a.waitFor("the input queued for the next run", has("queued for the next run: later", "idle"))
@@ -60,14 +59,10 @@ func TestAnInputQueuedWhileIdleWaitsForTheNextRun(t *testing.T) {
 	}
 }
 
-// failingSteer is a backend whose Steer cannot write the queued entry.
-type failingSteer struct{ client.Backend }
+// failingSteer is a control whose Queue cannot write the queued entry.
+type failingSteer struct{ agentturn.Control }
 
-func (b failingSteer) Control() client.Control { return failingControl{b.Backend.Control()} }
-
-type failingControl struct{ client.Control }
-
-func (failingControl) Steer(context.Context, ...openresponses.Item) error {
+func (failingSteer) Queue(context.Context, agentturn.QueueMode, ...openresponses.Item) error {
 	return errors.New("disk full")
 }
 
@@ -77,7 +72,7 @@ func (failingControl) Steer(context.Context, ...openresponses.Item) error {
 func TestASteerThatFailsSaysSoAndGivesTheTextBack(t *testing.T) {
 	g := newGates()
 	a := newAppWith(t, cfgWith(say(g, map[int]string{0: "mid"}, "first")), nil,
-		func(be client.Backend) client.Backend { return failingSteer{be} })
+		func(c agentturn.Control) agentturn.Control { return failingSteer{c} })
 	t.Cleanup(func() { g.release("mid") })
 
 	a.submit("start")

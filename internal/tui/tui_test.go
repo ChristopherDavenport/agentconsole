@@ -17,6 +17,7 @@ import (
 	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/openresponses"
 
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
 
@@ -485,7 +486,7 @@ func TestCtrlCAbortsARunAndQuitsWhenIdle(t *testing.T) {
 func TestAZeroSizeIsNotASize(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hi")))
 	a.mu.Lock()
-	m := tui.New(a.ctx, a.be)
+	m := tui.New(a.ctx, a.record, a.ctl, client.Direct(a.ctl))
 	a.mu.Unlock()
 	m.Update(tea.WindowSizeMsg{Width: 0, Height: 0})
 	if s := m.View().Content; s != "starting..." {
@@ -547,7 +548,7 @@ func TestFeedFailureStaysOnTheStatusLine(t *testing.T) {
 }
 
 // TestAnsweredPermissionIsNotOfferedAgainWhileTheViewLags: the run ends
-// (runDoneMsg) before the slow feed has told the view, which still lists
+// before the slow feed has told the view, which still lists
 // the permission just answered.
 func TestAnsweredPermissionIsNotOfferedAgainWhileTheViewLags(t *testing.T) {
 	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
