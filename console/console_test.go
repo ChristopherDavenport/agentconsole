@@ -6,33 +6,43 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ChristopherDavenport/agentkit"
+	"github.com/ChristopherDavenport/agentpolicy"
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
+	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/client/native"
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/console"
 	"github.com/ChristopherDavenport/agentconsole/internal/scripted"
 	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 )
 
-// rig is an agent, its recorder and a backend over a store, and a
-// console.Run on a pipe.
+// rig is an agent a kit assembles, its recorder over a store, the kit's
+// Control, and a console.Run on a pipe.
 type rig struct {
 	t     *testing.T
 	agent *agentturn.Agent
-	be    *native.Backend
+	ctl   *agentkit.Control
 	in    *io.PipeWriter
 	out   *termtest.Term
 	done  chan error
 }
 
 func start(t *testing.T, m *scripted.Model, opts ...console.Option) *rig {
+	t.Helper()
+	return startKit(t, []agentkit.Option{agentkit.WithModel(m, "scripted")}, opts...)
+}
+
+// startKit is start over a kit built with kopts.
+func startKit(t *testing.T, kopts []agentkit.Option, opts ...console.Option) *rig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -45,18 +55,27 @@ func start(t *testing.T, m *scripted.Model, opts ...console.Option) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ag := agentturn.New(agentturn.Config{Model: m, ModelName: "scripted"})
+	kit, err := agentkit.New(ctx, append(kopts, agentkit.WithRecorder(rec))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kit.Close() })
+	ag := agentturn.New(kit.Config(), kit.AgentOptions()...)
 	t.Cleanup(rec.Attach(ag))
-	be, err := native.New(ag, rec)
+	ctl, err := kit.Control(ag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := client.RecordOf(rec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pr, pw := io.Pipe()
 	t.Cleanup(func() { pw.Close() })
-	r := &rig{t: t, agent: ag, be: be, in: pw, out: termtest.New(80, 20), done: make(chan error, 1)}
+	r := &rig{t: t, agent: ag, ctl: ctl, in: pw, out: termtest.New(80, 20), done: make(chan error, 1)}
 	t.Cleanup(func() { r.out.Close() })
 	opts = append([]console.Option{console.WithInput(pr), console.WithOutput(r.out), console.WithoutSignalHandler(), console.WithWindowSize(80, 20)}, opts...)
-	go func() { r.done <- console.Run(ctx, be, opts...) }()
+	go func() { r.done <- console.Run(ctx, ctl, record, opts...) }()
 	return r
 }
 
@@ -230,4 +249,44 @@ func TestRunHandsALineToTheProgramRunningIt(t *testing.T) {
 	}
 	r.type_("ping\r")
 	r.waitScreen("pong")
+}
+
+// TestRunApprovesAPolicysQuestionFromTheTerminal: Run over a kit's
+// Control with a policy that asks about one tool. The permission is
+// shown, y approves it through the kit (the engine's release, the
+// person's decision on the record), and the tool's reply reaches the
+// screen.
+func TestRunApprovesAPolicysQuestionFromTheTerminal(t *testing.T) {
+	var ran atomic.Int32
+	danger := agenttool.New("danger", "needs approval", func(context.Context, struct{}) (string, error) {
+		ran.Add(1)
+		return "did it", nil
+	})
+	ask, err := agentpolicy.ParseRules("danger")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := startKit(t, []agentkit.Option{
+		agentkit.WithModel(scripted.New(scripted.Call("c1", "danger", `{}`), scripted.Say("tool said ok")), "scripted"),
+		agentkit.WithTools(danger),
+		agentkit.WithPolicy(agentpolicy.Policy{Ask: ask, Default: agentpolicy.Allow()}, nil),
+	})
+	r.type_("run it\r")
+	r.waitScreen("Permission requested")
+	if ran.Load() != 0 {
+		t.Fatal("the tool ran before approval")
+	}
+	r.type_("y")
+	r.waitScreen("tool said ok")
+	if ran.Load() != 1 {
+		t.Fatalf("tool ran %d times", ran.Load())
+	}
+	for r.agent.State().Running {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	r.type_("\x03")
+	if err := r.waitEnd(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
@@ -98,7 +99,7 @@ func TestAPromptAndASteerAtOnceIsRefused(t *testing.T) {
 	a := newAppWith(t, cfgWith(say(nil, nil, "unused")), nil, nil, tui.WithSubmit(both))
 
 	a.submit("twice")
-	s := a.waitFor("the refusal", has("submit: both a prompt and a steer", "> twice"))
+	s := a.waitFor("the refusal", has("submit: more than one of a prompt, a steer and a follow-up", "> twice"))
 	if prompted("x")(s) || strings.Contains(s, "unused") {
 		t.Errorf("the line reached the agent:\n%s", s)
 	}
@@ -172,4 +173,40 @@ func TestAPromptWhileARunGoesIsRefused(t *testing.T) {
 	if prompted("again")(s) || strings.Contains(s, "unused") {
 		t.Errorf("the second prompt reached the agent:\n%s", s)
 	}
+}
+
+// TestASubmitFunctionQueuesAFollowUp: a follow-up waits for the end of
+// the run, is listed as such, and is what the run takes when the model
+// would stop.
+func TestASubmitFunctionQueuesAFollowUp(t *testing.T) {
+	g := newGates()
+	follow := func(_ context.Context, l tui.Line) (tui.Submission, error) {
+		if l.Running {
+			return tui.Submission{FollowUp: []openresponses.Item{openresponses.UserText(l.Text)}}, nil
+		}
+		return tui.Submission{Prompt: []openresponses.Item{openresponses.UserText(l.Text)}}, nil
+	}
+	a := newAppWith(t, cfgWith(say(g, map[int]string{0: "mid"}, "first"), say(nil, nil, "second")), nil, nil, tui.WithSubmit(follow))
+	t.Cleanup(func() { g.release("mid") })
+
+	a.submit("start")
+	g.arrive(t, "mid")
+	a.submit("then this")
+	a.waitFor("the follow-up queued", has("queued for the end of the run: then this"))
+	g.release("mid")
+	s := a.waitFor("the follow-up taken and answered", all(has("first", "then this", "second", "idle"), lacks("queued")))
+	if n := strings.Count(s, "then this"); n != 1 {
+		t.Errorf("follow-up shown %d times, want 1:\n%s", n, s)
+	}
+}
+
+// TestTheStatusLineSaysWhatStoppedTheRun: a run the turn limit stopped
+// says so until the next run.
+func TestTheStatusLineSaysWhatStoppedTheRun(t *testing.T) {
+	cfg := cfgWith(callTool("c1", "upper", `{"text":"a"}`), say(nil, nil, "after"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.MaxTurns = 1
+	a := newApp(t, cfg)
+	a.submit("go")
+	a.waitFor("the stop", has("last run stopped: turn limit", "idle"))
 }

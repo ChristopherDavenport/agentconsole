@@ -5,6 +5,47 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Changed: agentconsole is the view and runs nothing (#33). It drives an
+  agent through agentturn's control contract, `agentturn.Control`
+  (agentkit's `Kit.Control` in process, agentturn's `front/control`
+  `Dial` over a wire), and reads its session through a `client.Record`:
+  `console.Run(ctx, control, record, ...)`. The view reads agentturn's
+  events (`view.View.Live` takes an `agentturn.Event`), copied by
+  `client.Copy` and queued by `client.Live`, so it sees what they carry:
+  whether a pending call was only held, the part of a call a question is
+  about, whether a held call was dispatched before, what stopped a run.
+- Added: `client.HeadMover`, the control that moves the agent's head
+  (agentkit's `Control` is one); without it the tree is read only.
+  `client.RecordOf`, a `Record` over a `session.Recorder`'s store.
+- Added: the permission panel shows the part of a compound call the
+  policy asked about (`view.Permission.Subject`) and says when a call
+  was started before it was held and may have run
+  (`view.Permission.MayHaveRun`). The status line says what stopped
+  the last run (`view.Turn.Cause`).
+- Added: a question's answer carries the user's words: `a` allows with
+  a note, and a refusal's reason is the answer's `Note`
+  (`agenttool.Answer`). A question with a form to fill can only be
+  refused; a URL question shows its URL.
+- Added: `console.Submit.FollowUp` queues a line for when the run would
+  stop (`agentturn.QueueFollowUp`). A submission with more than one of
+  a prompt, a steer and a follow-up is refused.
+- Fixed: a call the policy only held beside another call's question is
+  no longer asked about while the run's end is in hand; the answers to
+  the batch release it (the first part of #9). After a restart every
+  pending call is still asked about, since the record cannot tell them
+  apart.
+- Removed: `client/native` and `client/kitbackend`, and `client.Backend`,
+  `client.Control`, `client.LiveEvent` and its event types,
+  `client.FromEvent`, `client.Question` and `client.Reply`. What the
+  backends did around a run is agentkit's `Kit.Control`, and a
+  question is agentturn's `Question` event answered with `Reply`.
+- Changed: `cmd/agentconsole` assembles its agent with agentkit and
+  drives it through `Kit.Control`.
+- Changed: requires agentturn v0.0.22, agentkit v0.0.10, agentpolicy
+  v0.0.15 and agenttool v0.0.22.
+
 ## v0.0.10 - 2026-10-10
 
 - Added: `console.WithSubmit`, which hands each line the user submits to

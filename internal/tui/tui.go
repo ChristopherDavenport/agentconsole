@@ -1,11 +1,11 @@
 // Package tui is the terminal client: a Bubble Tea model over the view
 // reconciler. It renders what [view.Model] says, committed rows plainly
-// and in-flight rows marked as such, and turns keys into the backend's
-// [client.Control] calls.
+// and in-flight rows marked as such, and turns keys into
+// [agentturn.Control] calls.
 //
 // # Concurrency
 //
-// Control.Prompt and Control.Answer block until the run ends, so they run
+// Control.Prompt and Control.Resume block until the run ends, so they run
 // in tea.Cmds and report with a [runDoneMsg]. The view is fed by
 // [Attach] on goroutines of its own and reaches the model only as
 // [ModelMsg] values, which share nothing with the view. The model itself
@@ -30,6 +30,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
 
+	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
@@ -59,8 +60,11 @@ type replyDoneMsg struct {
 
 // Model is the Bubble Tea model.
 type Model struct {
-	ctx      context.Context
-	ctl      client.Control
+	ctx context.Context
+	ctl agentturn.Control
+	// head moves the agent's head, when the control can
+	// ([client.HeadMover]); nil leaves the tree read only.
+	head     client.HeadMover
 	verified bool
 
 	view view.Model // the latest the feed sent
@@ -91,17 +95,17 @@ type Model struct {
 	busy     bool
 	aborting bool
 	// err is the last run's error, cleared by the next action. feedErr is
-	// a stream of the backend that stopped: the view is frozen from then
+	// the record or live stream that stopped: the view is frozen from then
 	// on and nothing the user does revives it, so it is never cleared.
 	// It is not restarted: a new feed would start from a new view and a
 	// fresh Live subscription that misses what the run emitted meanwhile.
 	err     string
 	feedErr string
 
-	// inflight counts the Prompt, Answer and Steer commands that have
+	// inflight counts the Prompt, Resume and Queue commands that have
 	// not returned, for [Model.Drain].
 	inflight sync.WaitGroup
-	// steers hands what is typed while a run goes to Control.Steer, in
+	// steers hands what is typed while a run goes to Control.Queue, in
 	// the order it was typed.
 	steers *steerQueue
 
@@ -121,9 +125,10 @@ type Model struct {
 	refusing bool
 	// replied are the questions answered whose close the view has not
 	// shown yet, by ID; refusingQ is set while a question's refusal
-	// reason is typed.
+	// reason is typed, and notingQ while the note an allow carries is.
 	replied   map[string]bool
 	refusingQ bool
+	notingQ   bool
 
 	rec  client.Record
 	insp *inspect.Inspector
@@ -184,9 +189,11 @@ func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(m *Model) { m.tools = maps.Clone(rs) }
 }
 
-// New returns the model for a backend. The caller starts [Attach] with
-// the program's Send; ctx ends the runs the model starts.
-func New(ctx context.Context, be client.Backend, options ...Option) *Model {
+// New returns the model for an agent driven through c, whose session rec
+// follows. The caller starts [Attach] with the program's Send; ctx ends
+// the runs the model starts. When c is a [client.HeadMover] the tree
+// continues from an entry; otherwise it is read only.
+func New(ctx context.Context, c agentturn.Control, rec client.Record, options ...Option) *Model {
 	in := textarea.New()
 	in.Prompt = "> "
 	in.Placeholder = "say something (ctrl+/ for keys)"
@@ -198,9 +205,9 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 	in.Focus()
 	m := &Model{
 		ctx:      ctx,
-		ctl:      be.Control(),
-		verified: be.Record().Verified(),
-		rec:      be.Record(),
+		ctl:      c,
+		verified: rec.Verified(),
+		rec:      rec,
 		vp:       viewport.New(),
 		in:       in,
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
@@ -218,7 +225,10 @@ func New(ctx context.Context, be client.Backend, options ...Option) *Model {
 	if m.cost != nil {
 		inspOpts = append(inspOpts, inspect.WithCost(m.cost))
 	}
-	m.insp = inspect.New(be.Record(), inspOpts...)
+	m.insp = inspect.New(rec, inspOpts...)
+	if h, ok := c.(client.HeadMover); ok {
+		m.head = h
+	}
 	return m
 }
 
@@ -252,16 +262,16 @@ func (m *Model) spin() tea.Cmd {
 // question is the question being asked: the first a running call waits
 // on that has no reply yet. It is asked while the run goes, on the
 // conversation, ahead of any permission.
-func (m *Model) question() (client.Question, int, bool) {
+func (m *Model) question() (agentturn.Question, int, bool) {
 	if m.frozen != nil || m.screen != screenConversation {
-		return client.Question{}, 0, false
+		return agentturn.Question{}, 0, false
 	}
 	for i, q := range m.view.Questions {
 		if !m.replied[q.ID] {
 			return q, i, true
 		}
 	}
-	return client.Question{}, 0, false
+	return agentturn.Question{}, 0, false
 }
 
 // pending is the permission being asked about: the first of the ones out
@@ -427,8 +437,8 @@ func (m *Model) syncQuestions() {
 			delete(m.replied, id)
 		}
 	}
-	if _, _, ok := m.question(); !ok && m.refusingQ {
-		m.refusingQ = false
+	if _, _, ok := m.question(); !ok && (m.refusingQ || m.notingQ) {
+		m.refusingQ, m.notingQ = false, false
 		m.in.Reset()
 	}
 }
@@ -637,22 +647,30 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 }
 
 // questionKey handles a key while a question is asked, as permissionKey
-// does a permission's: y allows, n starts a refusal whose optional
-// reason is typed, Enter sends it and Esc goes back.
-func (m *Model) questionKey(msg tea.KeyPressMsg, q client.Question) (tea.Model, tea.Cmd) {
-	if m.refusingQ {
+// does a permission's: y allows, a starts an allow with a note, n starts
+// a refusal whose optional reason is typed, Enter sends either and Esc
+// goes back. The note, either way, is the answer's Note: the user's
+// words, which reach the model with a call's answer and the record. A
+// question with a form to fill ([agenttool.Elicitation]'s Schema) can
+// only be refused here: the client has no form to fill it with.
+func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Model, tea.Cmd) {
+	if m.refusingQ || m.notingQ {
 		if isNewlineKey(msg) {
 			return m, m.newline()
 		}
 		switch msg.Code {
 		case tea.KeyEnter:
 			note := strings.TrimSpace(m.in.Value())
+			action := agenttool.ActionDecline
+			if m.notingQ {
+				action = agenttool.ActionAccept
+			}
 			m.in.Reset()
-			m.refusingQ = false
-			return m.reply(q, client.Reply{Note: note})
+			m.refusingQ, m.notingQ = false, false
+			return m.reply(q, agenttool.Answer{Action: action, Note: note})
 		case tea.KeyEscape:
 			m.in.Reset()
-			m.refusingQ = false
+			m.refusingQ, m.notingQ = false, false
 			m.relayout()
 			return m, nil
 		}
@@ -660,7 +678,15 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q client.Question) (tea.Model, 
 	}
 	switch msg.String() {
 	case "y", "Y":
-		return m.reply(q, client.Reply{Accept: true})
+		if !asksForForm(q) {
+			return m.reply(q, agenttool.Answer{Action: agenttool.ActionAccept})
+		}
+	case "a", "A":
+		if !asksForForm(q) {
+			m.notingQ = true
+			m.in.Reset()
+			m.relayout()
+		}
 	case "n", "N":
 		m.refusingQ = true
 		m.in.Reset()
@@ -669,9 +695,13 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q client.Question) (tea.Model, 
 	return m, nil
 }
 
+// asksForForm reports whether q asks for a form, which this client cannot
+// fill.
+func asksForForm(q agentturn.Question) bool { return len(q.Elicitation.Schema) > 0 }
+
 // reply sends the answer to q. The call that asked goes on at once, so
 // nothing waits on it here; the panel moves to the next question.
-func (m *Model) reply(q client.Question, r client.Reply) (tea.Model, tea.Cmd) {
+func (m *Model) reply(q agentturn.Question, r agenttool.Answer) (tea.Model, tea.Cmd) {
 	m.replied[q.ID] = true
 	m.err = ""
 	m.relayout()
@@ -710,7 +740,8 @@ func (m *Model) decide(a agentturn.Answer) (tea.Model, tea.Cmd) {
 	m.inflight.Add(1)
 	return m, tea.Batch(func() tea.Msg {
 		defer m.inflight.Done()
-		return runDoneMsg{err: ctl.Answer(ctx, answers...)}
+		_, err := ctl.Resume(ctx, answers...)
+		return runDoneMsg{err: err}
 	}, m.spin())
 }
 
@@ -729,7 +760,7 @@ func (m *Model) send() (tea.Model, tea.Cmd) {
 	m.err = ""
 	if m.running() {
 		m.relayout()
-		return m, m.steer(text, item)
+		return m, m.steer(text, agentturn.QueueSteer, item)
 	}
 	cmd := m.prompt(item)
 	m.relayout()
@@ -798,7 +829,7 @@ func (m *Model) relayout() {
 	m.drawn = m.screen
 	_, _, asking := m.question()
 	_, _, permitting := m.pending()
-	if (asking && !m.refusingQ) || (!asking && permitting && !m.refusing) {
+	if (asking && !m.refusingQ && !m.notingQ) || (!asking && permitting && !m.refusing) {
 		m.in.Blur()
 	} else {
 		m.in.Focus()
@@ -840,6 +871,14 @@ func (m *Model) panel() string {
 	if p.Question != "" {
 		b.WriteString("\n  " + p.Question)
 	}
+	if p.Subject != "" && !strings.Contains(p.Question, p.Subject) {
+		// A compound call's question is about one part of it, which is
+		// also where the policy says why.
+		b.WriteString("\n  about: " + p.Subject)
+	}
+	if p.MayHaveRun {
+		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
+	}
 	if m.refusing {
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
 	} else {
@@ -849,25 +888,36 @@ func (m *Model) panel() string {
 }
 
 // questionPanel is the panel for a question a running call asked.
-func (m *Model) questionPanel(q client.Question, i int) string {
+func (m *Model) questionPanel(q agentturn.Question, i int) string {
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Question") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Questions)) + ")")
-	if q.Call != nil {
-		b.WriteString(": " + q.Call.Name)
-		if q.Call.Arguments != "" {
-			b.WriteString(" " + clipLine(q.Call.Arguments, false))
+	if c := q.Call; c != nil {
+		b.WriteString(": " + c.Name)
+		if len(c.Args) > 0 {
+			b.WriteString(" " + clipLine(string(c.Args), false))
 		}
 	}
-	if q.Text != "" {
-		b.WriteString("\n  " + q.Text)
+	e := q.Elicitation
+	if e.Message != "" {
+		b.WriteString("\n  " + e.Message)
+	}
+	if c := q.Call; c != nil && c.Decision != nil && c.Decision.Subject != "" && !strings.Contains(e.Message, c.Decision.Subject) {
+		b.WriteString("\n  about: " + c.Decision.Subject)
+	}
+	if e.URL != "" {
+		b.WriteString("\n  " + e.URL)
 	}
 	switch {
 	case m.refusingQ:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
+	case m.notingQ:
+		b.WriteString("\n  A note with the answer, Enter to allow, Esc to go back")
+	case asksForForm(q):
+		b.WriteString("\n  It asks for a form this client cannot fill.   [n] refuse")
 	case q.Call != nil:
-		b.WriteString("\n  [y] allow   [n] refuse")
+		b.WriteString("\n  [y] allow   [a] allow with a note   [n] refuse")
 	default:
-		b.WriteString("\n  [y] yes   [n] no")
+		b.WriteString("\n  [y] yes   [a] yes with a note   [n] no")
 	}
 	return wrap(b.String(), max(m.width, 10))
 }

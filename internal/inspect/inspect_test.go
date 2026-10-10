@@ -16,7 +16,6 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
-	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/inspect"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -103,7 +102,8 @@ type rig struct {
 	ctx   context.Context
 	store agentsession.Store
 	rec   *session.Recorder
-	be    *native.Backend
+	agent *agentturn.Agent
+	recd  client.Record
 	in    *inspect.Inspector
 }
 
@@ -120,7 +120,7 @@ func newRig(t *testing.T, cfg agentturn.Config) *rig {
 	}
 	ag := agentturn.New(cfg)
 	detach := rec.Attach(ag)
-	be, err := native.New(ag, rec)
+	recd, err := client.RecordOf(rec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,12 +131,12 @@ func newRig(t *testing.T, cfg agentturn.Config) *rig {
 			t.Errorf("close the store: %v", err)
 		}
 	})
-	return &rig{t: t, ctx: ctx, store: store, rec: rec, be: be, in: inspect.New(be.Record())}
+	return &rig{t: t, ctx: ctx, store: store, rec: rec, agent: ag, recd: recd, in: inspect.New(recd)}
 }
 
 func (r *rig) prompt(text string) {
 	r.t.Helper()
-	if err := r.be.Control().Prompt(r.ctx, openresponses.UserText(text)); err != nil {
+	if _, err := r.agent.Prompt(r.ctx, openresponses.UserText(text)); err != nil {
 		r.t.Fatal(err)
 	}
 }
@@ -144,7 +144,7 @@ func (r *rig) prompt(text string) {
 // model reads the session as the view would show it.
 func (r *rig) model() view.Model {
 	r.t.Helper()
-	s, err := r.be.Record().Read(r.ctx, "")
+	s, err := r.recd.Read(r.ctx, "")
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestSessionUsageAndCost(t *testing.T) {
 		usageSay(100, 20, "one"), usageSay(200, 30, "two"),
 	}}}
 	r := newRig(t, cfg)
-	r.in = inspect.New(r.be.Record(), inspect.WithCost(func(model string, u openresponses.Usage) (float64, bool) {
+	r.in = inspect.New(r.recd, inspect.WithCost(func(model string, u openresponses.Usage) (float64, bool) {
 		if model != "priced" {
 			return 0, false
 		}
@@ -240,7 +240,7 @@ func TestSessionUsageAndCost(t *testing.T) {
 func TestSessionUsageNamesUnpricedModels(t *testing.T) {
 	cfg := agentturn.Config{ModelName: "provider/model-name", Model: &script{responses: []step{usageSay(10, 5, "hi")}}}
 	r := newRig(t, cfg)
-	r.in = inspect.New(r.be.Record(), inspect.WithCost(func(string, openresponses.Usage) (float64, bool) {
+	r.in = inspect.New(r.recd, inspect.WithCost(func(string, openresponses.Usage) (float64, bool) {
 		return 0, false
 	}))
 	r.prompt("go")
@@ -306,7 +306,7 @@ func TestADeferredCallShowsItsDecisionAndWhoApprovedIt(t *testing.T) {
 		}}
 	r := newRig(t, cfg)
 	r.prompt("go")
-	if err := r.be.Control().Answer(r.ctx, agentturn.Approve("call_1").WithBy("human")); err != nil {
+	if _, err := r.agent.Resume(r.ctx, agentturn.Approve("call_1").WithBy("human")); err != nil {
 		t.Fatal(err)
 	}
 	m := r.model()
@@ -565,7 +565,7 @@ func TestAnEntryOffTheLineIsRefused(t *testing.T) {
 	if _, err := r.in.Entry(r.ctx, "", m.Tail, "sha256:nope", m.Entries); err == nil {
 		t.Error("an unknown entry was described")
 	}
-	var _ client.Record = r.be.Record()
+	var _ client.Record = r.recd
 }
 
 // Two panes asked for together (a fast Tab Tab) read the session once.
@@ -715,7 +715,7 @@ func TestGrantsAreMeasuredAtTheDecision(t *testing.T) {
 	// The call's item and its hold are on the record; now a grant lands,
 	// and then the call is approved.
 	r.annotate(inspect.VerdictNS, map[string]any{"action": "allow", "rule": "upper", "source": "agentskill:shout", "reason": "granted upper by agentskill:shout", "by": "policy"})
-	if err := r.be.Control().Answer(r.ctx, agentturn.Approve("call_1").WithBy("human")); err != nil {
+	if _, err := r.agent.Resume(r.ctx, agentturn.Approve("call_1").WithBy("human")); err != nil {
 		t.Fatal(err)
 	}
 	m := r.model()

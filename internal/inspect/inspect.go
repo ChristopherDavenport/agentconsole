@@ -4,7 +4,7 @@
 // session as a whole (its header, its verification, its configuration, its
 // refs, its memory manifest).
 //
-// It works on a snapshot of the session read from the backend, never on
+// It works on a snapshot of the session read from the record, never on
 // the follower's session, and it is meant to be called off the UI's
 // goroutine and only for what the user selects. A response's verification
 // is cached for good (a response entry and the path behind it never

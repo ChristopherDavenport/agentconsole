@@ -1,4 +1,4 @@
-package native_test
+package view_test
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
-	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -155,9 +154,10 @@ func (n nameless) CreateStream(ctx context.Context, req openresponses.Request, s
 	}))
 }
 
-// rig is a real agent with a real recorder over a memory store, a native
-// backend, and a view fed from both of its streams on goroutines of
-// their own, as a client would. Every state the view passes through is
+// rig is a real agent with a real recorder over a jsonl store, driven as
+// agentturn's Control (the bare agent is one), and a view fed from its
+// live stream (client.Live) and its record (client.RecordOf) on
+// goroutines of their own, as a client would. Every state the view passes through is
 // kept, and the invariants the reconciler promises are checked on each.
 type rig struct {
 	t      *testing.T
@@ -166,8 +166,8 @@ type rig struct {
 	sess   *agentsession.Session
 	rec    *session.Recorder
 	agent  *agentturn.Agent
-	be     *native.Backend
-	ctl    client.Control
+	record client.Record
+	ctl    agentturn.Control
 	cancel context.CancelFunc
 
 	// allowDrop lifts the rule that a row once shown stays shown, for a
@@ -184,7 +184,7 @@ type rig struct {
 	runs    sync.WaitGroup
 }
 
-func newRig(t *testing.T, cfg agentturn.Config, opts ...native.Option) *rig {
+func newRig(t *testing.T, cfg agentturn.Config) *rig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	// A jsonl store, which the follower reads back from the file. The
@@ -201,15 +201,15 @@ func newRig(t *testing.T, cfg agentturn.Config, opts ...native.Option) *rig {
 	}
 	a := agentturn.New(cfg)
 	detach := rec.Attach(a)
-	be, err := native.New(a, rec, opts...)
+	record, err := client.RecordOf(rec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{t: t, ctx: ctx, store: store, sess: sess, rec: rec, agent: a, be: be, ctl: be.Control(),
+	r := &rig{t: t, ctx: ctx, store: store, sess: sess, rec: rec, agent: a, record: record, ctl: a,
 		cancel: cancel, v: view.New(), seen: map[string]bool{}}
 	r.changed = sync.NewCond(&r.mu)
 
-	live := be.Live(ctx)
+	live := client.Live(ctx, a)
 	done := make(chan struct{}, 2)
 	go func() {
 		defer func() { done <- struct{}{} }()
@@ -222,7 +222,7 @@ func newRig(t *testing.T, cfg agentturn.Config, opts ...native.Option) *rig {
 	}()
 	go func() {
 		defer func() { done <- struct{}{} }()
-		for ch, err := range be.Record().Follow(ctx, "") {
+		for ch, err := range record.Follow(ctx, "") {
 			if err != nil {
 				return
 			}
@@ -354,7 +354,10 @@ func (r *rig) ever(cond func(view.Model) bool) bool {
 
 // prompt starts a run on its own goroutine and returns what it ends with.
 func (r *rig) prompt(text string) <-chan error {
-	return r.start(func() error { return r.ctl.Prompt(r.ctx, openresponses.UserText(text)) })
+	return r.start(func() error {
+		_, err := r.ctl.Prompt(r.ctx, openresponses.UserText(text))
+		return err
+	})
 }
 
 func (r *rig) start(f func() error) <-chan error {
@@ -411,4 +414,11 @@ func assistantRows(m view.Model) []view.Row {
 		}
 	}
 	return out
+}
+
+// answer resumes the run with answers, as a client's permission panel
+// does.
+func answer(r *rig, answers ...agentturn.Answer) error {
+	_, err := r.ctl.Resume(r.ctx, answers...)
+	return err
 }

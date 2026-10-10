@@ -485,7 +485,7 @@ func TestCtrlCAbortsARunAndQuitsWhenIdle(t *testing.T) {
 func TestAZeroSizeIsNotASize(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hi")))
 	a.mu.Lock()
-	m := tui.New(a.ctx, a.be)
+	m := tui.New(a.ctx, a.ctl, a.record)
 	a.mu.Unlock()
 	m.Update(tea.WindowSizeMsg{Width: 0, Height: 0})
 	if s := m.View().Content; s != "starting..." {

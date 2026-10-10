@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ChristopherDavenport/agentkit"
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
 	"github.com/ChristopherDavenport/agenttool"
@@ -21,7 +22,6 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
-	"github.com/ChristopherDavenport/agentconsole/client/native"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
 
@@ -193,12 +193,13 @@ func deferAll(reason string) func(context.Context, agentturn.ToolCallInfo) (*age
 	}
 }
 
-// app is a real agent, recorder, native backend and TUI model. It stands
-// in for a tea.Program: messages are applied to the model one at a time,
-// and the commands the model returns run on goroutines whose results come
-// back as messages, as the program does.
+// app is a real agent, recorder, agentkit Control and TUI model. It
+// stands in for a tea.Program: messages are applied to the model one at a
+// time, and the commands the model returns run on goroutines whose results
+// come back as messages, as the program does.
 type app struct {
-	be     *native.Backend
+	ctl    *agentkit.Control
+	record client.Record
 	t      *testing.T
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -235,10 +236,40 @@ func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 	return newAppWith(t, cfg, start, nil)
 }
 
-// newAppWith is newAppOn with the backend the model drives wrapped, to
-// play a backend that fails where the native one does not, and the
-// model's own options.
-func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(client.Backend) client.Backend, opts ...tui.Option) *app {
+// newAppWith is newAppOn with the control the model drives wrapped, to
+// play a control that fails where the kit's does not, and the model's own
+// options.
+//
+// The agent is built from cfg, as a test writes it, and driven through a
+// kit's Control: the kit records into the session's recorder and has no
+// policy of its own, so cfg's hooks decide.
+func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
+	t.Helper()
+	return newAppFrom(t, start, func(ctx context.Context, rec *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error) {
+		kit, err := agentkit.New(ctx, agentkit.WithModel(cfg.Model, cfg.ModelName), agentkit.WithRecorder(rec))
+		if err != nil {
+			return nil, nil, err
+		}
+		return kit, agentturn.New(cfg), nil
+	}, wrap, opts...)
+}
+
+// newKitApp is an app whose agent a kit built with kopts assembles: its
+// policy, its tools, its model.
+func newKitApp(t *testing.T, kopts []agentkit.Option, wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
+	t.Helper()
+	return newAppFrom(t, nil, func(ctx context.Context, rec *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error) {
+		kit, err := agentkit.New(ctx, append(kopts, agentkit.WithRecorder(rec))...)
+		if err != nil {
+			return nil, nil, err
+		}
+		return kit, agentturn.New(kit.Config(), kit.AgentOptions()...), nil
+	}, wrap, opts...)
+}
+
+// newAppFrom is the app over the kit and agent build makes for the
+// session's recorder.
+func newAppFrom(t *testing.T, start starter, build func(context.Context, *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error), wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
@@ -255,23 +286,32 @@ func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(cli
 	if err != nil {
 		t.Fatal(err)
 	}
-	ag := agentturn.New(cfg)
-	detach := rec.Attach(ag)
-	be, err := native.New(ag, rec)
+	kit, ag, err := build(ctx, rec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, be: be}
-	var driven client.Backend = be
-	if wrap != nil {
-		driven = wrap(be)
+	// The recorder subscribes ahead of the client, so an entry is in the
+	// store before the client sees the event that wrote it.
+	detach := rec.Attach(ag)
+	ctl, err := kit.Control(ag)
+	if err != nil {
+		t.Fatal(err)
 	}
-	a.m = tui.New(ctx, driven, append([]tui.Option{tui.WithCopier(func(text string) {
+	record, err := client.RecordOf(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, ctl: ctl, record: record}
+	var driven agentturn.Control = ctl
+	if wrap != nil {
+		driven = wrap(ctl)
+	}
+	a.m = tui.New(ctx, driven, record, append([]tui.Option{tui.WithCopier(func(text string) {
 		a.copyMu.Lock()
 		defer a.copyMu.Unlock()
 		a.copies = append(a.copies, text)
 	})}, opts...)...)
-	a.wait = tui.Attach(ctx, driven, func(msg tea.Msg) {
+	a.wait = tui.Attach(ctx, driven, record, func(msg tea.Msg) {
 		if _, ok := msg.(tui.ModelMsg); ok {
 			time.Sleep(time.Duration(a.feedDelay.Load()))
 		}
@@ -282,6 +322,9 @@ func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(cli
 		a.wait()
 		a.wg.Wait()
 		detach()
+		if err := kit.Close(); err != nil {
+			t.Errorf("close the kit: %v", err)
+		}
 		if err := store.Close(); err != nil {
 			t.Errorf("close the store: %v", err)
 		}

@@ -1,14 +1,18 @@
-// Package client is the contract between a terminal client and the agent
-// it drives. A backend gives the client three things over one vocabulary,
-// the stack's own types: Control to act on the agent, Live for what is not
-// committed yet, and Record for what is.
+// Package client is what a terminal client reads an agent through. The
+// agent is driven through agentturn's control contract,
+// [agentturn.Control], whose Subscribe is the live stream: what is not
+// committed yet. The session is read through a [Record]: what is.
 //
 // The rule behind the split is that the record is the truth for everything
 // committed and live events carry only what is not. Package
 // [github.com/ChristopherDavenport/agentconsole/view] turns the two
 // streams into what a client renders, and package
 // [github.com/ChristopherDavenport/agentconsole/console] runs the
-// terminal client over a Backend.
+// terminal client over a control and a record.
+//
+// Nothing here runs an agent. The control is the loop's or the kit's
+// (agentkit's Kit.Control in process, agentturn's front/control Dial over
+// a wire), and the record is a store's.
 package client
 
 import (
@@ -16,7 +20,6 @@ import (
 	"iter"
 
 	"github.com/ChristopherDavenport/agentsession"
-	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
@@ -24,53 +27,17 @@ import (
 // it has no price for.
 type Cost func(model string, usage openresponses.Usage) (float64, bool)
 
-// Backend is one agent the client drives.
-type Backend interface {
-	Control() Control
-	// Live streams the uncommitted part of the agent's activity: deltas,
-	// open tool calls, turn state, permission requests. It runs until ctx
-	// is done. It subscribes when it is called, so a client that calls it
-	// and then starts a run misses nothing; events from before the call
-	// are not replayed, and a run already going is read from
-	// Control.State.
-	Live(ctx context.Context) iter.Seq2[LiveEvent, error]
-	// Record follows the agent's session.
-	Record() Record
-}
-
-// Control acts on the agent.
-//
-// Prompt and Answer block until the run they start ends, as the agent's
-// own do, and return the error that kept it from starting or that ended
-// it. A client calls them from a goroutine of its own and learns how the
-// run went from Live's [RunEnded]. Steer and Abort return at once.
-type Control interface {
-	Prompt(ctx context.Context, items ...openresponses.Item) error
-	// Steer queues items into the run in flight, after its current tool
-	// batch and before its next model call, or into the next run when
-	// none can take them. Each is on the record, as a queued entry, when
-	// Steer returns, so a client shows what waits from the record
-	// (view.Model.Queued) before the run appends it. An item whose entry
-	// cannot be written is not queued and the error says so; the items
-	// before it are. A trigger on ctx (agentturn.ContextWithTrigger) is
-	// written as what brought the items in; nothing else is read from
-	// it.
-	Steer(ctx context.Context, items ...openresponses.Item) error
-	Abort()
-	// Answer answers the calls a run left pending and continues it: the
-	// reply to a permission request.
-	Answer(ctx context.Context, answers ...agentturn.Answer) error
-	State() agentturn.State
-	// Reply answers a question a running call asked ([QuestionAsked]).
-	// It returns at once; the call goes on. A question already closed is
-	// an error.
-	Reply(id string, r Reply) error
+// HeadMover is a control that moves the agent's head, which
+// [agentturn.Control] does not: agentkit's Control does. A client
+// asserts it on the control it was given, and without it shows the
+// session's tree read only.
+type HeadMover interface {
 	// ContinueFrom moves the agent's head to the entry: the next prompt
-	// continues the conversation from there, on a branch of the session.
-	// It is how a client acts on what it saw in the tree, and the one
-	// control that moves the record's head. It is refused while a run
-	// goes. The move is recorded as a leaf label, so a follower sees the
-	// head move and a reopened session resumes there.
+	// continues the conversation from there, on a branch of the
+	// session. It is how a client acts on what it saw in the tree, and
+	// the one control that moves the record's head. It is refused while
+	// a run goes. The move is on the record, so a follower sees the head
+	// move and a reopened session resumes there.
 	ContinueFrom(ctx context.Context, entryID string) error
 }
 
@@ -81,7 +48,7 @@ type Record interface {
 	// agentsession's Follower does.
 	Follow(ctx context.Context, from agentsession.Cursor) iter.Seq2[agentsession.Change, error]
 	// Verified reports whether the record is the agent's own, hashed and
-	// checkable, or one the backend synthesized from what it was told.
+	// checkable, or one synthesized from what a foreign agent said.
 	Verified() bool
 	// Read reads a session whole, as the caller's own: the followed one
 	// for the empty ID, or another the store holds (the origin of a

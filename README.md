@@ -15,8 +15,13 @@ an agent run in process. The ACP backend is a later step. The design is in
 
 ## As a library
 
-A coding agent embeds the client by building a backend over its own agent
-and handing it to `console.Run`. For an agent assembled with agentkit:
+The client is a view: it drives an agent through agentturn's control
+contract (`agentturn.Control`) and reads its session through a
+`client.Record`, and runs nothing itself. A coding agent embeds it by
+handing `console.Run` the two. For an agent assembled with agentkit,
+the kit's `Control` does what a front needs around each run (the
+recorder on the run's context, the engine's release of held calls,
+the head move with the skill grants):
 
 ```go
 kit, err := agentkit.New(ctx,
@@ -32,26 +37,34 @@ if err != nil {
 }
 defer kit.Close()
 
-be, err := kitbackend.New(kit)
+agent := agentturn.New(kit.Config(), kit.AgentOptions()...)
+defer kit.Attach(agent)() // the kit's recorder, ahead of the client
+ctl, err := kit.Control(agent)
 if err != nil {
 	return err
 }
-defer be.Close()
-return console.Run(ctx, be) // returns when the user quits; the store is then safe to close
+rec, err := client.RecordOf(kit.Recorder())
+if err != nil {
+	return err
+}
+return console.Run(ctx, ctl, rec) // returns when the user quits; the store is then safe to close
 ```
 
-For an `agentturn.Agent` built by hand, attach its `session.Recorder`
-and use `native.New(agent, rec)` instead; `native` does not import
-agentkit. The public packages are `console`, `client`, `client/native`,
-`client/kitbackend`, `view` and `toolview`; the terminal model and the
-record panes are internal.
+Any `agentturn.Control` will do: a bare `*agentturn.Agent` with its
+`session.Recorder` attached, or a remote agent through agentturn's
+`front/control` (`control.Dial`), whose session a store client reads.
+A control that also moves the agent's head (`client.HeadMover`, which
+agentkit's `Control` is) lets the tree continue from an entry; without
+it the tree is read only. The public packages are `console`, `client`,
+`view` and `toolview`; the terminal model and the record panes are
+internal, and none of them imports agentkit.
 
 A call to a tool shows its name and its arguments as `key=value` pairs.
 To draw a tool's calls its own way (a command as a shell line, an edit
 as a diff), give the client a `toolview.Renderer` for it:
 
 ```go
-console.Run(ctx, be, console.WithToolRenderers(toolview.Renderers{"bash": bashRenderer{}}))
+console.Run(ctx, ctl, rec, console.WithToolRenderers(toolview.Renderers{"bash": bashRenderer{}}))
 ```
 
 A renderer reads what the session records of a call (the arguments, the

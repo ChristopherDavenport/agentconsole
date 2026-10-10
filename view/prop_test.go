@@ -286,7 +286,7 @@ type checker struct {
 	running  bool
 	prevLf   string
 	prevTail string
-	lastEnd  *client.RunEnded
+	lastEnd  *agentturn.RunEnd
 	openEph  map[string]bool
 	gone     map[string]bool
 	// standing is the run whose live end was delivered before the
@@ -320,7 +320,7 @@ type callTruth struct {
 	partial, result      string
 }
 
-func (c *checker) liveDelivered(ev client.LiveEvent) {
+func (c *checker) liveDelivered(ev agentturn.Event) {
 	eph := func(item openresponses.Item) {
 		if u := rowUID(Row{Item: item}); c.tl.ephemeral[u] {
 			c.openEph[u] = true
@@ -335,7 +335,7 @@ func (c *checker) liveDelivered(ev client.LiveEvent) {
 			return // an item with no ID is not overlaid
 		}
 		u := rowUID(Row{Item: it})
-		c.items[u] = &itemTruth{run: ev.Run()}
+		c.items[u] = &itemTruth{run: runOf(ev)}
 		if completed {
 			c.completed[u] = true
 		}
@@ -349,53 +349,53 @@ func (c *checker) liveDelivered(ev client.LiveEvent) {
 		return t
 	}
 	switch e := ev.(type) {
-	case *client.RunStarted:
+	case *agentturn.RunStart:
 		c.running = true
 		c.turnNo, c.turnModel, c.attempt = 0, "", 0
 		clear(c.openEph) // a cut stream's leftovers go with their run, not a later response
-	case *client.TurnStarted:
-		c.turnNo, c.turnModel, c.attempt = e.Turn, e.Model, 0
-	case *client.RunEnded:
+	case *agentturn.TurnStart:
+		c.turnNo, c.turnModel, c.attempt = e.Turn, e.Request.Model, 0
+	case *agentturn.RunEnd:
 		c.running = false
 		c.lastEnd = e
 		c.justEnded = true
 		c.liveEndedRuns[e.RunID] = true
 		c.turnNo, c.attempt = 0, 0
 		clear(c.openEph)
-	case *client.ItemOpened:
+	case *agentturn.ItemStart:
 		item(e.Item, false)
-	case *client.ItemUpdated:
+	case *agentturn.ItemUpdate:
 		item(e.Item, false)
-	case *client.ItemCompleted:
+	case *agentturn.ItemEnd:
 		item(e.Item, true)
-	case *client.ModelRetrying:
+	case *agentturn.ModelRetry:
 		c.attempt = e.Attempt
 		for u := range c.openEph {
 			c.gone[u] = true
 		}
 		clear(c.openEph)
-	case *client.ResponseCompleted:
+	case *agentturn.ResponseEnd:
 		// What the turn streamed and never completed has no entry
 		// coming: it must be gone from here on, not at the run's end.
 		for u := range c.openEph {
 			c.gone[u] = true
 		}
 		clear(c.openEph)
-	case *client.ToolOpened:
+	case *agentturn.ToolStart:
 		t := call(e.CallID, e.RunID)
 		t.parent = e.Parent
 		if e.Parent != "" {
 			p := call(e.Parent, e.RunID)
 			p.children = append(p.children, e.CallID)
 		}
-	case *client.ToolDispatched:
+	case *agentturn.ToolDispatch:
 		call(e.CallID, e.RunID).dispatched = true
-	case *client.ToolProgress:
-		call(e.CallID, e.RunID).partial = e.Partial
-	case *client.ToolFinished:
+	case *agentturn.ToolUpdate:
+		call(e.CallID, e.RunID).partial = e.Partial.Output.String()
+	case *agentturn.ToolEnd:
 		t := call(e.CallID, e.RunID)
-		t.finished, t.deferred, t.failed, t.result = true, e.Deferred, e.Err != nil, e.Result
-		if e.Err != nil && e.Result == "" {
+		t.finished, t.deferred, t.failed, t.result = true, e.Deferred, e.Err != nil, e.Result.Output.String()
+		if e.Err != nil && t.result == "" {
 			t.result = e.Err.Error()
 		}
 	}
@@ -518,9 +518,9 @@ func (c *checker) step(what string, moved bool) string {
 			wantPerms, wantCuts, withQuestions = nil, nil, false
 			for _, p := range f.Pending {
 				if f.Reason == agentturn.ReasonInputRequired && p.Reason == agentturn.PendingDeferred {
-					wantPerms = append(wantPerms, p.CallID)
+					wantPerms = append(wantPerms, p.Call.CallID)
 				} else {
-					wantCuts = append(wantCuts, p.CallID)
+					wantCuts = append(wantCuts, p.Call.CallID)
 				}
 			}
 			sort.Strings(wantPerms)
@@ -1268,25 +1268,25 @@ func TestGeneratorCoverage(t *testing.T) {
 		}
 		for _, l := range tl.lives {
 			switch x := l.ev.(type) {
-			case *client.ToolProgress:
+			case *agentturn.ToolUpdate:
 				seen["tool progress"]++
-			case *client.ToolOpened:
+			case *agentturn.ToolStart:
 				if x.Parent != "" {
 					seen["child call"]++
 				}
-			case *client.ModelRetrying:
+			case *agentturn.ModelRetry:
 				seen["retry"]++
-			case *client.ResponseCompleted:
+			case *agentturn.ResponseEnd:
 				if x.Withheld {
 					seen["withheld"]++
 				}
-			case *client.ItemOpened:
+			case *agentturn.ItemStart:
 				if x.ResponseID == "" {
 					if _, isMsg := x.Item.(*openresponses.Message); isMsg {
 						seen["unnamed stream"]++
 					}
 				}
-			case *client.RunEnded:
+			case *agentturn.RunEnd:
 				if x.Reason == agentturn.ReasonInputRequired {
 					seen["input required"]++
 				}
@@ -1355,4 +1355,25 @@ func (c *checker) treeFacts(m Model, ref rendering) string {
 		}
 	}
 	return ""
+}
+
+// runOf is the run an item event belongs to.
+func runOf(ev agentturn.Event) string {
+	switch e := ev.(type) {
+	case *agentturn.ItemStart:
+		return e.RunID
+	case *agentturn.ItemUpdate:
+		return e.RunID
+	case *agentturn.ItemEnd:
+		return e.RunID
+	}
+	return ""
+}
+
+// source is the source of a run start, a resume or a prompt.
+func source(resume bool) agentturn.Source {
+	if resume {
+		return agentturn.SourceResume
+	}
+	return agentturn.SourceInput
 }

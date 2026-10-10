@@ -1,5 +1,5 @@
 // Package view is the reconciler: a pure model that takes the record's
-// changes and the backend's live events, in whatever order they arrive,
+// changes and the agent's live events, in whatever order they arrive,
 // and produces what a client renders.
 //
 // The rule is the plan's: the record is the truth for everything
@@ -24,8 +24,8 @@
 // The overlay waits for the entry, never for the event.
 //   - A live item_end is not a commit. A model item that completes
 //     before the stream names its response is written at response_end,
-//     so its overlay copy stays through [client.ItemCompleted] and
-//     [client.ResponseCompleted] until the entry lands.
+//     so its overlay copy stays through [agentturn.ItemEnd] and
+//     [agentturn.ResponseEnd] until the entry lands.
 //   - A config entry is written by the next entry-writing event, so the
 //     record's model lags the model of the turn running. Both are
 //     reported: [Model.Config] is the record's, [Turn.Model] the
@@ -102,6 +102,11 @@ type Turn struct {
 	// Withheld is set when the last run ended because a guard withheld
 	// a message: the text that streamed was never committed.
 	Withheld bool
+	// Cause is what stopped the last run, when it ended with
+	// [agentturn.ReasonStopped] (a turn limit, a hook, a guard, a tool
+	// that ended it, a refusal), and "" otherwise. It is the live end's:
+	// the record does not hold it.
+	Cause agentturn.StopCause
 	// Attempt is the number of the model call that failed and is being
 	// retried, 0 when none is.
 	Attempt int
@@ -220,7 +225,17 @@ type Permission struct {
 	// Question is the reason the call was deferred, as a front puts it
 	// to the user.
 	Question string
-	Reason   string
+	// Subject is the part of the call the question is about, when the
+	// policy decided on a part (one command of a compound line), from
+	// the decision that deferred it; "" for the whole call. The record
+	// does not hold it, so a permission read from the record alone has
+	// none.
+	Subject string
+	// MayHaveRun is set for a call that was handed to its tool before
+	// it was left unanswered: a call held after its dispatch, or one an
+	// abort cut off while it ran. Its effects may have happened.
+	MayHaveRun bool
+	Reason     string
 }
 
 // Queued is an input the agent accepted into its queue, a steer or a
@@ -278,7 +293,7 @@ type Model struct {
 	// Questions are the questions running calls wait on the user for,
 	// in the order they were asked: a sub-agent's call its policy asks
 	// about, a tool's own question.
-	Questions []client.Question
+	Questions []agentturn.Question
 	// Queued are the inputs waiting to join the conversation, in the
 	// order they were accepted, from the record's path to its head
 	// (agentsession.Queued). An input a run did not take before it
@@ -307,6 +322,10 @@ type ovCall struct {
 	output   string
 	reason   string
 	finished bool
+	// held and subject are from the decision that deferred the call:
+	// held beside another call's question, and the part it is about.
+	held    bool
+	subject string
 }
 
 // maxSettled caps the responses remembered as over. Past it the oldest are
@@ -347,9 +366,10 @@ const maxRuns = 256
 // the live stream: then the oldest end entries are forgotten, and a run
 // whose live end arrives after that is never settled by its end entry. Its
 // overlay rows would stay until the start entry of a later run lands, the
-// one other thing that settles it. In the native backend an entry is
-// written before its live event is queued and both are consumed in
-// order, so the record cannot be that far ahead; the cap bounds a session
+// one other thing that settles it. In process, with the recorder
+// subscribed ahead of the client, an entry is written before its live
+// event is queued and both are consumed in order, so the record cannot be
+// that far ahead; the cap bounds a session
 // written by another process, which no live event ever settles.
 const maxEndSeen = 64
 
@@ -395,7 +415,7 @@ type View struct {
 	calls []*ovCall
 	perms []Permission
 	cut   []Permission
-	asked []client.Question
+	asked []agentturn.Question
 	// queued are the inputs waiting on the head's path, copied out of
 	// the session.
 	queued []Queued
@@ -408,7 +428,7 @@ type View struct {
 	runSeq map[string]int
 	seq    int
 	// liveFacts is the last run end the live stream reported.
-	liveFacts *client.RunEnded
+	liveFacts *agentturn.RunEnd
 	endSeen   map[string]bool
 	endOrder  []string
 	turn      Turn
@@ -460,6 +480,13 @@ func (v *View) Record(ch agentsession.Change) {
 // does not hold the run (the record is behind) or holds its start and the
 // end is on its way. A live end the record has delivered, or one for a run
 // the viewed path moved off, says nothing about the viewed line.
+//
+// While the live end of the path's last run is in hand, a call its
+// decision only held beside another call's question ([agentturn.ToolDecision]'s
+// Held) is not asked about: answering the batch decides it, as agentkit's
+// Control releases it with the answers. Without that end, after a
+// restart, the record cannot tell a held call from an asked one, and
+// every pending call is asked about.
 func (v *View) reconcilePending() {
 	if v.turn.State == Running {
 		return
@@ -478,14 +505,21 @@ func (v *View) reconcilePending() {
 			v.turn.State = RequiresAction
 		}
 	}()
-	if f := v.liveFacts; f != nil && v.liveEnded[f.RunID] && !v.endSeen[f.RunID] && (!v.runKnown(f.RunID) || (last != nil && last.RunID == f.RunID)) {
+	f := v.liveFacts
+	if f != nil && v.liveEnded[f.RunID] && !v.endSeen[f.RunID] && (!v.runKnown(f.RunID) || (last != nil && last.RunID == f.RunID)) {
 		for _, p := range f.Pending {
-			if v.landedOuts[p.CallID] {
+			if p.Call == nil || v.landedOuts[p.Call.CallID] {
 				continue
 			}
-			next := Permission{CallID: p.CallID, Name: p.Name, Args: p.Args, Reason: string(p.Reason)}
+			next := Permission{CallID: p.Call.CallID, Name: p.Call.Name, Args: p.Call.Arguments, Reason: string(p.Reason), MayHaveRun: p.Dispatched}
 			if f.Reason == agentturn.ReasonInputRequired && p.Reason == agentturn.PendingDeferred {
-				next.Question = questionOf(old, p.CallID)
+				if held(p.Decision) {
+					continue
+				}
+				next.Question, next.Subject = questionOf(old, p.Call.CallID), subjectOf(p.Decision)
+				if next.Question == "" && p.Decision != nil {
+					next.Question = p.Decision.Reason
+				}
 				v.perms = append(v.perms, next)
 			} else {
 				v.cut = append(v.cut, next)
@@ -496,6 +530,18 @@ func (v *View) reconcilePending() {
 	if last == nil || !last.IsEnd() {
 		return
 	}
+	// The live end of the same run, when in hand, has what the record
+	// does not: which calls were only held, and the part each question
+	// is about.
+	var live map[string]agentturn.PendingCall
+	if f != nil && f.RunID == last.RunID {
+		live = map[string]agentturn.PendingCall{}
+		for _, p := range f.Pending {
+			if p.Call != nil {
+				live[p.Call.CallID] = p
+			}
+		}
+	}
 	waiting := map[string]bool{}
 	for _, id := range last.Pending {
 		waiting[id] = true
@@ -504,8 +550,12 @@ func (v *View) reconcilePending() {
 		if !c.Pending() || !waiting[c.ID()] {
 			continue
 		}
-		p := Permission{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments}
+		p := Permission{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments, MayHaveRun: len(c.Dispatches) > 0}
 		if last.Reason == agentsession.ReasonInputRequired && c.Held() {
+			lp, known := live[p.CallID]
+			if known && held(lp.Decision) {
+				continue
+			}
 			p.Reason = string(agentturn.PendingDeferred)
 			if n := len(c.Decisions); n > 0 {
 				p.Question = c.Decisions[n-1].Reason
@@ -513,12 +563,27 @@ func (v *View) reconcilePending() {
 			if q := questionOf(old, p.CallID); q != "" {
 				p.Question = q
 			}
+			if known {
+				p.Subject = subjectOf(lp.Decision)
+				p.MayHaveRun = p.MayHaveRun || lp.Dispatched
+			}
 			v.perms = append(v.perms, p)
 			continue
 		}
 		p.Reason = last.Reason
 		v.cut = append(v.cut, p)
 	}
+}
+
+// held reports whether the decision deferred its call only beside
+// another call's question.
+func held(d *agentturn.ToolDecision) bool { return d != nil && d.Action == agentturn.Defer && d.Held }
+
+func subjectOf(d *agentturn.ToolDecision) string {
+	if d == nil {
+		return ""
+	}
+	return d.Subject
 }
 
 func questionOf(perms []Permission, callID string) string {
@@ -911,14 +976,19 @@ func (v *View) flush(runID string) {
 	v.calls = kept
 }
 
-// Live applies a live event.
-func (v *View) Live(ev client.LiveEvent) {
+// Live applies a live event: one of agentturn's, as
+// [agentturn.Control.Subscribe] delivers it and [client.Copy] copies it.
+// The view keeps what it is given, so an event must share nothing the
+// agent goes on changing. An event the view does not read is ignored.
+func (v *View) Live(ev agentturn.Event) {
 	switch e := ev.(type) {
-	case *client.QuestionAsked:
-		v.asked = append(v.asked, e.Question)
-	case *client.QuestionClosed:
-		v.asked = slices.DeleteFunc(v.asked, func(q client.Question) bool { return q.ID == e.ID })
-	case *client.RunStarted:
+	case *agentturn.Question:
+		if !slices.ContainsFunc(v.asked, func(q agentturn.Question) bool { return q.ID == e.ID }) {
+			v.asked = append(v.asked, *e)
+		}
+	case *agentturn.QuestionClosed:
+		v.asked = slices.DeleteFunc(v.asked, func(q agentturn.Question) bool { return q.ID == e.ID })
+	case *agentturn.RunStart:
 		v.seq++
 		v.runSeq[e.RunID] = v.seq
 		for id, q := range v.runSeq {
@@ -938,36 +1008,44 @@ func (v *View) Live(ev client.LiveEvent) {
 		clear(v.calls[len(kept):])
 		v.calls = kept
 		v.turn = Turn{State: Running, RunID: e.RunID}
-	case *client.TurnStarted:
+	case *agentturn.TurnStart:
 		v.turn.Number, v.turn.Attempt = e.Turn, 0
-		v.turn.Model = e.Model
-	case *client.ModelRetrying:
+		v.turn.Model = e.Request.Model
+	case *agentturn.ModelRetry:
 		// The failed attempt's items are dropped with it.
 		v.turn.Attempt = e.Attempt
 		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == e.Turn })
-	case *client.ItemOpened:
+	case *agentturn.ItemStart:
+		if !e.Hidden {
+			v.item(e.RunID, e.ResponseID, e.Item, false)
+		}
+	case *agentturn.ItemUpdate:
 		v.item(e.RunID, e.ResponseID, e.Item, false)
-	case *client.ItemUpdated:
-		v.item(e.RunID, e.ResponseID, e.Item, false)
-	case *client.ItemCompleted:
-		v.item(e.RunID, e.ResponseID, e.Item, true)
-	case *client.ResponseCompleted:
+	case *agentturn.ItemEnd:
+		if !e.Hidden {
+			v.item(e.RunID, e.ResponseID, e.Item, true)
+		}
+	case *agentturn.ResponseEnd:
+		responseID := ""
+		if e.Response != nil {
+			responseID = e.Response.ID
+		}
 		// The response names the items that completed before the stream
 		// did, and is over: an item with no response yet is not its.
-		if e.ResponseID != "" {
-			v.closed.add(e.ResponseID)
+		if responseID != "" {
+			v.closed.add(responseID)
 			for _, o := range v.items {
 				if o.run == e.RunID && o.turn == v.turn.Number && o.responseID == "" {
-					o.responseID = e.ResponseID
+					o.responseID = responseID
 				}
 			}
 			// One whose entry landed first is the entry's.
 			v.dropItems(func(o *ovItem) bool {
-				if o.key.call || o.responseID != e.ResponseID {
+				if o.key.call || o.responseID != responseID {
 					return false
 				}
 				for _, l := range v.landedItems[o.key.id] {
-					if l.resp == e.ResponseID {
+					if l.resp == responseID {
 						return true
 					}
 				}
@@ -978,27 +1056,28 @@ func (v *View) Live(ev client.LiveEvent) {
 		// item_end, so the record will not hold it: a message the guard
 		// withheld, or one a failed response cut off.
 		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == v.turn.Number && !o.done })
-	case *client.ToolOpened:
+	case *agentturn.ToolStart:
 		if v.landedOuts[e.CallID] {
 			return
 		}
 		c := v.call(e.RunID, e.CallID)
-		c.name, c.args, c.parent = e.Name, e.Args, e.Parent
-	case *client.ToolDispatched:
+		c.name, c.args, c.parent = e.Name, string(e.Args), e.Parent
+		c.held, c.subject = held(e.Decision), subjectOf(e.Decision)
+	case *agentturn.ToolDispatch:
 		if v.landedOuts[e.CallID] {
 			return
 		}
 		c := v.call(e.RunID, e.CallID)
 		c.name, c.state = e.Name, CallRunning
-	case *client.ToolProgress:
+	case *agentturn.ToolUpdate:
 		if v.landedOuts[e.CallID] {
 			return
 		}
 		c := v.call(e.RunID, e.CallID)
-		c.name, c.partial = e.Name, e.Partial
-	case *client.ToolFinished:
+		c.name, c.partial = e.Name, e.Partial.Output.String()
+	case *agentturn.ToolEnd:
 		v.toolFinished(e)
-	case *client.RunEnded:
+	case *agentturn.RunEnd:
 		v.runEnded(e)
 	}
 }
@@ -1043,17 +1122,21 @@ func (v *View) call(runID, callID string) *ovCall {
 	return c
 }
 
-func (v *View) toolFinished(e *client.ToolFinished) {
+func (v *View) toolFinished(e *agentturn.ToolEnd) {
 	if v.landedOuts[e.CallID] {
 		return
 	}
 	c := v.call(e.RunID, e.CallID)
 	c.name, c.parent, c.finished = e.Name, e.Parent, true
-	c.output, c.reason = e.Result, e.Reason
+	c.output, c.reason = e.Result.Output.String(), e.Reason
 	switch {
 	case e.Deferred:
 		c.state, c.output = CallDeferred, ""
-		v.permit(Permission{CallID: e.CallID, Name: e.Name, Args: c.args, Question: e.Reason, Reason: "deferred"})
+		// A call held beside another's question is not asked about:
+		// the answers to the batch decide it.
+		if !c.held {
+			v.permit(Permission{CallID: e.CallID, Name: e.Name, Args: c.args, Question: e.Reason, Subject: c.subject, Reason: "deferred"})
+		}
 	case e.Blocked:
 		c.state = CallBlocked
 	default:
@@ -1070,6 +1153,9 @@ func (v *View) permit(p Permission) {
 			if p.Question == "" {
 				p.Question = v.perms[i].Question
 			}
+			if p.Subject == "" {
+				p.Subject = v.perms[i].Subject
+			}
 			v.perms[i] = p
 			return
 		}
@@ -1077,8 +1163,8 @@ func (v *View) permit(p Permission) {
 	v.perms = append(v.perms, p)
 }
 
-func (v *View) runEnded(e *client.RunEnded) {
-	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld = e.RunID, 0, 0, e.Withheld
+func (v *View) runEnded(e *agentturn.RunEnd) {
+	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld, v.turn.Cause = e.RunID, 0, 0, e.Withheld, e.Cause
 	v.turn.State = Idle
 	v.liveFacts = e
 	v.liveEnded[e.RunID] = true
@@ -1149,7 +1235,7 @@ func (v *View) Model() Model {
 	}
 	m.Permissions = append([]Permission(nil), v.perms...)
 	m.CutOff = append([]Permission(nil), v.cut...)
-	m.Questions = append([]client.Question(nil), v.asked...)
+	m.Questions = append([]agentturn.Question(nil), v.asked...)
 	for _, q := range v.queued {
 		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
 	}

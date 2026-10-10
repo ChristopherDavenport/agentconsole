@@ -1,281 +1,205 @@
 package client
 
 import (
-	"time"
+	"context"
+	"errors"
+	"iter"
+	"slices"
+	"sync"
 
-	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
-// LiveEvent is a narrowed view of [agentturn.Event]: the events that
-// say something the record does not hold yet. Every value is a copy that
-// shares nothing with the agent, so a client may keep it. Concrete types
-// are [RunStarted], [TurnStarted], [ModelRetrying], [ItemOpened],
-// [ItemUpdated], [ItemCompleted], [ResponseCompleted], [ToolOpened],
-// [ToolDispatched], [ToolProgress], [ToolFinished], [RunEnded],
-// [QuestionAsked] and [QuestionClosed]; all are pointers.
-type LiveEvent interface {
-	liveEvent()
-	// Run is the ID of the run the event belongs to.
-	Run() string
-}
-
-// RunStarted opens a run. Resume is set for a run that answers pending
-// calls.
-type RunStarted struct {
-	RunID  string
-	Resume bool
-}
-
-// TurnStarted opens a model call.
-type TurnStarted struct {
-	RunID string
-	Turn  int
-	// Model is the model the request names.
-	Model string
-}
-
-// ModelRetrying says the model call failed and will be tried again.
-// What the failed attempt streamed is dropped, so a client drops what
-// it showed of that turn's open items.
-type ModelRetrying struct {
-	RunID   string
-	Turn    int
-	Attempt int
-	Err     error
-	Delay   time.Duration
-}
-
-// ItemOpened announces an item the model has begun, or one the loop
-// appended. ResponseID is empty while the stream has not named its
-// response.
-type ItemOpened struct {
-	RunID      string
-	ResponseID string
-	Item       openresponses.Item
-}
-
-// ItemUpdated carries the item as accumulated so far.
-type ItemUpdated struct {
-	RunID      string
-	ResponseID string
-	Item       openresponses.Item
-}
-
-// ItemCompleted carries a finished item. It is not a commit: the record
-// writes the item when its entry lands, which for a model's item that
-// completed before its response was named is at the response's end.
-type ItemCompleted struct {
-	RunID      string
-	ResponseID string
-	Item       openresponses.Item
-}
-
-// ResponseCompleted carries the model's response, whose ID names the
-// items that completed before the stream did.
-type ResponseCompleted struct {
-	RunID      string
-	ResponseID string
-	Model      string
-	Status     openresponses.ResponseStatus
-	// Withheld says OutputGuard withheld a message of the response: the
-	// text that streamed has no item_end and no entry.
-	Withheld bool
-}
-
-// ToolOpened announces a call the loop is about to settle. Parent is the
-// ID of the call whose tool made this one, empty for the model's.
-type ToolOpened struct {
-	RunID  string
-	CallID string
-	Name   string
-	Args   string
-	Parent string
-}
-
-// ToolDispatched says the call reached its tool.
-type ToolDispatched struct {
-	RunID  string
-	CallID string
-	Name   string
-}
-
-// ToolProgress is a partial result from a running tool.
-type ToolProgress struct {
-	RunID   string
-	CallID  string
-	Name    string
-	Partial string
-}
-
-// ToolFinished says a call ended. Deferred means nothing ran and the
-// call waits for an answer: a permission request, with Reason as the
-// question. Blocked means a policy refused it. Result is the output the
-// model sees, empty for a deferred call; it is in the record once the
-// output item lands.
-type ToolFinished struct {
-	RunID    string
-	CallID   string
-	Name     string
-	Result   string
-	Err      error
-	Blocked  bool
-	Deferred bool
-	Reason   string
-	Parent   string
-}
-
-// Pending is a call that waits for the caller.
-type Pending struct {
-	CallID string
-	Name   string
-	Args   string
-	// Reason says why it waits: deferred to the caller, cut off by an
-	// abort, and so on.
-	Reason agentturn.PendingReason
-}
-
-// RunEnded closes a run. Pending lists the calls the run left waiting,
-// which is the authoritative permission list for Reason input_required.
-type RunEnded struct {
-	RunID  string
-	Reason agentturn.Reason
-	Err    error
-	// Withheld says the run ended because a guard withheld a message.
-	Withheld bool
-	Pending  []Pending
-}
-
-// Question is put to the user while a call runs, and the call waits
-// for the answer: a sub-agent's call its policy asks about, or a tool's
-// own question (an MCP elicitation). It is not a permission, which is a
-// call a run left pending after it ended; the run that asks a question
-// is still going.
-type Question struct {
-	// ID names the question for [Control.Reply].
-	ID string
-	// Call is the call the question is about, when there is one: the
-	// sub-agent's call, with its name and arguments. Nil for a tool's
-	// own question.
-	Call *openresponses.FunctionCall
-	// Text is the question.
-	Text string
-}
-
-// Reply answers a [Question]: Accept allows the call or says yes, and
-// Note is what the user typed with it, a refusal's reason.
-type Reply struct {
-	Accept bool
-	Note   string
-}
-
-// QuestionAsked says a question waits for the user.
-type QuestionAsked struct {
-	Question Question
-}
-
-// QuestionClosed says a question no longer waits: answered, or given up
-// by the call that asked it (an abort). Reply is nil when it was given
-// up.
-type QuestionClosed struct {
-	ID    string
-	Reply *Reply
-}
-
-func (*QuestionAsked) liveEvent()     {}
-func (*QuestionClosed) liveEvent()    {}
-func (*RunStarted) liveEvent()        {}
-func (*TurnStarted) liveEvent()       {}
-func (*ModelRetrying) liveEvent()     {}
-func (*ItemOpened) liveEvent()        {}
-func (*ItemUpdated) liveEvent()       {}
-func (*ItemCompleted) liveEvent()     {}
-func (*ResponseCompleted) liveEvent() {}
-func (*ToolOpened) liveEvent()        {}
-func (*ToolDispatched) liveEvent()    {}
-func (*ToolProgress) liveEvent()      {}
-func (*ToolFinished) liveEvent()      {}
-func (*RunEnded) liveEvent()          {}
-
-// Run implements [LiveEvent].
-func (e *RunStarted) Run() string { return e.RunID }
-
-// Run is empty for a question: the code that asks it may not know the
-// run, and the question is answered by its ID.
-func (e *QuestionAsked) Run() string     { return "" }
-func (e *QuestionClosed) Run() string    { return "" }
-func (e *TurnStarted) Run() string       { return e.RunID }
-func (e *ModelRetrying) Run() string     { return e.RunID }
-func (e *ItemOpened) Run() string        { return e.RunID }
-func (e *ItemUpdated) Run() string       { return e.RunID }
-func (e *ItemCompleted) Run() string     { return e.RunID }
-func (e *ResponseCompleted) Run() string { return e.RunID }
-func (e *ToolOpened) Run() string        { return e.RunID }
-func (e *ToolDispatched) Run() string    { return e.RunID }
-func (e *ToolProgress) Run() string      { return e.RunID }
-func (e *ToolFinished) Run() string      { return e.RunID }
-func (e *RunEnded) Run() string          { return e.RunID }
-
-// FromEvent narrows an agent event to a live one. It reports false for an
-// event that carries nothing the record lacks or that a client does not
-// render: turn_end, queued, model_blocked. A hidden item is dropped too,
-// since a renderer shows none.
+// Live subscribes to c when it is called, not when the result is first
+// ranged over, so a client that calls it and then starts a run misses
+// nothing, and yields what the view reads of each event, copied
+// ([Copy]) inside the subscriber. Past events are not replayed, except
+// the questions still waiting, which [agentturn.Control.Subscribe] sends
+// a new subscriber first; a run already going is read from c's State.
 //
-// An event's item is the agent's accumulator and keeps changing as the
-// stream goes on, so FromEvent copies it. It is called from the agent's
-// subscriber, which the agent delivers as a barrier, so nothing mutates
-// the item during the copy.
-func FromEvent(ev agentturn.Event) (LiveEvent, bool) {
+// Events queue without bound until the caller takes them: an in-process
+// agent's delivery is a barrier, and a slow client must not stall the
+// run or the recorder. The subscription ends when ctx is done or the
+// caller stops ranging.
+func Live(ctx context.Context, c agentturn.Control) iter.Seq2[agentturn.Event, error] {
+	q := &queue{wake: make(chan struct{}, 1)}
+	unsub := c.Subscribe(func(_ context.Context, ev agentturn.Event) error {
+		if ev, ok := Copy(ev); ok {
+			q.push(ev)
+		}
+		return nil
+	})
+	stop := context.AfterFunc(ctx, unsub)
+	return func(yield func(agentturn.Event, error) bool) {
+		defer func() {
+			stop()
+			unsub()
+		}()
+		for {
+			batch := q.take()
+			for _, ev := range batch {
+				if !yield(ev, nil) {
+					return
+				}
+			}
+			if len(batch) > 0 {
+				continue
+			}
+			select {
+			case <-q.wake:
+			case <-ctx.Done():
+				if !errors.Is(ctx.Err(), context.Canceled) {
+					yield(nil, ctx.Err())
+				}
+				return
+			}
+		}
+	}
+}
+
+// queue is an unbounded FIFO with a wake-up for its one reader.
+type queue struct {
+	mu   sync.Mutex
+	evs  []agentturn.Event
+	wake chan struct{}
+}
+
+func (q *queue) push(ev agentturn.Event) {
+	q.mu.Lock()
+	q.evs = append(q.evs, ev)
+	q.mu.Unlock()
+	select {
+	case q.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (q *queue) take() []agentturn.Event {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := q.evs
+	q.evs = nil
+	return out
+}
+
+// Copy returns what a view keeps of ev, sharing nothing the agent goes
+// on changing, and false for an event a view does not read: an item
+// the model never sees (Hidden), a response end without its response,
+// and the events of the loop's own bookkeeping (turn_end, queued,
+// model_blocked). An event's item is the agent's accumulator, so a
+// subscriber copies it before its callback returns, as [Live] does.
+//
+// What the view does not read and could be large is left out of the
+// copy: a run end's transcript, a request's input (only its model is
+// kept), an update's raw stream event, a response's output items (its
+// ID, model, status and usage are kept), and a pending call's tool.
+func Copy(ev agentturn.Event) (agentturn.Event, bool) {
 	switch e := ev.(type) {
 	case *agentturn.RunStart:
-		return &RunStarted{RunID: e.RunID, Resume: e.Source == agentturn.SourceResume}, true
+		c := *e
+		return &c, true
 	case *agentturn.TurnStart:
-		return &TurnStarted{RunID: e.RunID, Turn: e.Turn, Model: e.Request.Model}, true
+		c := *e
+		c.Request = openresponses.Request{Model: e.Request.Model}
+		c.Inputs = e.Inputs.Clone()
+		c.Arrived = slices.Clone(e.Arrived)
+		return &c, true
 	case *agentturn.ModelRetry:
-		return &ModelRetrying{RunID: e.RunID, Turn: e.Turn, Attempt: e.Attempt, Err: e.Err, Delay: e.Delay}, true
+		c := *e
+		c.Request = openresponses.Request{Model: e.Request.Model}
+		return &c, true
 	case *agentturn.ItemStart:
 		if e.Hidden {
 			return nil, false
 		}
-		return &ItemOpened{RunID: e.RunID, ResponseID: e.ResponseID, Item: CloneItem(e.Item)}, true
+		c := *e
+		c.Item = CloneItem(e.Item)
+		return &c, true
 	case *agentturn.ItemUpdate:
-		return &ItemUpdated{RunID: e.RunID, ResponseID: e.ResponseID, Item: CloneItem(e.Item)}, true
+		c := *e
+		c.Item, c.Stream = CloneItem(e.Item), nil
+		return &c, true
 	case *agentturn.ItemEnd:
 		if e.Hidden {
 			return nil, false
 		}
-		return &ItemCompleted{RunID: e.RunID, ResponseID: e.ResponseID, Item: CloneItem(e.Item)}, true
+		c := *e
+		c.Item = CloneItem(e.Item)
+		return &c, true
 	case *agentturn.ResponseEnd:
 		if e.Response == nil {
 			return nil, false
 		}
-		return &ResponseCompleted{RunID: e.RunID, ResponseID: e.Response.ID, Model: e.Response.Model, Status: e.Response.Status, Withheld: e.Withheld}, true
-	case *agentturn.ToolStart:
-		return &ToolOpened{RunID: e.RunID, CallID: e.CallID, Name: e.Name, Args: string(e.Args), Parent: e.Parent}, true
-	case *agentturn.ToolDispatch:
-		return &ToolDispatched{RunID: e.RunID, CallID: e.CallID, Name: e.Name}, true
-	case *agentturn.ToolUpdate:
-		return &ToolProgress{RunID: e.RunID, CallID: e.CallID, Name: e.Name, Partial: resultText(e.Partial)}, true
-	case *agentturn.ToolEnd:
-		return &ToolFinished{RunID: e.RunID, CallID: e.CallID, Name: e.Name, Result: resultText(e.Result),
-			Err: e.Err, Blocked: e.Blocked, Deferred: e.Deferred, Reason: e.Reason, Parent: e.Parent}, true
-	case *agentturn.RunEnd:
-		end := &RunEnded{RunID: e.RunID, Reason: e.Reason, Err: e.Err, Withheld: e.Withheld}
-		for _, p := range e.Pending {
-			if p.Call == nil {
-				continue
-			}
-			end.Pending = append(end.Pending, Pending{CallID: p.Call.CallID, Name: p.Call.Name, Args: p.Call.Arguments, Reason: p.Reason})
+		c := *e
+		r := e.Response
+		c.Response = &openresponses.Response{ID: r.ID, Model: r.Model, Status: r.Status}
+		if r.Usage != nil {
+			u := *r.Usage
+			c.Response.Usage = &u
 		}
-		return end, true
+		return &c, true
+	case *agentturn.ToolStart:
+		c := *e
+		c.Args = slices.Clone(e.Args)
+		c.Decision = copyDecision(e.Decision)
+		return &c, true
+	case *agentturn.ToolDispatch:
+		c := *e
+		return &c, true
+	case *agentturn.ToolUpdate:
+		c := *e
+		return &c, true
+	case *agentturn.ToolEnd:
+		c := *e
+		return &c, true
+	case *agentturn.RunEnd:
+		c := *e
+		c.Items = nil
+		c.Pending = make([]agentturn.PendingCall, 0, len(e.Pending))
+		for _, p := range e.Pending {
+			p.Tool = nil
+			if p.Call != nil {
+				p.Call = CloneItem(p.Call).(*openresponses.FunctionCall)
+			}
+			if p.Ran != nil {
+				p.Ran = CloneItem(p.Ran).(*openresponses.FunctionCallOutput)
+			}
+			p.Args = slices.Clone(p.Args)
+			p.Decision = copyDecision(p.Decision)
+			c.Pending = append(c.Pending, p)
+		}
+		return &c, true
+	case *agentturn.Question:
+		c := *e
+		if e.Call != nil {
+			call := *e.Call
+			call.Args = slices.Clone(call.Args)
+			call.Decision = copyDecision(call.Decision)
+			c.Call = &call
+		}
+		return &c, true
+	case *agentturn.QuestionClosed:
+		c := *e
+		if e.Answer != nil {
+			a := *e.Answer
+			c.Answer = &a
+		}
+		return &c, true
 	}
 	return nil, false
 }
 
-func resultText(r agenttool.Result) string { return r.Output.String() }
+func copyDecision(d *agentturn.ToolDecision) *agentturn.ToolDecision {
+	if d == nil {
+		return nil
+	}
+	c := *d
+	c.Args = slices.Clone(d.Args)
+	return &c
+}
 
-// CloneItem returns a copy of item that shares nothing with it.
+// CloneItem returns a deep copy of item, which shares nothing with it.
 func CloneItem(item openresponses.Item) openresponses.Item {
 	if item == nil {
 		return nil
@@ -283,9 +207,7 @@ func CloneItem(item openresponses.Item) openresponses.Item {
 	return openresponses.Items{item}.Clone()[0]
 }
 
-// ItemID is the ID an item carries, and "" for one with none. A function
-// call or its output is keyed by its call ID instead, which [CallID]
-// reads.
+// ItemID is the item's own ID, "" for an item that has none.
 func ItemID(item openresponses.Item) string {
 	switch v := item.(type) {
 	case *openresponses.Message:
@@ -302,7 +224,7 @@ func ItemID(item openresponses.Item) string {
 	return ""
 }
 
-// CallID is the call ID of a function call or its output, and "" for any
+// CallID is the call ID of a function call or its output, "" for any
 // other item.
 func CallID(item openresponses.Item) string {
 	switch v := item.(type) {

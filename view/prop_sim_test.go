@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
@@ -95,7 +96,7 @@ func (s pScript) String() string {
 }
 
 type liveStep struct {
-	ev    client.LiveEvent
+	ev    agentturn.Event
 	after int // entries written before the event was queued
 }
 
@@ -176,7 +177,7 @@ func (s *sim) write(e agentsession.Entry) string {
 	return id
 }
 
-func (s *sim) live(ev client.LiveEvent) {
+func (s *sim) live(ev agentturn.Event) {
 	s.tl.lives = append(s.tl.lives, liveStep{ev: ev, after: len(s.tl.entries)})
 }
 
@@ -360,7 +361,7 @@ func (s *sim) run(el pElem, n int) {
 	}
 	s.curRun = runID
 	s.write(agentsession.NewRunStart(runID, src, ""))
-	s.live(&client.RunStarted{RunID: runID, Resume: resume})
+	s.live(&agentturn.RunStart{RunID: runID, Source: source(resume)})
 	if el.Model != "" {
 		s.model = el.Model
 	}
@@ -375,9 +376,9 @@ func (s *sim) run(el pElem, n int) {
 	} else {
 		text := s.uid("u")
 		item := openresponses.UserText(text)
-		s.live(&client.ItemOpened{RunID: runID, Item: client.CloneItem(item)})
+		s.live(&agentturn.ItemStart{RunID: runID, Item: client.CloneItem(item)})
 		s.write(s.itemEntry(item, ""))
-		s.live(&client.ItemCompleted{RunID: runID, Item: client.CloneItem(item)})
+		s.live(&agentturn.ItemEnd{RunID: runID, Item: client.CloneItem(item)})
 	}
 	if el.HiddenPrompt {
 		// An item the caller marked hidden: in the context, written with
@@ -419,10 +420,10 @@ func (s *sim) answer(runID string, pend []*agentsession.Call, approve bool) {
 		switch {
 		case held && approve:
 			s.write(agentsession.NewDecision(callID, c.Entry.ID, agentsession.VerdictProceed, "user"))
-			s.live(&client.ToolOpened{RunID: runID, CallID: callID, Name: c.Call.Name, Args: c.Call.Arguments})
+			s.live(&agentturn.ToolStart{RunID: runID, CallID: callID, Name: c.Call.Name, Args: json.RawMessage(c.Call.Arguments)})
 			s.write(agentsession.NewDispatch(callID, c.Entry.ID))
-			s.live(&client.ToolDispatched{RunID: runID, CallID: callID, Name: c.Call.Name})
-			s.live(&client.ToolFinished{RunID: runID, CallID: callID, Name: c.Call.Name, Result: "ran"})
+			s.live(&agentturn.ToolDispatch{RunID: runID, CallID: callID, Name: c.Call.Name})
+			s.live(&agentturn.ToolEnd{RunID: runID, CallID: callID, Name: c.Call.Name, Result: agenttool.Text("ran")})
 			s.output(runID, callID, "ran")
 		case dispatched && !held:
 			s.write(agentsession.NewDecision(callID, c.Entry.ID, agentsession.VerdictAnswer, "user").WithReason("unknown"))
@@ -436,23 +437,23 @@ func (s *sim) answer(runID string, pend []*agentsession.Call, approve bool) {
 
 func (s *sim) output(runID, callID, text string) {
 	out := openresponses.NewFunctionCallOutput(callID, text)
-	s.live(&client.ItemOpened{RunID: runID, Item: client.CloneItem(out)})
+	s.live(&agentturn.ItemStart{RunID: runID, Item: client.CloneItem(out)})
 	s.flush()
 	s.write(s.itemEntry(out, ""))
-	s.live(&client.ItemCompleted{RunID: runID, Item: client.CloneItem(out)})
+	s.live(&agentturn.ItemEnd{RunID: runID, Item: client.CloneItem(out)})
 }
 
 func (s *sim) finish(runID string, end endKind) {
 	pend := s.pending()
 	var ids []string
-	var lp []client.Pending
+	var lp []agentturn.PendingCall
 	for _, c := range pend {
 		ids = append(ids, c.ID())
 		reason := agentturn.PendingAborted
 		if s.tl.deferred[c.ID()] && c.Held() {
 			reason = agentturn.PendingDeferred
 		}
-		lp = append(lp, client.Pending{CallID: c.ID(), Name: c.Call.Name, Args: c.Call.Arguments, Reason: reason})
+		lp = append(lp, agentturn.PendingCall{Call: &openresponses.FunctionCall{CallID: c.ID(), Name: c.Call.Name, Arguments: c.Call.Arguments}, Reason: reason})
 	}
 	reason, live := agentsession.ReasonDone, agentturn.ReasonDone
 	withheld := false
@@ -477,7 +478,7 @@ func (s *sim) finish(runID string, end endKind) {
 		s.inFlight = false
 	}
 	s.write(agentsession.NewRunEnd(runID, reason, "", ids))
-	s.live(&client.RunEnded{RunID: runID, Reason: live, Withheld: withheld, Pending: lp})
+	s.live(&agentturn.RunEnd{RunID: runID, Reason: live, Withheld: withheld, Pending: lp})
 }
 
 func textItem(item openresponses.Item, text string) openresponses.Item {
@@ -529,7 +530,7 @@ func (s *sim) endItem(runID string, h heldItem, resp string) {
 	} else {
 		s.held = append(s.held, h)
 	}
-	s.live(&client.ItemCompleted{RunID: runID, ResponseID: resp, Item: client.CloneItem(h.item)})
+	s.live(&agentturn.ItemEnd{RunID: runID, ResponseID: resp, Item: client.CloneItem(h.item)})
 }
 
 // commit ends the reasoning items the loop held, as a message or a call
@@ -546,8 +547,8 @@ func (s *sim) commit(runID string) {
 // response ID the stream carries by now.
 func (s *sim) openItem(runID string, item openresponses.Item) {
 	p := partialOf(item)
-	s.live(&client.ItemOpened{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(p)})
-	s.live(&client.ItemUpdated{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(p)})
+	s.live(&agentturn.ItemStart{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(p)})
+	s.live(&agentturn.ItemUpdate{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(p)})
 }
 
 type callRec struct {
@@ -566,7 +567,7 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 	if s.model != "" && s.model != s.recModel && (s.lateCfg || t.Model != "") {
 		s.pendCfg = s.model
 	}
-	s.live(&client.TurnStarted{RunID: runID, Turn: n, Model: s.model})
+	s.live(&agentturn.TurnStart{RunID: runID, Turn: n, Request: openresponses.Request{Model: s.model}})
 	s.respName = s.uid("resp")
 	s.respID = ""
 	if t.Named {
@@ -577,9 +578,9 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 		s.tl.ephemeral[x] = true
 		item := textItem(openresponses.AssistantText(""), x+" do")
 		item.(*openresponses.Message).ID = s.uid("msg_failed")
-		s.live(&client.ItemOpened{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(item)})
-		s.live(&client.ItemUpdated{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(item)})
-		s.live(&client.ModelRetrying{RunID: runID, Turn: n, Attempt: a + 1})
+		s.live(&agentturn.ItemStart{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(item)})
+		s.live(&agentturn.ItemUpdate{RunID: runID, ResponseID: s.respID, Item: client.CloneItem(item)})
+		s.live(&agentturn.ModelRetry{RunID: runID, Turn: n, Attempt: a + 1})
 	}
 	s.inFlight = true
 	s.held, s.loopHeld = nil, nil
@@ -669,7 +670,7 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 	}
 	s.write(&agentsession.ResponseEntry{ResponseID: s.respName, Status: status})
 	s.inFlight = false
-	s.live(&client.ResponseCompleted{RunID: runID, ResponseID: s.respName, Withheld: t.Withheld})
+	s.live(&agentturn.ResponseEnd{RunID: runID, Withheld: t.Withheld, Response: &openresponses.Response{ID: s.respName}})
 	if t.Withheld {
 		return endWithheld
 	}
@@ -681,32 +682,32 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 	var done []string
 	for _, c := range calls {
 		call := s.callEntryOf(c.id)
-		s.live(&client.ToolOpened{RunID: runID, CallID: c.id, Name: "tool", Args: "{}"})
+		s.live(&agentturn.ToolStart{RunID: runID, CallID: c.id, Name: "tool", Args: json.RawMessage("{}")})
 		s.flush()
 		switch {
 		case c.spec.Defer:
 			s.write(agentsession.NewDecision(c.id, call, agentsession.VerdictHold, "policy").WithReason("q-" + c.id))
-			s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Deferred: true, Reason: "q-" + c.id})
+			s.live(&agentturn.ToolEnd{RunID: runID, CallID: c.id, Name: "tool", Deferred: true, Reason: "q-" + c.id})
 			if end == endNone {
 				end = endInput
 			}
 		default:
 			s.write(agentsession.NewDispatch(c.id, call))
-			s.live(&client.ToolDispatched{RunID: runID, CallID: c.id, Name: "tool"})
+			s.live(&agentturn.ToolDispatch{RunID: runID, CallID: c.id, Name: "tool"})
 			if c.spec.Progress {
-				s.live(&client.ToolProgress{RunID: runID, CallID: c.id, Name: "tool", Partial: "p-" + c.id})
+				s.live(&agentturn.ToolUpdate{RunID: runID, CallID: c.id, Name: "tool", Partial: agenttool.Text("p-" + c.id)})
 			}
 			for k := 0; k < c.spec.Children; k++ {
 				child := fmt.Sprintf("%s.%d", c.id, k)
-				s.live(&client.ToolOpened{RunID: runID, CallID: child, Name: "child", Args: "{}", Parent: c.id})
+				s.live(&agentturn.ToolStart{RunID: runID, CallID: child, Name: "child", Args: json.RawMessage("{}"), Parent: c.id})
 				s.write(&agentsession.CustomEntry{NS: "agentturn.nested", Data: json.RawMessage(`{}`), CallID: c.id})
-				s.live(&client.ToolFinished{RunID: runID, CallID: child, Name: "child", Result: "C-" + child, Parent: c.id})
+				s.live(&agentturn.ToolEnd{RunID: runID, CallID: child, Name: "child", Result: agenttool.Text("C-" + child), Parent: c.id})
 			}
 			if c.spec.Hang {
-				s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Err: errors.New("aborted")})
+				s.live(&agentturn.ToolEnd{RunID: runID, CallID: c.id, Name: "tool", Err: errors.New("aborted")})
 				end = endAbort
 			} else {
-				s.live(&client.ToolFinished{RunID: runID, CallID: c.id, Name: "tool", Result: "R-" + c.id})
+				s.live(&agentturn.ToolEnd{RunID: runID, CallID: c.id, Name: "tool", Result: agenttool.Text("R-" + c.id)})
 				done = append(done, c.id)
 			}
 		}
@@ -724,11 +725,11 @@ func (s *sim) turn(runID string, n int, t pTurn) endKind {
 		// message before the next model call.
 		item := openresponses.UserText(s.uid("u"))
 		q := s.write(agentsession.NewQueued(client.CloneItem(item), agentsession.ModeSteer))
-		s.live(&client.ItemOpened{RunID: runID, Item: client.CloneItem(item)})
+		s.live(&agentturn.ItemStart{RunID: runID, Item: client.CloneItem(item)})
 		e := s.itemEntry(item, "")
 		e.QueuedFrom = q
 		s.write(e)
-		s.live(&client.ItemCompleted{RunID: runID, Item: client.CloneItem(item)})
+		s.live(&agentturn.ItemEnd{RunID: runID, Item: client.CloneItem(item)})
 	}
 	return end
 }
