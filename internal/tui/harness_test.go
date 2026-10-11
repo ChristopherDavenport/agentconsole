@@ -246,7 +246,7 @@ func newAppOn(t *testing.T, cfg agentturn.Config, start starter) *app {
 func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
 	t.Helper()
 	return newAppFrom(t, start, func(ctx context.Context, rec *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error) {
-		kit, err := agentkit.New(ctx, agentkit.WithModel(cfg.Model, cfg.ModelName), agentkit.WithRecorder(rec))
+		kit, err := agentkit.New(ctx, agentkit.WithModel(cfg.Model, cfg.ModelName), agentkit.WithRecorder(rec), agentkit.WithQuestionEvents())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -259,7 +259,7 @@ func newAppWith(t *testing.T, cfg agentturn.Config, start starter, wrap func(age
 func newKitApp(t *testing.T, kopts []agentkit.Option, wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
 	t.Helper()
 	return newAppFrom(t, nil, func(ctx context.Context, rec *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error) {
-		kit, err := agentkit.New(ctx, append(kopts, agentkit.WithRecorder(rec))...)
+		kit, err := agentkit.New(ctx, append(kopts, agentkit.WithRecorder(rec), agentkit.WithQuestionEvents())...)
 		if err != nil {
 			return nil, nil, err
 		}

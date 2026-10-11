@@ -85,7 +85,7 @@ func TestAllowingWithANoteSendsTheNote(t *testing.T) {
 	a.key("enter")
 	a.waitFor("the run finished", all(has(`task text="go"`, "done", "idle"), lacks("Question (1/1)")))
 	a.key("ctrl+o")
-	a.waitFor("the note reached the call", has("SUBAGENT WROTE The user said: only the notes"))
+	a.waitFor("the note reached the model", has("SUBAGENT WROTE", "only the notes"))
 }
 
 func TestAToolsOwnQuestionIsYesOrNo(t *testing.T) {

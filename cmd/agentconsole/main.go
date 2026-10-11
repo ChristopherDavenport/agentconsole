@@ -72,6 +72,8 @@ func run() error {
 		agentkit.WithModel(openresponses.NewClient(*baseURL, clientOpts...).AsAdapter(), *model),
 		agentkit.WithMaxTurns(*maxTurns),
 		agentkit.WithRecorder(rec),
+		// The client answers the agent's questions, so they are events.
+		agentkit.WithQuestionEvents(),
 	}
 	if *instructions != "" {
 		kopts = append(kopts, agentkit.WithInstructions(*instructions))

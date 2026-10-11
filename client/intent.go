@@ -77,7 +77,11 @@ type headMover interface {
 //     failed before it started, with that error ([agentturn.ErrRunning],
 //     say). An error after the start reaches the client in the run's
 //     [agentturn.RunEnd].
-//   - Queue, Abort and Reply are c's own, which return at once.
+//   - Queue, Abort and Reply are c's own, which return at once. Reply
+//     goes under ctx, which names who answered when it carries
+//     [agentturn.ContextWithAnswerer]: the view holds no identity, so
+//     an embedder that knows the person wraps the Controller and adds
+//     it to a Reply's context. Without it the answer is unattributed.
 //   - ContinueFrom goes to c when c has a ContinueFrom(ctx, entryID)
 //     method (agentkit's Control has), and is refused with
 //     [ErrNoHeadMove] otherwise.
@@ -103,7 +107,7 @@ func Direct(c agentturn.Control) Controller {
 			c.Abort()
 			return nil
 		case Reply:
-			return c.Reply(in.ID, in.Answer)
+			return c.Reply(ctx, in.ID, in.Answer)
 		case ContinueFrom:
 			if h, ok := c.(headMover); ok {
 				return h.ContinueFrom(ctx, in.EntryID)
