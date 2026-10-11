@@ -7,7 +7,7 @@ versions may break the API.
 
 ## Unreleased
 
-- Dependencies: agentturn and agentturn/session v0.0.26, agentpolicy
+- Dependencies: agentturn and agentturn/session v0.0.27, agentpolicy
   v0.0.16, agentkit v0.0.12.
 - Changed: `client.Direct` sends a `Reply` with the Controller's
   context, as agentturn's `Control.Reply` now takes one. The view holds
