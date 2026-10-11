@@ -1250,6 +1250,7 @@ func TestGeneratorCoverage(t *testing.T) {
 				seen["head record"]++
 			}
 		}
+		links := map[string]*agentsession.LinkEntry{}
 		for _, e := range tl.entries {
 			switch x := e.(type) {
 			case *agentsession.CustomEntry:
@@ -1272,9 +1273,15 @@ func TestGeneratorCoverage(t *testing.T) {
 				}
 			case *agentsession.LinkEntry:
 				seen["link entry"]++
+				links[x.ID] = x
 				switch {
 				case x.Cancel != "":
 					seen["cancel notice"]++
+					if t := links[x.Target]; t != nil && t.Rel == agentsession.RelSubsession && t.URL == "" {
+						seen["cancel of an in-store subsession"]++
+					}
+				case x.Rel == agentsession.RelPeer && x.URL == "":
+					seen["peer named by its session"]++
 				case x.Rel == agentsession.RelPeer:
 					seen["peer link"]++
 				case x.URL != "" && x.Session == "":
@@ -1322,7 +1329,7 @@ func TestGeneratorCoverage(t *testing.T) {
 		}
 	}
 	for _, k := range []string{"late config", "head record", "marked item", "hidden item", "steered input", "bookmark", "leaf label",
-		"cut response with no ID", "named mid-stream", "link entry", "cancel notice", "peer link", "callee subsession with no session", "compaction", "tool progress", "child call", "retry", "withheld", "unnamed stream", "input required", "aborted", "failed"} {
+		"cut response with no ID", "named mid-stream", "link entry", "cancel notice", "cancel of an in-store subsession", "peer link", "peer named by its session", "callee subsession with no session", "compaction", "tool progress", "child call", "retry", "withheld", "unnamed stream", "input required", "aborted", "failed"} {
 		if seen[k] == 0 {
 			t.Errorf("the generator never produced %q in 400 scripts", k)
 		}

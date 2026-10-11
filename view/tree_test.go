@@ -3,6 +3,7 @@ package view
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
 )
@@ -349,18 +350,74 @@ func TestACancelNoticeMarksTheLinkItNames(t *testing.T) {
 			check(t, "after a reset", v.Model(), link, other)
 			check(t, "a snapshot", At(s, ""), link, other)
 
-			// The notice before its link: it waits for the link.
+			// The notice before its link marks nothing, as Callees reads
+			// a path: a notice names a link written before it.
 			v = New()
 			v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: agentsession.New(agentsession.Header{})})
-			order := []agentsession.Entry{notice, link, other}
-			for _, e := range order {
+			for _, e := range []agentsession.Entry{notice, link, other} {
 				v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, ID: e.Base().ID, Entry: e})
 				if e == notice && len(v.Model().Links) != 0 {
 					t.Errorf("the notice is listed as a link: %+v", v.Model().Links)
 				}
 			}
-			check(t, "notice then link", v.Model(), link, other)
+			if m := v.Model(); len(m.Links) != 2 || m.Links[0].CancelSent || m.Links[1].CancelSent {
+				t.Errorf("notice then link: links = %+v, want the two callees unmarked", m.Links)
+			}
 		})
+	}
+}
+
+// TestACancelNoticeBeforeItsLinkMarksNothing: a file (one a writer
+// re-pointed, or another product's) whose notice comes before the link
+// it names, read whole. The view marks nothing, as Callees passes it
+// over.
+func TestACancelNoticeBeforeItsLinkMarksNothing(t *testing.T) {
+	newLink := func(parent string) *agentsession.LinkEntry {
+		l := agentsession.NewPeerLink("call_1", agentsession.Callee{URL: "https://peer.example/a2a", Task: "t"})
+		l.Parent, l.Timestamp = parent, time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+		return l
+	}
+	// The link's ID, from a session that holds it alone: IDs are
+	// hashes, so the same link under the same parent has the same one.
+	s := agentsession.New(agentsession.Header{ID: "s1"})
+	root := mustAppend(t, s, itemEntry(msg("a", "user", "q"), ""))
+	alone := agentsession.New(agentsession.Header{ID: "s1"})
+	first, _ := s.Entry(root)
+	if _, err := alone.Commit(first); err != nil {
+		t.Fatal(err)
+	}
+	want := mustAppend(t, alone, newLink(root))
+
+	// Commit is a read path's append: it holds the entry to the format,
+	// not to the writer's rule that a notice follows its link.
+	notice := &agentsession.LinkEntry{Rel: agentsession.RelPeer, CallID: "call_1", Target: want, Cancel: agentsession.CancelSent}
+	notice.Parent = root
+	if _, err := s.Commit(notice); err != nil {
+		t.Fatal(err)
+	}
+	link := newLink(root)
+	if _, err := s.Commit(link); err != nil {
+		t.Fatal(err)
+	}
+	if link.ID != want {
+		t.Fatalf("the link's ID is %q, not the %q the notice names", link.ID, want)
+	}
+	// With hashed IDs a link cannot follow a notice naming it on one
+	// path, so the two are siblings: the notice on one branch, the link
+	// on another, the notice first in the file.
+	callees, err := s.Callees(link.ID)
+	if err != nil || len(callees) != 1 || callees[0].Cancelled {
+		t.Fatalf("Callees = %+v, %v: want the link, not cancelled", callees, err)
+	}
+	for _, m := range []Model{At(s, ""), func() Model {
+		v := New()
+		v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: s})
+		v.Record(agentsession.Change{Kind: agentsession.Reset, Session: s})
+		return v.Model()
+	}()} {
+		if len(m.Links) != 1 || m.Links[0].Entry != link.ID || m.Links[0].CancelSent {
+			t.Errorf("links = %+v, want the peer unmarked", m.Links)
+		}
 	}
 }
 

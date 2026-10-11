@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -435,9 +436,9 @@ type treeItem struct {
 	at      string
 	title   string
 	branch  bool
-	// link is set for a session's link; one with no session, a callee
-	// that published none, opens nothing.
-	link bool
+	// closed is set for a link that names no session, a callee that
+	// published none: it opens nothing, and this says so.
+	closed string
 }
 
 // treeItems lists what the tree shows, from the live view: the branches
@@ -474,35 +475,38 @@ func (m *Model) treeItems() []treeItem {
 		out = append(out, treeItem{text: text, session: o.ParentSession, at: o.Base, title: "origin " + shortID(o.ParentSession)})
 	}
 	for _, l := range m.view.Links {
+		name := cmp.Or(shortID(l.Session), "no session")
 		var text string
-		switch {
-		case l.Rel == agentsession.RelPeer || l.URL != "":
+		switch l.Rel {
+		case agentsession.RelSubsession, agentsession.RelPeer:
 			text = "  " + calleeText(l)
-		case l.Rel == agentsession.RelSubsession:
-			text = "  subsession: " + shortID(l.Session)
-			if l.CallID != "" {
-				text += " (call " + l.CallID + ")"
-			}
-		case l.Rel == agentsession.RelContinuedIn:
-			text = "  continued in: " + shortID(l.Session)
-		case l.Rel == agentsession.RelForkOf:
-			text = "  fork: " + shortID(l.Session)
+		case agentsession.RelContinuedIn:
+			text = "  continued in: " + name
+		case agentsession.RelForkOf:
+			text = "  fork: " + name
 		default:
-			text = "  " + l.Rel + ": " + shortID(l.Session)
+			text = "  " + l.Rel + ": " + name
 		}
-		title := l.Rel + " " + shortID(l.Session)
-		if l.URL != "" {
-			title = l.Rel + " at " + l.URL
+		it := treeItem{text: text, session: l.Session, title: l.Rel + " " + name}
+		switch {
+		case l.URL != "":
+			it.title = l.Rel + " at " + l.URL
+			if l.Session == "" {
+				it.closed = "the " + it.title + " published no session to open"
+			}
+		case l.Session == "":
+			it.closed = "this " + l.Rel + " link names no session to open"
 		}
-		out = append(out, treeItem{text: text, session: l.Session, title: title, link: true})
+		out = append(out, it)
 	}
 	return out
 }
 
-// calleeText describes a callee in another system, or a peer: a
-// subsession here is one the call started and ends when it gives up, a
-// peer one whose work outlives the call. A cancel the caller sent is
-// said as sent, since it did not wait to learn whether the work stopped.
+// calleeText describes a subsession or a peer: a subsession is work the
+// call started and ends when it gives up, a peer's work outlives the
+// call. One in another system says where it is and its task. A cancel
+// the caller sent is said as sent, since it did not wait to learn
+// whether the work stopped.
 func calleeText(l view.Link) string {
 	kind := "subsession"
 	if l.Rel == agentsession.RelPeer {
@@ -510,17 +514,14 @@ func calleeText(l view.Link) string {
 	}
 	var text string
 	if l.URL == "" {
-		// A peer named by its session alone.
-		text = kind + ": " + shortID(l.Session)
+		text = kind + ": " + cmp.Or(shortID(l.Session), "no session")
 		if l.CallID != "" {
 			text += " (call " + l.CallID + ")"
 		}
 	} else {
-		text = kind + " at " + l.URL + ": "
+		text = kind + " at " + l.URL + ": no task"
 		if l.Task != "" {
-			text += "task " + l.Task
-		} else {
-			text += "no task"
+			text = kind + " at " + l.URL + ": task " + l.Task
 		}
 		if l.CallID != "" {
 			text += " (call " + l.CallID + ")"
@@ -608,8 +609,8 @@ func (m *Model) openTreeItem() tea.Cmd {
 		return nil
 	}
 	it := items[m.treeCur]
-	if it.link && it.session == "" {
-		m.note = "the " + it.title + " published no session to open"
+	if it.closed != "" {
+		m.note = it.closed
 		m.relayout()
 		return nil
 	}

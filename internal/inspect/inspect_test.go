@@ -747,11 +747,12 @@ func TestACallShowsItsCallees(t *testing.T) {
 		call.ResponseID = "resp_1"
 		calls[c] = add(call)
 	}
-	add(agentsession.NewDispatch("call_peer", calls["call_peer"]))
+	dispatches := map[string]string{}
+	dispatches["call_peer"] = add(agentsession.NewDispatch("call_peer", calls["call_peer"]))
 	peer := agentsession.NewPeerLink("call_peer", agentsession.Callee{URL: "https://peer.example/a2a", Task: "task-p", Context: "ctx-p"})
 	peer.ID = add(peer)
 	add(agentsession.NewItemEntry(openresponses.NewFunctionCallOutput("call_peer", "done")))
-	add(agentsession.NewDispatch("call_sub", calls["call_sub"]))
+	dispatches["call_sub"] = add(agentsession.NewDispatch("call_sub", calls["call_sub"]))
 	sub := agentsession.NewCalleeSubsessionLink("call_sub", agentsession.Callee{URL: "https://sub.example/a2a", Task: "task-s", Session: "remote-1"})
 	sub.ID = add(sub)
 	add(agentsession.NewCancelSentLink(sub))
@@ -774,13 +775,9 @@ func TestACallShowsItsCallees(t *testing.T) {
 		if len(e.Call.Callees) != 1 {
 			t.Fatalf("%s callees = %+v, want one", c.call, e.Call.Callees)
 		}
-		got := e.Call.Callees[0]
-		if got.Dispatch == "" {
-			t.Errorf("%s: the link belongs to no dispatch: %+v", c.call, got)
-		}
-		got.Dispatch = ""
-		if got != c.want {
-			t.Errorf("%s callee = %+v, want %+v", c.call, got, c.want)
+		c.want.Dispatch = dispatches[c.call]
+		if got := e.Call.Callees[0]; got != c.want {
+			t.Errorf("%s callee = %+v, want %+v", c.call, e.Call.Callees[0], c.want)
 		}
 		text := joined(e.Lines())
 		if !strings.Contains(text, c.line) {

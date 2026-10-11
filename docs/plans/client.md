@@ -1192,10 +1192,16 @@ agentsession v0.0.24 (format 0.12) names a call's callee in another
 system, reached over A2A, on a `subsession` or `peer` link (`url`,
 `task`, `context`, and `session` only when the callee publishes one),
 and records a cancel the caller sent as a later link of the same call
-that names the callee's link. agentturn's recorder writes them from its
-A2A tool. The relation follows the callee's lifetime: a subsession is
-work the call started and ends, or asks to stop, when it gives the call
-up; a peer's work outlives the call.
+that names the callee's link. The relation follows the callee's
+lifetime: a subsession is work the call started and ends, or asks to
+stop, when it gives the call up; a peer's work outlives the call.
+
+The links come from agentturn's session recorder once agentturn#252 is
+released. Until then (agentturn v0.0.28), agentturn's `tools/a2a`
+records a real A2A run's callee and its cancel as custom entries (`agentturn:a2a_callee`,
+`agentturn:a2a_cancel`), which the client does not read, so the tree
+shows no callee for it. The view is ready for the links and is tested on
+sessions built by hand.
 
 - **`view.Link` carries the callee.** Exported fields added: `URL`,
   `Task`, `Context` (empty for a subsession of this store) and
@@ -1206,28 +1212,43 @@ up; a peer's work outlives the call.
   call's detail pane shows them.
 - **A cancel notice is folded into its link, never listed.** It marks
   the link its target names `CancelSent`, which says the cancel was
-  sent, not that the work stopped: the caller did not wait. The mark is
-  the session's, as `Links` is: a notice is on a path through its link,
-  and a cancel sent to work in another system was sent whichever branch
-  is viewed. A notice that lands before its link (the format and the
-  store's append keep the link first, so this is a foreign or re-pointed
-  file) waits in the view until the link lands; a reset or snapshot
-  drops what waits and reads the session in again. A notice naming a
+  sent, not that the work stopped: the caller did not wait. It marks
+  only a link that landed before it, as `Callees` reads a path: a notice
+  that comes before its link (the format and the store's append keep
+  the link first, so only a foreign or re-pointed file has one) marks
+  nothing, on the follow and after a reset alike. A notice naming a
   link of another relation is passed over, as `Callees` does, and one
   naming no link never shows: there is no link to mark.
-- **The tree says what each callee is.** An in-process subsession reads
-  as before. A callee in another system reads "subsession at URL" or
-  "peer at URL", with its task ("no task" when it answered without one),
-  its call, its session or "no session to open"; a peer named by its
-  session alone reads "peer: SESSION"; either ends "cancel sent" when
-  marked. A link with no session opens nothing: Enter or a click says
-  the callee published no session and stays on the tree. One with a
-  session opens it read only, as before, when the store holds it.
+- **The tree's mark is the session's; the call pane reads the viewed
+  path.** `Links` is every branch's, so a link marked by a notice on
+  any branch shows "cancel sent" in the tree, whichever branch is
+  viewed: a cancel sent to work in another system was sent. The call's
+  detail pane reads `Callees` on the viewed line, so for a link on a
+  shared prefix whose notice is on another branch the pane shows no
+  mark where the tree does. The view does not check that a notice is on
+  a path through its link (the store's append does); a foreign file's
+  notice on one branch naming a link only on another marks it in the
+  tree, where `Callees` would not.
+- **The tree says what each callee is.** A subsession of this store
+  reads as before, "subsession: SESSION (call C)". A callee in another
+  system reads "subsession at URL" or "peer at URL", with its task ("no
+  task" when it answered without one), its call, its session or "no
+  session to open"; a peer named by its session alone reads "peer:
+  SESSION". Every subsession and peer label ends "cancel sent" when
+  marked. A link that names no session reads "no session" in its place
+  and opens nothing: Enter or a click says so on the status line and
+  stays on the tree. One with a session opens it read only, as before,
+  when the store holds it.
 - **A call's detail lists its callees,** from `agentsession.Callees`
   over the viewed line: relation, URL, task, context, session, the link
   and the dispatch it belongs to, then "cancel sent" or "answered the
   call". The client has no pane for a link entry of its own: links are
   not rows.
+- **The binary writes format 0.12.** agentturn/session v0.0.28 asks for
+  agentsession v0.0.20 only; this release's floor of v0.0.24 is what
+  raises every session the binary appends to to format 0.12, and an
+  embedder that takes this floor (dax, by version selection) with it. A
+  reader built on agentsession before v0.0.24 refuses those files.
 
 ## Open questions
 

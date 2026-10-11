@@ -404,7 +404,8 @@ func TestTheTreeLabelsCalleesAndOpensOnlyThoseWithASession(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendTo(agentsession.NewItemEntry(openresponses.UserText("hand it off")))
-	appendTo(agentsession.NewSubsessionLink(child.ID(), "call_in"))
+	in := agentsession.NewSubsessionLink(child.ID(), "call_in")
+	in.ID = appendTo(in)
 	peer := agentsession.NewPeerLink("call_peer", agentsession.Callee{URL: "https://peer.example/a2a", Task: "task-p", Context: "ctx-p"})
 	peer.ID = appendTo(peer)
 	appendTo(agentsession.NewCalleeSubsessionLink("call_sub", agentsession.Callee{URL: "https://sub.example/a2a", Task: "task-s", Session: remote.ID()}))
@@ -414,16 +415,21 @@ func TestTheTreeLabelsCalleesAndOpensOnlyThoseWithASession(t *testing.T) {
 	local := agentsession.NewPeerLink("call_local", agentsession.Callee{Session: child.ID()})
 	local.ID = appendTo(local)
 	appendTo(agentsession.NewCancelSentLink(local))
+	// The in-process subsession was asked to stop too, and a link names
+	// no session at all.
+	appendTo(agentsession.NewCancelSentLink(in))
+	appendTo(agentsession.NewLinkEntry(agentsession.RelContinuedIn, ""))
 
 	a.waitFor("the conversation", has("hand it off"))
 	a.key("ctrl+t")
-	s := a.waitFor("the links in the tree", has("other sessions", "x-reviewed_by", "call_local"))
+	s := a.waitFor("the links in the tree", has("other sessions", "x-reviewed_by", "call_local", "continued in"))
 	for _, want := range []string{
-		"subsession: " + child.ID()[:8] + " (call call_in)",
+		"subsession: " + child.ID()[:8] + " (call call_in), cancel sent",
 		"peer at https://peer.example/a2a: task task-p (call call_peer), no session to open, cancel sent",
 		"subsession at https://sub.example/a2a: task task-s (call call_sub), session " + remote.ID()[:8],
 		"x-reviewed_by: reviewer",
 		"peer: " + child.ID()[:8] + " (call call_local), cancel sent",
+		"continued in: no session",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the tree lacks %q:\n%s", want, s)
@@ -443,7 +449,20 @@ func TestTheTreeLabelsCalleesAndOpensOnlyThoseWithASession(t *testing.T) {
 	if !strings.Contains(s, "branches of session") || strings.Contains(s, "VIEWING") {
 		t.Errorf("selecting a callee with no session left the tree:\n%s", s)
 	}
-	a.press("down", "enter")
+	// A click selects the item and a second opens it, the same path: it
+	// opens nothing either.
+	a.clickOn("peer at https://peer.example/a2a: task")
+	a.clickOn("peer at https://peer.example/a2a: task")
+	s = a.screen()
+	if !strings.Contains(s, "branches of session") || strings.Contains(s, "VIEWING") || !strings.Contains(lineWith(s, "peer at https://peer.example/a2a: task"), "▶") {
+		t.Errorf("clicking a callee with no session left the tree:\n%s", s)
+	}
+	// A link that names no session and no callee says so.
+	a.clickOn("continued in")
+	a.clickOn("continued in")
+	a.waitFor("the empty link refused", has("this continued_in link names no session to open", "branches of session"))
+	a.clickOn("sub.example")
+	a.key("enter")
 	a.waitFor("the remote subsession opened", all(has("VIEWING subsession at https://sub.example/a2a", "read only"), lacks("branches of session")))
 	a.key("esc")
 	a.waitFor("back on the live session", all(has("hand it off"), lacks("VIEWING")))
