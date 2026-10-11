@@ -55,7 +55,7 @@ func startKit(t *testing.T, kopts []agentkit.Option, opts ...console.Option) *ri
 	if err != nil {
 		t.Fatal(err)
 	}
-	kit, err := agentkit.New(ctx, append(kopts, agentkit.WithRecorder(rec))...)
+	kit, err := agentkit.New(ctx, append(kopts, agentkit.WithRecorder(rec), agentkit.WithQuestionEvents())...)
 	if err != nil {
 		t.Fatal(err)
 	}

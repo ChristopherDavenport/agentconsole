@@ -5,6 +5,24 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentturn and agentturn/session v0.0.27, agentpolicy
+  v0.0.16, agentkit v0.0.12.
+- Changed: `client.Direct` sends a `Reply` with the Controller's
+  context, as agentturn's `Control.Reply` now takes one. The view holds
+  no identity: an embedder that knows who answered wraps the Controller
+  and adds `agentturn.ContextWithAnswerer` to a `Reply`'s context, and
+  the record names them; without it the answer is unattributed.
+- Changed: the binary and the tests build their kits with
+  `agentkit.WithQuestionEvents()`. Since agentkit v0.0.12 a kit puts a
+  tool's question as an event only when asked to; without it the
+  question goes unasked.
+- Changed: a note given with an accept of a question about a call
+  reaches the model as the person's own message after the batch's
+  outputs (agentturn v0.0.24), no longer appended to the decision's
+  note the call reads.
+
 ## v0.0.11 - 2026-10-10
 
 - Changed: agentconsole is the view and is not the controller (#33,
