@@ -270,8 +270,9 @@ type Model struct {
 	// Leaves less a leaf label that only marks a head (see branchTips),
 	// plus the viewed line.
 	Branches []Branch
-	// Links are the session's link entries: its subsessions, its
-	// successor.
+	// Links are the session's link entries, on any branch: its
+	// subsessions, its peers, its successor. A cancel notice is folded
+	// into the link it names.
 	Links []Link
 	// Origin is where the session came from, by its header.
 	Origin Origin
@@ -394,6 +395,9 @@ type View struct {
 	entries  int
 	origin   Origin
 	links    []Link
+	// cancels are the targets of cancel notices whose link has not
+	// landed yet.
+	cancels map[string]bool
 	// parent maps the entries the view has seen to their parents, to tell
 	// whether two entries are on one line.
 	parent map[string]string
@@ -442,6 +446,7 @@ func New() *View {
 	return &View{
 		landedItems: map[string][]landedItem{},
 		parent:      map[string]string{},
+		cancels:     map[string]bool{},
 		runTip:      map[string]string{},
 		tipOwner:    map[string]string{},
 		landedCalls: map[string]bool{},
@@ -608,7 +613,7 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.landedOuts = map[string]bool{}
 	v.endSeen, v.endOrder = map[string]bool{}, nil
 	v.parent = map[string]string{}
-	v.links = nil
+	v.links, v.cancels = nil, map[string]bool{}
 	v.runTip, v.tipOwner, v.runOrder = map[string]string{}, map[string]string{}, nil
 	v.setSession(s, "")
 	v.replaying = true
@@ -763,9 +768,7 @@ func (v *View) land(e agentsession.Entry) {
 	v.trackRun(e)
 	switch x := e.(type) {
 	case *agentsession.LinkEntry:
-		if !slices.ContainsFunc(v.links, func(l Link) bool { return l.Entry == x.ID }) {
-			v.links = append(v.links, Link{Rel: x.Rel, Session: x.Session, CallID: x.CallID, Entry: x.ID})
-		}
+		v.landLink(x)
 	case *agentsession.ItemEntry:
 		v.landItem(x.Item, x.ResponseID)
 	case *agentsession.CustomEntry:
@@ -799,6 +802,37 @@ func (v *View) land(e agentsession.Entry) {
 			}
 		}
 	}
+}
+
+// landLink records a link entry once. A cancel notice marks the callee
+// link its target names; one that lands before that link waits for it,
+// so neither order loses it. One naming a link of another relation is
+// passed over, as agentsession's Callees does.
+func (v *View) landLink(x *agentsession.LinkEntry) {
+	if x.Cancel == agentsession.CancelSent && callee(x.Rel) {
+		i := slices.IndexFunc(v.links, func(l Link) bool { return l.Entry == x.Target })
+		switch {
+		case i < 0:
+			v.cancels[x.Target] = true
+		case callee(v.links[i].Rel):
+			v.links[i].CancelSent = true
+		}
+		return
+	}
+	if slices.ContainsFunc(v.links, func(l Link) bool { return l.Entry == x.ID }) {
+		return
+	}
+	l := Link{Rel: x.Rel, Session: x.Session, CallID: x.CallID, Entry: x.ID, URL: x.URL, Task: x.Task, Context: x.Context}
+	if v.cancels[x.ID] {
+		delete(v.cancels, x.ID)
+		l.CancelSent = callee(x.Rel)
+	}
+	v.links = append(v.links, l)
+}
+
+// callee reports whether a link of the relation names a call's callee.
+func callee(rel string) bool {
+	return rel == agentsession.RelSubsession || rel == agentsession.RelPeer
 }
 
 func (v *View) noteEnd(id string) {

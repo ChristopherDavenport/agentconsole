@@ -9,10 +9,10 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/ChristopherDavenport/agentkit v0.0.12
 	github.com/ChristopherDavenport/agentpolicy v0.0.16
-	github.com/ChristopherDavenport/agentsession v0.0.21
+	github.com/ChristopherDavenport/agentsession v0.0.24
 	github.com/ChristopherDavenport/agenttool v0.0.22
-	github.com/ChristopherDavenport/agentturn v0.0.27
-	github.com/ChristopherDavenport/agentturn/session v0.0.27
+	github.com/ChristopherDavenport/agentturn v0.0.28
+	github.com/ChristopherDavenport/agentturn/session v0.0.28
 	github.com/ChristopherDavenport/openresponses v0.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8

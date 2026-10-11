@@ -253,3 +253,139 @@ func TestBookkeepingOfTheOldLineIsNotABranchOnceTheHeadIsExtended(t *testing.T) 
 		t.Errorf("branches rest on %v, want the new line %s then the old %s (and not %s)", got, r3, r2, r1)
 	}
 }
+
+func TestCalleeLinksCarryTheirMembers(t *testing.T) {
+	remote := agentsession.Callee{URL: "https://agents.example/a2a", Task: "task-7", Context: "ctx-3"}
+	withSession := remote
+	withSession.Session = "remote-session-1"
+	cases := []struct {
+		name  string
+		entry *agentsession.LinkEntry
+		want  Link
+	}{
+		{"in-process subsession", agentsession.NewSubsessionLink("child1", "call_1"),
+			Link{Rel: agentsession.RelSubsession, Session: "child1", CallID: "call_1"}},
+		{"peer", agentsession.NewPeerLink("call_2", remote),
+			Link{Rel: agentsession.RelPeer, CallID: "call_2", URL: remote.URL, Task: "task-7", Context: "ctx-3"}},
+		{"peer with a session", agentsession.NewPeerLink("call_2", withSession),
+			Link{Rel: agentsession.RelPeer, Session: "remote-session-1", CallID: "call_2", URL: remote.URL, Task: "task-7", Context: "ctx-3"}},
+		{"callee subsession without a session", agentsession.NewCalleeSubsessionLink("call_3", remote),
+			Link{Rel: agentsession.RelSubsession, CallID: "call_3", URL: remote.URL, Task: "task-7", Context: "ctx-3"}},
+		{"callee subsession with a session", agentsession.NewCalleeSubsessionLink("call_3", withSession),
+			Link{Rel: agentsession.RelSubsession, Session: "remote-session-1", CallID: "call_3", URL: remote.URL, Task: "task-7", Context: "ctx-3"}},
+		{"an unknown relation", agentsession.NewLinkEntry("x-reviewed_by", "reviewer1"),
+			Link{Rel: "x-reviewed_by", Session: "reviewer1"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			l := newLog(t)
+			l.append(itemEntry(msg("a", "user", "q"), ""))
+			c.want.Entry = l.append(c.entry)
+			for _, kind := range []agentsession.ChangeKind{agentsession.Appended, agentsession.Reset} {
+				if kind == agentsession.Reset {
+					l.v.Record(agentsession.Change{Kind: agentsession.Reset, Session: l.s})
+				}
+				m := l.v.Model()
+				if len(m.Links) != 1 || m.Links[0] != c.want {
+					t.Errorf("after %v links = %+v, want [%+v]", kind, m.Links, c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestACancelNoticeMarksTheLinkItNames(t *testing.T) {
+	remote := agentsession.Callee{URL: "https://agents.example/a2a", Task: "task-7"}
+	for _, rel := range []string{agentsession.RelPeer, agentsession.RelSubsession} {
+		t.Run(rel, func(t *testing.T) {
+			build := func() (*agentsession.Session, *agentsession.LinkEntry, *agentsession.LinkEntry, *agentsession.LinkEntry) {
+				s := agentsession.New(agentsession.Header{})
+				mustAppend(t, s, itemEntry(msg("a", "user", "q"), ""))
+				link := agentsession.NewCalleeSubsessionLink("call_1", remote)
+				if rel == agentsession.RelPeer {
+					link = agentsession.NewPeerLink("call_1", remote)
+				}
+				mustAppend(t, s, link)
+				other := agentsession.NewPeerLink("call_2", agentsession.Callee{URL: "https://other.example/a2a", Task: "task-8"})
+				mustAppend(t, s, other)
+				notice := agentsession.NewCancelSentLink(link)
+				mustAppend(t, s, notice)
+				return s, link, other, notice
+			}
+			check := func(t *testing.T, what string, m Model, link, other *agentsession.LinkEntry) {
+				t.Helper()
+				if len(m.Links) != 2 {
+					t.Fatalf("%s: links = %+v, want the two callees and no notice", what, m.Links)
+				}
+				for _, got := range m.Links {
+					switch got.Entry {
+					case link.ID:
+						if !got.CancelSent || got.Rel != rel || got.URL != remote.URL || got.Task != "task-7" {
+							t.Errorf("%s: the cancelled link = %+v", what, got)
+						}
+					case other.ID:
+						if got.CancelSent {
+							t.Errorf("%s: a link no notice names is marked: %+v", what, got)
+						}
+					default:
+						t.Errorf("%s: a link the session does not hold as a callee: %+v", what, got)
+					}
+				}
+			}
+
+			// The link, then the notice, as the follower delivers them.
+			s, link, other, notice := build()
+			v := New()
+			v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: agentsession.New(agentsession.Header{})})
+			for _, e := range s.Entries() {
+				v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, ID: e.Base().ID, Entry: e})
+			}
+			check(t, "link then notice", v.Model(), link, other)
+			// The notice delivered again is still not a link.
+			v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, ID: notice.ID, Entry: notice})
+			check(t, "the notice again", v.Model(), link, other)
+			// A reset reads them in again, once.
+			v.Record(agentsession.Change{Kind: agentsession.Reset, Session: s})
+			check(t, "after a reset", v.Model(), link, other)
+			check(t, "a snapshot", At(s, ""), link, other)
+
+			// The notice before its link: it waits for the link.
+			v = New()
+			v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: agentsession.New(agentsession.Header{})})
+			order := []agentsession.Entry{notice, link, other}
+			for _, e := range order {
+				v.Record(agentsession.Change{Kind: agentsession.Appended, Session: s, ID: e.Base().ID, Entry: e})
+				if e == notice && len(v.Model().Links) != 0 {
+					t.Errorf("the notice is listed as a link: %+v", v.Model().Links)
+				}
+			}
+			check(t, "notice then link", v.Model(), link, other)
+		})
+	}
+}
+
+func TestACancelNoticeForNoCalleeLinkIsNotALink(t *testing.T) {
+	l := newLog(t)
+	l.append(itemEntry(msg("a", "user", "q"), ""))
+	fork := l.append(agentsession.NewLinkEntry(agentsession.RelForkOf, "fork1"))
+	// Notices a writer may not append, as a foreign file may hold them:
+	// one naming a link of another relation and one naming no link.
+	for i, target := range []string{fork, "missing"} {
+		n := &agentsession.LinkEntry{Rel: agentsession.RelPeer, CallID: "call_1", Target: target, Cancel: agentsession.CancelSent}
+		n.ID = "notice" + string(rune('0'+i))
+		l.v.Record(agentsession.Change{Kind: agentsession.Appended, Session: l.s, ID: n.ID, Entry: n})
+	}
+	m := l.v.Model()
+	if len(m.Links) != 1 || m.Links[0].Entry != fork || m.Links[0].CancelSent {
+		t.Errorf("links = %+v, want the fork alone, unmarked", m.Links)
+	}
+}
+
+func mustAppend(t *testing.T, s *agentsession.Session, e agentsession.Entry) string {
+	t.Helper()
+	id, err := s.Append(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}

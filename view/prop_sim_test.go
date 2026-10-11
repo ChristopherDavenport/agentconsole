@@ -325,9 +325,36 @@ func (s *sim) bookmark(to int) {
 	s.write(agentsession.NewLabelEntry(path[to%len(path)].Base().ID, "bookmark"))
 }
 
-// link records a subsession at the leaf.
+// link records a link at the leaf: a subsession of this store, a peer or
+// a subsession in another system (with a session or without), or a cancel
+// notice for the newest callee link on the line, written after a callee
+// link of its own when the line has none.
 func (s *sim) link(to int) {
-	s.write(agentsession.NewSubsessionLink(fmt.Sprintf("child_%d", to), fmt.Sprintf("call_link_%d", to)))
+	call := fmt.Sprintf("call_link_%d", to)
+	remote := agentsession.Callee{URL: fmt.Sprintf("https://agent%d.example/a2a", to%3), Task: fmt.Sprintf("task_%d", to)}
+	if to/4%2 == 0 {
+		remote.Session = fmt.Sprintf("remote_%d", to)
+	}
+	switch to % 4 {
+	case 0:
+		s.write(agentsession.NewSubsessionLink(fmt.Sprintf("child_%d", to), call))
+	case 1:
+		s.write(agentsession.NewPeerLink(call, remote))
+	case 2:
+		s.write(agentsession.NewCalleeSubsessionLink(call, remote))
+	default:
+		path := s.ws.Path(s.ws.Leaf())
+		for i := len(path) - 1; i >= 0; i-- {
+			if l, ok := path[i].(*agentsession.LinkEntry); ok && l.URL != "" && l.Cancel == "" {
+				s.write(agentsession.NewCancelSentLink(l))
+				return
+			}
+		}
+		l := agentsession.NewCalleeSubsessionLink(call, remote)
+		if s.write(l) != "" {
+			s.write(agentsession.NewCancelSentLink(l))
+		}
+	}
 }
 
 // compact folds the line before one of its items into a summary.

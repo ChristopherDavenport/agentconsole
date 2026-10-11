@@ -724,3 +724,83 @@ func TestGrantsAreMeasuredAtTheDecision(t *testing.T) {
 		t.Errorf("grants in force at the call's decision = %+v, want shout", c.Grants)
 	}
 }
+
+// TestACallShowsItsCallees: a call's detail lists the callees it reached
+// in another system, from links written by hand as a caller's recorder
+// would: a peer that answered the call, and a subsession whose task a
+// cancel notice was sent for.
+func TestACallShowsItsCallees(t *testing.T) {
+	r := newRig(t, agentturn.Config{ModelName: "m"})
+	id := r.rec.SessionID()
+	add := func(e agentsession.Entry) string {
+		t.Helper()
+		eid, err := r.store.Append(r.ctx, id, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return eid
+	}
+	add(agentsession.NewItemEntry(openresponses.UserText("ask the others")))
+	calls := map[string]string{}
+	for _, c := range []string{"call_peer", "call_sub"} {
+		call := agentsession.NewItemEntry(&openresponses.FunctionCall{CallID: c, Name: "a2a", Arguments: `{}`})
+		call.ResponseID = "resp_1"
+		calls[c] = add(call)
+	}
+	add(agentsession.NewDispatch("call_peer", calls["call_peer"]))
+	peer := agentsession.NewPeerLink("call_peer", agentsession.Callee{URL: "https://peer.example/a2a", Task: "task-p", Context: "ctx-p"})
+	peer.ID = add(peer)
+	add(agentsession.NewItemEntry(openresponses.NewFunctionCallOutput("call_peer", "done")))
+	add(agentsession.NewDispatch("call_sub", calls["call_sub"]))
+	sub := agentsession.NewCalleeSubsessionLink("call_sub", agentsession.Callee{URL: "https://sub.example/a2a", Task: "task-s", Session: "remote-1"})
+	sub.ID = add(sub)
+	add(agentsession.NewCancelSentLink(sub))
+	add(agentsession.NewItemEntry(openresponses.NewFunctionCallOutput("call_sub", "given up")))
+
+	m := r.model()
+	cases := []struct {
+		call string
+		want inspect.Callee
+		line string
+	}{
+		{"call_peer", inspect.Callee{Entry: peer.ID, Rel: agentsession.RelPeer, URL: "https://peer.example/a2a", Task: "task-p", Context: "ctx-p", Answered: true},
+			"callee:   peer at https://peer.example/a2a, task task-p, context ctx-p, no session published"},
+		{"call_sub", inspect.Callee{Entry: sub.ID, Rel: agentsession.RelSubsession, Session: "remote-1", URL: "https://sub.example/a2a", Task: "task-s", CancelSent: true},
+			"callee:   subsession at https://sub.example/a2a, task task-s, session remote-1"},
+	}
+	for _, c := range cases {
+		row := rowWith(t, m, func(row view.Row) bool { return row.Call != nil && row.Call.CallID == c.call })
+		e := r.entry(row, m)
+		if len(e.Call.Callees) != 1 {
+			t.Fatalf("%s callees = %+v, want one", c.call, e.Call.Callees)
+		}
+		got := e.Call.Callees[0]
+		if got.Dispatch == "" {
+			t.Errorf("%s: the link belongs to no dispatch: %+v", c.call, got)
+		}
+		got.Dispatch = ""
+		if got != c.want {
+			t.Errorf("%s callee = %+v, want %+v", c.call, got, c.want)
+		}
+		text := joined(e.Lines())
+		if !strings.Contains(text, c.line) {
+			t.Errorf("%s: the pane lacks %q:\n%s", c.call, c.line, text)
+		}
+		end := "answered the call"
+		if c.want.CancelSent {
+			end = "cancel sent"
+		}
+		if l := lineOf(text, "callee:"); !strings.HasSuffix(l, end) {
+			t.Errorf("%s: the callee line %q does not end %q", c.call, l, end)
+		}
+	}
+}
+
+func lineOf(text, sub string) string {
+	for _, l := range strings.Split(text, "\n") {
+		if strings.Contains(l, sub) {
+			return l
+		}
+	}
+	return ""
+}

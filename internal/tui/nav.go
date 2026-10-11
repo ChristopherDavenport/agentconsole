@@ -435,6 +435,9 @@ type treeItem struct {
 	at      string
 	title   string
 	branch  bool
+	// link is set for a session's link; one with no session, a callee
+	// that published none, opens nothing.
+	link bool
 }
 
 // treeItems lists what the tree shows, from the live view: the branches
@@ -472,22 +475,66 @@ func (m *Model) treeItems() []treeItem {
 	}
 	for _, l := range m.view.Links {
 		var text string
-		switch l.Rel {
-		case agentsession.RelSubsession:
+		switch {
+		case l.Rel == agentsession.RelPeer || l.URL != "":
+			text = "  " + calleeText(l)
+		case l.Rel == agentsession.RelSubsession:
 			text = "  subsession: " + shortID(l.Session)
 			if l.CallID != "" {
 				text += " (call " + l.CallID + ")"
 			}
-		case agentsession.RelContinuedIn:
+		case l.Rel == agentsession.RelContinuedIn:
 			text = "  continued in: " + shortID(l.Session)
-		case agentsession.RelForkOf:
+		case l.Rel == agentsession.RelForkOf:
 			text = "  fork: " + shortID(l.Session)
 		default:
 			text = "  " + l.Rel + ": " + shortID(l.Session)
 		}
-		out = append(out, treeItem{text: text, session: l.Session, title: l.Rel + " " + shortID(l.Session)})
+		title := l.Rel + " " + shortID(l.Session)
+		if l.URL != "" {
+			title = l.Rel + " at " + l.URL
+		}
+		out = append(out, treeItem{text: text, session: l.Session, title: title, link: true})
 	}
 	return out
+}
+
+// calleeText describes a callee in another system, or a peer: a
+// subsession here is one the call started and ends when it gives up, a
+// peer one whose work outlives the call. A cancel the caller sent is
+// said as sent, since it did not wait to learn whether the work stopped.
+func calleeText(l view.Link) string {
+	kind := "subsession"
+	if l.Rel == agentsession.RelPeer {
+		kind = "peer"
+	}
+	var text string
+	if l.URL == "" {
+		// A peer named by its session alone.
+		text = kind + ": " + shortID(l.Session)
+		if l.CallID != "" {
+			text += " (call " + l.CallID + ")"
+		}
+	} else {
+		text = kind + " at " + l.URL + ": "
+		if l.Task != "" {
+			text += "task " + l.Task
+		} else {
+			text += "no task"
+		}
+		if l.CallID != "" {
+			text += " (call " + l.CallID + ")"
+		}
+		if l.Session != "" {
+			text += ", session " + shortID(l.Session)
+		} else {
+			text += ", no session to open"
+		}
+	}
+	if l.CancelSent {
+		text += ", cancel sent"
+	}
+	return text
 }
 
 func shortID(id string) string {
@@ -553,13 +600,19 @@ func (m *Model) treeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // openTreeItem is Enter on the tree, or a click on the item selected:
 // the head's own branch is the live view, any other branch or session
-// opens read only.
+// opens read only, and a link with no session, to a callee that
+// published none, opens nothing.
 func (m *Model) openTreeItem() tea.Cmd {
 	items := m.treeItems()
 	if m.treeCur >= len(items) {
 		return nil
 	}
 	it := items[m.treeCur]
+	if it.link && it.session == "" {
+		m.note = "the " + it.title + " published no session to open"
+		m.relayout()
+		return nil
+	}
 	m.screen = screenConversation
 	if it.branch && it.leaf == m.view.Leaf {
 		m.frozen = nil // the head's own line is the live view

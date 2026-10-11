@@ -63,6 +63,9 @@ type Call struct {
 	Asked []session.Elicitation
 	// Dispatch is the dispatch entry, when the call was handed to its tool.
 	Dispatch *Dispatch
+	// Callees are the call's subsession and peer links on the path, in
+	// order, with what became of each.
+	Callees []Callee
 	// Output is what the call returned, and OutputEntry the entry that
 	// holds it; HasOutput says whether there is one.
 	Output      string
@@ -88,6 +91,26 @@ type Dispatch struct {
 	Target         string
 	IdempotencyKey string
 	Time           time.Time
+}
+
+// Callee is a subsession or peer link of a call, as agentsession's
+// Callees reads it.
+type Callee struct {
+	Entry   string
+	Rel     string
+	Session string
+	// URL, Task and Context name a callee in another system.
+	URL     string
+	Task    string
+	Context string
+	// Dispatch is the dispatch the link belongs to, "" when the path
+	// records none.
+	Dispatch string
+	// CancelSent says a cancel notice names the link: the caller asked
+	// the callee to stop and did not wait.
+	CancelSent bool
+	// Answered says the call's output came from this callee.
+	Answered bool
 }
 
 // Fold is what a compaction entry folded.
@@ -233,6 +256,12 @@ func callOf(s *agentsession.Session, path []agentsession.Entry, c *agentsession.
 		}
 	}
 	out.Asked = elicitationsFor(path, c.ID())
+	for _, l := range agentsession.Callees(path) {
+		if l.CallID == c.ID() {
+			out.Callees = append(out.Callees, Callee{Entry: l.ID, Rel: l.Rel, Session: l.Session, URL: l.URL, Task: l.Task, Context: l.Context,
+				Dispatch: l.Dispatch, CancelSent: l.Cancelled, Answered: l.Answered})
+		}
+	}
 	if at >= 0 {
 		out.Grants = grantsAt(path, at)
 	}

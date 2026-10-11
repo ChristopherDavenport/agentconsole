@@ -378,3 +378,77 @@ func TestPanesAreComputedOnlyWhenAskedForAndNotPerEntry(t *testing.T) {
 	a.waitFor("the run over", all(has("xy", "idle"), lacks("(streaming)")))
 	a.waitFor("the pane refreshed", func(string) bool { return a.reads() == 2 })
 }
+
+// TestTheTreeLabelsCalleesAndOpensOnlyThoseWithASession: a session's
+// links in the tree, by what each callee is. A peer and a subsession in
+// another system say where they are and their task, a cancel notice
+// marks the link it names and is not listed, and a callee that
+// published no session cannot be opened.
+func TestTheTreeLabelsCalleesAndOpensOnlyThoseWithASession(t *testing.T) {
+	a := newViewApp(t, &handSource{}, (&intents{}).act)
+	ctx, id := a.ctx, a.rec.SessionID()
+	appendTo := func(e agentsession.Entry) string {
+		t.Helper()
+		eid, err := a.store.Append(ctx, id, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return eid
+	}
+	child, err := a.store.Create(ctx, agentsession.Header{Records: agentsession.AllRecords, ParentSession: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := a.store.Create(ctx, agentsession.Header{Records: agentsession.AllRecords})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendTo(agentsession.NewItemEntry(openresponses.UserText("hand it off")))
+	appendTo(agentsession.NewSubsessionLink(child.ID(), "call_in"))
+	peer := agentsession.NewPeerLink("call_peer", agentsession.Callee{URL: "https://peer.example/a2a", Task: "task-p", Context: "ctx-p"})
+	peer.ID = appendTo(peer)
+	appendTo(agentsession.NewCalleeSubsessionLink("call_sub", agentsession.Callee{URL: "https://sub.example/a2a", Task: "task-s", Session: remote.ID()}))
+	appendTo(agentsession.NewCancelSentLink(peer))
+	appendTo(agentsession.NewLinkEntry("x-reviewed_by", "reviewer1"))
+	// A peer named by its session alone, cancelled.
+	local := agentsession.NewPeerLink("call_local", agentsession.Callee{Session: child.ID()})
+	local.ID = appendTo(local)
+	appendTo(agentsession.NewCancelSentLink(local))
+
+	a.waitFor("the conversation", has("hand it off"))
+	a.key("ctrl+t")
+	s := a.waitFor("the links in the tree", has("other sessions", "x-reviewed_by", "call_local"))
+	for _, want := range []string{
+		"subsession: " + child.ID()[:8] + " (call call_in)",
+		"peer at https://peer.example/a2a: task task-p (call call_peer), no session to open, cancel sent",
+		"subsession at https://sub.example/a2a: task task-s (call call_sub), session " + remote.ID()[:8],
+		"x-reviewed_by: reviewer",
+		"peer: " + child.ID()[:8] + " (call call_local), cancel sent",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the tree lacks %q:\n%s", want, s)
+		}
+	}
+	if n := strings.Count(s, "peer at"); n != 1 {
+		t.Errorf("the peer is listed %d times, want once (the notice is not a link):\n%s", n, s)
+	}
+	if l := lineWith(s, "sub.example"); strings.Contains(l, "cancel") {
+		t.Errorf("a link no notice names says cancel: %q", l)
+	}
+
+	// The tree lists the branch, then the links in order: the in-process
+	// subsession, the peer, the remote subsession.
+	a.press("down", "down", "enter")
+	s = a.waitFor("the peer refused", has("the peer at https://peer.example/a2a published no session to open"))
+	if !strings.Contains(s, "branches of session") || strings.Contains(s, "VIEWING") {
+		t.Errorf("selecting a callee with no session left the tree:\n%s", s)
+	}
+	a.press("down", "enter")
+	a.waitFor("the remote subsession opened", all(has("VIEWING subsession at https://sub.example/a2a", "read only"), lacks("branches of session")))
+	a.key("esc")
+	a.waitFor("back on the live session", all(has("hand it off"), lacks("VIEWING")))
+	a.key("ctrl+t")
+	a.waitFor("the tree", has("branches of session"))
+	a.press("down", "enter") // the tree opens on its first item
+	a.waitFor("the in-process subsession opened", has("VIEWING subsession "+child.ID()[:8]))
+}
