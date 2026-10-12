@@ -53,6 +53,37 @@ func usageLine(u *openresponses.Usage) string {
 	return s
 }
 
+// line describes a callee: what it is, where, and what became of it.
+func (k Callee) line() string {
+	s := k.Rel
+	if k.URL != "" {
+		s += " at " + k.URL
+	}
+	if k.Task != "" {
+		s += ", task " + k.Task
+	}
+	if k.Context != "" {
+		s += ", context " + k.Context
+	}
+	if k.Session != "" {
+		s += ", session " + k.Session
+	} else {
+		s += ", no session published"
+	}
+	s += " (entry " + short(k.Entry)
+	if k.Dispatch != "" {
+		s += ", for dispatch " + short(k.Dispatch)
+	}
+	s += ")"
+	switch {
+	case k.CancelSent:
+		s += ", cancel sent"
+	case k.Answered:
+		s += ", answered the call"
+	}
+	return s
+}
+
 // Lines renders the entry's detail as plain lines: a heading, then
 // "label: value" lines and indented lists.
 func (e Entry) Lines() []string {
@@ -124,6 +155,9 @@ func (e Entry) Lines() []string {
 			l = append(l, s)
 		} else {
 			add("  dispatch: none recorded")
+		}
+		for _, k := range c.Callees {
+			l = append(l, "  callee:   "+k.line())
 		}
 		if c.HasOutput {
 			add("  output:   %s (entry %s)", clip(c.Output, 200), short(c.OutputEntry))

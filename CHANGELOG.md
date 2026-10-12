@@ -5,6 +5,30 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentsession v0.0.24 (format 0.12), agentturn and
+  agentturn/session v0.0.28.
+- Changed: with agentsession v0.0.24 the binary raises every session it
+  appends to to format 0.12, and so does an embedder that takes this
+  release's floor by version selection (dax). A reader built on
+  agentsession before v0.0.24 refuses those files until it is upgraded.
+- Added: `view.Link` names a callee in another system (`URL`, `Task`,
+  `Context`) on a subsession or peer link, and `CancelSent` when a
+  cancel notice names the link. A cancel notice is folded into the link
+  it names and never listed as a link of its own. As in agentsession's
+  `Callees`, it marks only a link that landed before it.
+- Changed: the tree labels a peer as a peer and a subsession in another
+  system apart from one of this store, with its URL, task, call and
+  session, and any subsession or peer with "cancel sent" when one was
+  sent. A link that names no session cannot be opened: selecting it
+  says so and stays on the tree. A real A2A run shows its callees once
+  agentturn's recorder writes them as links (agentturn#252, not yet
+  released).
+- Added: a call's detail pane lists its callees, with the dispatch each
+  belongs to and whether a cancel was sent or the callee answered the
+  call.
+
 ## v0.0.12 - 2026-10-11
 
 - Dependencies: agentturn and agentturn/session v0.0.27, agentpolicy

@@ -28,17 +28,33 @@ type Branch struct {
 }
 
 // Link is a link entry of the session: a subsession it spawned, a
-// successor it was continued in, a fork or a judge.
+// callee in another system, a successor it was continued in, a fork or a
+// judge. A cancel notice is not a link of its own: it marks the callee
+// link it names (CancelSent).
 type Link struct {
-	// Rel is the link's relation: agentsession.RelSubsession,
+	// Rel is the link's relation: agentsession.RelSubsession, RelPeer,
 	// RelContinuedIn, RelForkOf or RelJudgedBy.
 	Rel string
-	// Session is the other session.
+	// Session is the other session. It is empty for a callee in another
+	// system that published no session ID.
 	Session string
-	// CallID is the call that spawned a subsession, when the link says.
+	// CallID is the call that spawned a subsession or reached a peer,
+	// when the link says.
 	CallID string
 	// Entry is the link entry's own ID.
 	Entry string
+	// URL, Task and Context name a callee in another system, reached
+	// over a protocol such as A2A, on a subsession or peer link: the
+	// endpoint the call was sent to, the callee's task (empty when it
+	// answered without one) and its conversation. URL is empty for a
+	// subsession of this store.
+	URL     string
+	Task    string
+	Context string
+	// CancelSent is set when a cancel notice names this link: the caller
+	// told the callee it no longer wanted the work and did not wait. It
+	// does not say the work stopped.
+	CancelSent bool
 }
 
 // Origin is where a session came from, from its header: the session it

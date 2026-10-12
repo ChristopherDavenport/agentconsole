@@ -687,7 +687,11 @@ type refBranch struct {
 	current    bool
 }
 
-type refLink struct{ rel, session, callID, entry string }
+type refLink struct {
+	rel, session, callID, entry string
+	url, task, context          string
+	cancelSent                  bool
+}
 
 type refFold struct {
 	uid, entry, firstKept string
@@ -733,7 +737,17 @@ func render(s *agentsession.Session) rendering {
 		}
 		kids[b.Parent] = append(kids[b.Parent], b.ID)
 		if l, ok := e.(*agentsession.LinkEntry); ok {
-			out.links = append(out.links, refLink{rel: l.Rel, session: l.Session, callID: l.CallID, entry: l.ID})
+			if l.Cancel != "" {
+				// A notice is written after the link it names.
+				for i := range out.links {
+					if out.links[i].entry == l.Target {
+						out.links[i].cancelSent = true
+					}
+				}
+			} else {
+				out.links = append(out.links, refLink{rel: l.Rel, session: l.Session, callID: l.CallID, entry: l.ID,
+					url: l.URL, task: l.Task, context: l.Context})
+			}
 		}
 		if c, ok := e.(*agentsession.CompactionEntry); ok {
 			out.uids[rowUID(Row{Item: c.Summary})] = true
@@ -1236,6 +1250,7 @@ func TestGeneratorCoverage(t *testing.T) {
 				seen["head record"]++
 			}
 		}
+		links := map[string]*agentsession.LinkEntry{}
 		for _, e := range tl.entries {
 			switch x := e.(type) {
 			case *agentsession.CustomEntry:
@@ -1258,6 +1273,20 @@ func TestGeneratorCoverage(t *testing.T) {
 				}
 			case *agentsession.LinkEntry:
 				seen["link entry"]++
+				links[x.ID] = x
+				switch {
+				case x.Cancel != "":
+					seen["cancel notice"]++
+					if t := links[x.Target]; t != nil && t.Rel == agentsession.RelSubsession && t.URL == "" {
+						seen["cancel of an in-store subsession"]++
+					}
+				case x.Rel == agentsession.RelPeer && x.URL == "":
+					seen["peer named by its session"]++
+				case x.Rel == agentsession.RelPeer:
+					seen["peer link"]++
+				case x.URL != "" && x.Session == "":
+					seen["callee subsession with no session"]++
+				}
 			case *agentsession.CompactionEntry:
 				seen["compaction"]++
 			case *agentsession.ResponseEntry:
@@ -1300,7 +1329,7 @@ func TestGeneratorCoverage(t *testing.T) {
 		}
 	}
 	for _, k := range []string{"late config", "head record", "marked item", "hidden item", "steered input", "bookmark", "leaf label",
-		"cut response with no ID", "named mid-stream", "link entry", "compaction", "tool progress", "child call", "retry", "withheld", "unnamed stream", "input required", "aborted", "failed"} {
+		"cut response with no ID", "named mid-stream", "link entry", "cancel notice", "cancel of an in-store subsession", "peer link", "peer named by its session", "callee subsession with no session", "compaction", "tool progress", "child call", "retry", "withheld", "unnamed stream", "input required", "aborted", "failed"} {
 		if seen[k] == 0 {
 			t.Errorf("the generator never produced %q in 400 scripts", k)
 		}
@@ -1335,7 +1364,8 @@ func (c *checker) treeFacts(m Model, ref rendering) string {
 	}
 	for i, l := range m.Links {
 		w := ref.links[i]
-		if l.Rel != w.rel || l.Session != w.session || l.CallID != w.callID || l.Entry != w.entry {
+		if l.Rel != w.rel || l.Session != w.session || l.CallID != w.callID || l.Entry != w.entry ||
+			l.URL != w.url || l.Task != w.task || l.Context != w.context || l.CancelSent != w.cancelSent {
 			return fmt.Sprintf("link %d is %+v, want %+v", i, l, w)
 		}
 	}
