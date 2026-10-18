@@ -11,8 +11,8 @@ require (
 	github.com/ChristopherDavenport/agentpolicy v0.0.17
 	github.com/ChristopherDavenport/agentsession v0.0.27
 	github.com/ChristopherDavenport/agenttool v0.0.23
-	github.com/ChristopherDavenport/agentturn v0.0.29
-	github.com/ChristopherDavenport/agentturn/session v0.0.29
+	github.com/ChristopherDavenport/agentturn v0.0.30
+	github.com/ChristopherDavenport/agentturn/session v0.0.30
 	github.com/ChristopherDavenport/openresponses v0.0.15
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8

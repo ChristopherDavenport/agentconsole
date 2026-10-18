@@ -8,8 +8,12 @@ versions may break the API.
 ## Unreleased
 
 - Dependencies: agentsession v0.0.27 (format 0.13), agentturn and
-  agentturn/session v0.0.29, agenttool v0.0.23, agentpolicy v0.0.17,
+  agentturn/session v0.0.30, agenttool v0.0.23, agentpolicy v0.0.17,
   agentkit v0.0.13, openresponses v0.0.15.
+- Fixed: agentturn v0.0.29 → v0.0.30 clears an entry's `redacted`
+  member when the recorder copies an entry it read (a callee link copied
+  onto another branch, the env a child is written with), so a redacted
+  session the binary resumes takes its run as native entries.
 - Changed: with agentsession v0.0.27 the binary raises every session it
   appends to to format 0.13, and so does an embedder that takes this
   release's floor by version selection (dax). A reader built on
