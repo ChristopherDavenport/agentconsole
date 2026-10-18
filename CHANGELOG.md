@@ -5,6 +5,18 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit
+  v0.0.14, up from v0.0.13. A redacted session now hashes
+  independently: a redactor gives each redacted response the
+  `request_hash` of the request the redacted session rebuilds for it,
+  so readers verify it with no exception for redacted entries. The
+  inspect pane's verify tally, which has none, no longer reports a
+  redacted session made under that rule as FAILED, which answers the
+  report in #38; the pane rows #38 suggests for a redaction's origin
+  and spans are not added.
+
 ## v0.0.14 - 2026-10-18
 
 - Dependencies: agentsession v0.0.27 (format 0.13), agentturn and

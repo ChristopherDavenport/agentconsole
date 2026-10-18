@@ -7,9 +7,9 @@ require (
 	charm.land/bubbletea/v2 v2.0.10
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/ChristopherDavenport/agentkit v0.0.13
+	github.com/ChristopherDavenport/agentkit v0.0.14
 	github.com/ChristopherDavenport/agentpolicy v0.0.17
-	github.com/ChristopherDavenport/agentsession v0.0.27
+	github.com/ChristopherDavenport/agentsession v0.0.28
 	github.com/ChristopherDavenport/agenttool v0.0.23
 	github.com/ChristopherDavenport/agentturn v0.0.30
 	github.com/ChristopherDavenport/agentturn/session v0.0.30
