@@ -69,6 +69,16 @@ versions may break the API.
   hold shows none; a chain of forks that does not end is shown. The
   call's state is read through the session, so a prefix call is no
   longer "never_started" under the fork's records promise.
+- Added: `client.Lister`, an optional capability of a `client.Record`:
+  `List(ctx, parentSession)` gives the summaries of the sessions whose
+  header names the session as parent (agentsession RFC 0003, List).
+  `RecordOf` offers it when the recorder's store is an
+  `agentsession.Store`.
+- Added: the tree lists the sessions forked from the followed one under
+  "forks of this session", each with the entry it was forked at, when
+  the record can list them (#6). A fork has a base and no spawned_by;
+  subsessions and children a host started stay with the links. A fork
+  opens read only.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

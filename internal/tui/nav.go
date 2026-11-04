@@ -429,6 +429,8 @@ func (m *Model) continueFrom(entry string) tea.Cmd {
 // treeItem is one line of the tree screen.
 type treeItem struct {
 	text string
+	// group heads the items after the branches: "" for a branch.
+	group string
 	// leaf is the branch tip, for a branch; session and at for a session
 	// the line opens.
 	leaf    string
@@ -472,7 +474,22 @@ func (m *Model) treeItems() []treeItem {
 		} else {
 			text += " (parent)"
 		}
-		out = append(out, treeItem{text: text, session: o.ParentSession, at: o.Base, title: "origin " + shortID(o.ParentSession)})
+		out = append(out, treeItem{group: "other sessions", text: text, session: o.ParentSession, at: o.Base, title: "origin " + shortID(o.ParentSession)})
+	}
+	linked := map[string]bool{}
+	for _, l := range m.view.Links {
+		linked[l.Session] = true
+	}
+	if m.forksOf == m.view.Session {
+		for _, f := range m.forks {
+			if linked[f.session] {
+				continue
+			}
+			// A fork is a conversation of its own: it opens read only,
+			// and is never continued from here.
+			out = append(out, treeItem{group: "forks of this session", text: "  fork: session " + f.session + " (forked at entry " + shortID(f.base) + ")",
+				session: f.session, title: "fork " + shortID(f.session)})
+		}
 	}
 	for _, l := range m.view.Links {
 		name := cmp.Or(shortID(l.Session), "no session")
@@ -487,7 +504,7 @@ func (m *Model) treeItems() []treeItem {
 		default:
 			text = "  " + l.Rel + ": " + name
 		}
-		it := treeItem{text: text, session: l.Session, title: l.Rel + " " + name}
+		it := treeItem{group: "other sessions", text: text, session: l.Session, title: l.Rel + " " + name}
 		switch {
 		case l.URL != "":
 			it.title = l.Rel + " at " + l.URL
@@ -553,13 +570,13 @@ func (m *Model) renderTree() (string, int, []int) {
 	var b strings.Builder
 	b.WriteString(dimStyle.Render("branches of session "+shortID(m.view.Session)+" (* is where the agent's head is)") + "\n")
 	line := 0
-	otherHeader := false
+	group := ""
 	rows := 1
 	lines := make([]int, 0, len(items))
 	for i, it := range items {
-		if !it.branch && !otherHeader {
-			otherHeader = true
-			b.WriteString("\n" + dimStyle.Render("other sessions") + "\n")
+		if it.group != group {
+			group = it.group
+			b.WriteString("\n" + dimStyle.Render(group) + "\n")
 			rows += 2
 		}
 		cur := "  "
@@ -639,4 +656,40 @@ func (m *Model) frozenBanner() string {
 // noteHead is the status line's note that the head moved.
 func (m *Model) noteHead(entry string) {
 	m.note = "head moved to " + shortID(entry) + " at " + time.Now().Format("15:04:05")
+}
+
+// fork is a session forked from the followed one: a listed session whose
+// header has a base and no spawned_by. A subsession, a child the host
+// started and a judge name the session as parent too, and are reached
+// through its links.
+type fork struct {
+	session, base string
+}
+
+// forksMsg is the record's listing of the forks of session.
+type forksMsg struct {
+	session string
+	forks   []fork
+	err     error
+}
+
+// listForks lists the forks of the followed session, in a command off
+// the program's goroutine, when the record can list (client.Lister); a
+// record that cannot lists none.
+func (m *Model) listForks() tea.Cmd {
+	l, ok := m.rec.(client.Lister)
+	if !ok {
+		return nil
+	}
+	ctx, id := m.ctx, m.view.Session
+	return func() tea.Msg {
+		sums, err := l.List(ctx, id)
+		var out []fork
+		for _, s := range sums {
+			if h := s.Header; h.Base != "" && h.SpawnedBy == "" {
+				out = append(out, fork{session: h.ID, base: h.Base})
+			}
+		}
+		return forksMsg{session: id, forks: out, err: err}
+	}
 }

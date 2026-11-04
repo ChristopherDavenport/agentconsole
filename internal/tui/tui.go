@@ -163,6 +163,10 @@ type Model struct {
 	reveal   bool
 	panes    paneState
 	treeCur  int
+	// forks are the sessions forked from the followed one, as the
+	// record's Lister last listed them (nav.go), for the session forksOf.
+	forks   []fork
+	forksOf string
 	// The mouse selection (select.go): pressed is whether the left
 	// button is down, pressX and pressY where it went down, sel the region
 	// being dragged over, lines the frame's lines and content the
@@ -381,6 +385,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.relayout()
 		}
 		return m, nil
+	case forksMsg:
+		if msg.err != nil {
+			m.err = "listing the forks: " + msg.err.Error()
+		}
+		if msg.session == m.view.Session {
+			m.forks, m.forksOf = msg.forks, msg.session
+		}
+		m.relayout()
+		return m, nil
 	case openMsg:
 		if msg.err != nil {
 			m.err = msg.err.Error()
@@ -578,6 +591,8 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					m.treeCur = i
 				}
 			}
+			m.relayout()
+			return m, m.listForks()
 		}
 		m.relayout()
 		return m, nil

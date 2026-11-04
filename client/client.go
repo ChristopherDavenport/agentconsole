@@ -45,6 +45,18 @@ type Source interface {
 	State() agentturn.State
 }
 
+// Lister is a [Record] that can also list the sessions made from a
+// session: its forks, subsessions and judges, every session whose header
+// names it as parent_session (agentsession RFC 0003, List). It is
+// optional, since a record that only follows one session (a foreign
+// agent's synthesized one) has no store to list; a client tests for it
+// and shows nothing it cannot list. The empty ID is the followed
+// session. The header says which each is: a fork has a base and no
+// spawned_by.
+type Lister interface {
+	List(ctx context.Context, parentSession string) ([]agentsession.Summary, error)
+}
+
 // Record is the agent's session as a client follows it.
 type Record interface {
 	// Follow yields a Snapshot first, or with a cursor the changes after

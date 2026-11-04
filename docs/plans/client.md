@@ -1285,6 +1285,30 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   tool call. `Direct` keeps `Queue` until a delivery that returns once
   it is accepted exists.
 
+## Decided in implementation, forks in the tree
+
+- **Listing is an optional `client.Lister`.** `client.Record` follows
+  and reads one session at a time; the tree also wants the sessions
+  forked from it, which only a store can list (agentsession RFC 0003,
+  List, the `parent_session` filter). `Lister` is
+  `List(ctx, parentSession) ([]agentsession.Summary, error)`, the empty
+  ID the followed session, separate from `Record` so a record with no
+  store (a foreign agent's synthesized one) need not offer it. It
+  returns summaries, not sessions: the header says what each is, and
+  nothing is read whole until the tree opens one. `RecordOf` returns a
+  `Lister` when the recorder's store is an `agentsession.Store`, capped
+  at 256 sessions.
+- **A fork is a listed session with a `base` and no `spawned_by`.**
+  Subsessions, children a host started and judges also name the
+  session as parent; they are reached through its links, and a listed
+  session a link already names is not listed again. The tree lists the
+  forks under "forks of this session", by their full ID (two forks made
+  in one millisecond share the 8 characters the tree shows of other
+  sessions) and the entry each was forked at, in a command when the
+  tree opens, never from `Update`. A fork is a conversation of its own:
+  it opens read only, and continuing from it here is refused as for any
+  other session.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

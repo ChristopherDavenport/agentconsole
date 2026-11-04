@@ -271,6 +271,13 @@ func newKitApp(t *testing.T, kopts []agentkit.Option, wrap func(agentturn.Contro
 // session's recorder.
 func newAppFrom(t *testing.T, start starter, build func(context.Context, *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error), wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
 	t.Helper()
+	return newAppRecord(t, start, build, nil, wrap, opts...)
+}
+
+// newAppRecord is newAppFrom with the record the model reads wrapped, to
+// play a record that lacks a capability RecordOf's has.
+func newAppRecord(t *testing.T, start starter, build func(context.Context, *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error), wrapRecord func(client.Record) client.Record, wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
 	if err != nil {
@@ -300,6 +307,9 @@ func newAppFrom(t *testing.T, start starter, build func(context.Context, *sessio
 	record, err := client.RecordOf(rec)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if wrapRecord != nil {
+		record = wrapRecord(record)
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, ctl: ctl, record: record}
 	var driven agentturn.Control = ctl

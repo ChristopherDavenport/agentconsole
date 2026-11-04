@@ -31,7 +31,8 @@ committed, and live events carry only what is not committed yet.
     (`Prompt`, `Queue`, `Abort`, `Answer`, `Reply`, `ContinueFrom`) and
     `Controller`, `Direct`, `Live` (a source's events, copied, queued),
     `Copy` (what the view keeps of an event), `RecordOf` (a `Record`
-    over a `session.Recorder`'s store), `Cost`.
+    over a `session.Recorder`'s store), `Lister` (a `Record` that lists
+    the sessions made from one, optional), `Cost`.
   - `view`: the reconciler. A pure model: record `Change`s and
     agentturn's events in, what a client renders out. No goroutines, no
     I/O, no terminal.
