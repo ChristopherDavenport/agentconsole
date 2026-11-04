@@ -9,6 +9,7 @@ import (
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
+	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
 )
@@ -88,3 +89,21 @@ func TestARecordThatCannotListShowsNoForks(t *testing.T) {
 
 // entryID is an entry's ID as the tree shortens it.
 func entryID(id string) string { return strings.TrimPrefix(id, "sha256:")[:8] }
+
+// A prompt the host composed from a template (agentturn's
+// WithProvenance) is shown as not the person's words, on the record.
+func TestAComposedPromptIsNotShownAsTheUsers(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "on it")))
+	item, err := agentturn.WithProvenance(openresponses.UserText("review the diff"), agentturn.Provenance{
+		Layers: []agentturn.Layer{{Source: "dax.prompts", ID: "review"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ctl.Prompt(a.ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	s := a.waitFor("the composed prompt", has("composed from dax.prompts review: not your words", "review the diff", "on it", "idle"))
+	if l := lineWith(s, "review the diff"); strings.Contains(s, "user\n") && strings.Contains(l, "user") {
+		t.Errorf("shown as the user's:\n%s", s)
+	}
+}

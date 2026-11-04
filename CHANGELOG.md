@@ -7,7 +7,7 @@ versions may break the API.
 
 ## Unreleased
 
-- Dependencies: agentturn and agentturn/session v0.0.36, agentsession
+- Dependencies: agentturn and agentturn/session v0.0.37, agentsession
   v0.0.37, agentkit v0.0.16, agentpolicy v0.0.19, agenttool v0.0.29,
   openresponses v0.0.18, agentmemory v0.0.12 (now direct).
 - Changed: with agentsession v0.0.37 the binary raises every session it
@@ -98,6 +98,16 @@ versions may break the API.
   a question or a permission is answered. The editor must wait for the
   file (`code --wait`). What the input held when a refusal's reason or
   a question's note takes it over comes back after the answer.
+- Added: a message the host composed from text the person did not write
+  (agentturn v0.0.37's `WithProvenance`: instruction layers, a source,
+  trust) is shown as such, "composed from LAYERS, sent by SOURCE, LABELS:
+  not your words", never under "user": on the record (the item's
+  `instructions_part` and `trust`), live (`ItemStart`/`ItemEnd`'s
+  `Provenance`, copied by `client.Copy`) and in the queued list (the
+  queued entry's `agentturn:instructions_part` and `agentturn:trust`).
+  `view.Row.Provenance` and `view.Queued.Provenance` carry it. A queued
+  input marked hidden (`agentturn:visible` false) is not listed, as its
+  item is not shown once drained.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

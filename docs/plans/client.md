@@ -1287,6 +1287,19 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   tool call. `Direct` keeps `Queue` until a delivery that returns once
   it is accepted exists.
 
+## Decided in implementation, provenance
+
+- **A composed message is not the person's.** agentturn v0.0.37 lets a
+  host mark a message it composed (`WithProvenance`): the instruction
+  layers, what sent it, its trust. The view carries it as
+  `view.Provenance` (agentsession's `LayerRef`, `Trigger` and `Trust`)
+  on a `Row` and a `Queued`, from the item entry's `instructions_part`
+  and `trust` (a copied item's trust is its copy's, not a mark), from
+  the queued entry's `agentturn:*` members, and from the live item
+  events; the TUI labels the message with it in place of "user". A
+  message with neither layers nor trust is the person's, whatever its
+  `source`, which every input carries as the run's trigger.
+
 ## Decided in implementation, forks in the tree
 
 - **Listing is an optional `client.Lister`.** `client.Record` follows

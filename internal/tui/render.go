@@ -182,10 +182,13 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		// user typed is shown as typed.
 		var label string
 		body := it.Text()
-		switch it.Role {
-		case openresponses.RoleUser:
+		switch {
+		case row.Provenance != nil:
+			// Text the host composed: never shown as the person's words.
+			label = dimStyle.Render(provenanceText(row.Provenance))
+		case it.Role == openresponses.RoleUser:
 			label = userStyle.Render("user")
-		case openresponses.RoleAssistant:
+		case it.Role == openresponses.RoleAssistant:
 			label = assistantStyle.Render("agent")
 			body = md.render(body, width)
 		default:
@@ -796,4 +799,28 @@ func compactTokens(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprint(n)
+}
+
+// provenanceText says where a message the host composed came from, and
+// that the person did not write it: "composed from agentsmd sub/AGENTS.md,
+// sent by hook dax.agentsmd, untrusted: not your words".
+func provenanceText(p *view.Provenance) string {
+	var parts []string
+	if len(p.Layers) > 0 {
+		var ls []string
+		for _, l := range p.Layers {
+			ls = append(ls, strings.TrimSpace(l.Source+" "+l.ID))
+		}
+		parts = append(parts, "composed from "+strings.Join(ls, ", "))
+	}
+	if s := p.Source; s != nil && (s.Kind != "" || s.Source != "") {
+		parts = append(parts, "sent by "+strings.TrimSpace(s.Kind+" "+s.Source))
+	}
+	if t := p.Trust; t != nil && len(t.Reads) > 0 {
+		parts = append(parts, strings.Join(t.Reads, ", "))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "composed by the host")
+	}
+	return strings.Join(parts, ", ") + ": not your words"
 }

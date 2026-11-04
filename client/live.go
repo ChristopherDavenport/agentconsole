@@ -114,7 +114,7 @@ func Copy(ev agentturn.Event) (agentturn.Event, bool) {
 			return nil, false
 		}
 		c := *e
-		c.Item = CloneItem(e.Item)
+		c.Item, c.Provenance = CloneItem(e.Item), cloneProvenance(e.Provenance)
 		return &c, true
 	case *agentturn.ItemUpdate:
 		c := *e
@@ -125,7 +125,7 @@ func Copy(ev agentturn.Event) (agentturn.Event, bool) {
 			return nil, false
 		}
 		c := *e
-		c.Item = CloneItem(e.Item)
+		c.Item, c.Provenance = CloneItem(e.Item), cloneProvenance(e.Provenance)
 		return &c, true
 	case *agentturn.ResponseEnd:
 		if e.Response == nil {
@@ -234,4 +234,19 @@ func CallID(item openresponses.Item) string {
 		return v.CallID
 	}
 	return ""
+}
+
+// cloneProvenance copies an item's provenance, which the caller that
+// marked the item holds.
+func cloneProvenance(p *agentturn.Provenance) *agentturn.Provenance {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	c.Layers = slices.Clone(p.Layers)
+	c.Source.Extra = nil
+	if p.Trust != nil {
+		c.Trust = &agentturn.Trust{Reads: slices.Clone(p.Trust.Reads)}
+	}
+	return &c
 }

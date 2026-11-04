@@ -231,6 +231,10 @@ type Row struct {
 	// it: LeftOutQuarantined, LeftOutOmitted or LeftOutPlaceholder. ""
 	// when the item is sent whole.
 	LeftOut string
+	// Provenance is set on a message the host composed from text the
+	// person did not write (agentturn's WithProvenance): it is not the
+	// person's words. nil for one the person typed.
+	Provenance *Provenance
 	// Call is set on the row of a function call.
 	Call *Call
 	// Fold is set on the row of a compaction entry: the point where the
@@ -298,6 +302,19 @@ type Queued struct {
 	// Mode is agentsession.ModeSteer or agentsession.ModeFollowUp.
 	Mode string
 	Item openresponses.Item
+	// Provenance is set on an input the host composed, as on a Row.
+	Provenance *Provenance
+}
+
+// Provenance says where a message the host composed came from (agentturn
+// v0.0.37, agentsession RFC 0001 instructions_part, trust and source):
+// the instruction layers it was composed from, what sent it, and what
+// the host knows of its trust, nil when it said nothing and an empty
+// Reads when it judged the content clean.
+type Provenance struct {
+	Layers []agentsession.LayerRef
+	Source *agentsession.Trigger
+	Trust  *agentsession.Trust
 }
 
 // Model is what a client renders.
@@ -360,6 +377,7 @@ type ovItem struct {
 	responseID string
 	item       openresponses.Item
 	done       bool
+	prov       *Provenance
 }
 
 type ovCall struct {
@@ -735,7 +753,12 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	// and a queued entry there may belong to an item further on.
 	v.queued = nil
 	for _, q := range agentsession.Queued(s.Path(leaf)) {
-		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
+		hidden, prov := queuedProvenance(q)
+		if hidden {
+			// Not shown when it is drained either.
+			continue
+		}
+		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Provenance: prov})
 	}
 	v.leaves = tips(s)
 	v.branches = branchesOf(s, branchTips(s, v.leaf), v.leaf)
@@ -1140,13 +1163,13 @@ func (v *View) Live(ev agentturn.Event) {
 		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == e.Turn })
 	case *agentturn.ItemStart:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, false)
+			v.item(e.RunID, e.ResponseID, e.Item, false, liveProvenance(e.Provenance))
 		}
 	case *agentturn.ItemUpdate:
-		v.item(e.RunID, e.ResponseID, e.Item, false)
+		v.item(e.RunID, e.ResponseID, e.Item, false, nil)
 	case *agentturn.ItemEnd:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, true)
+			v.item(e.RunID, e.ResponseID, e.Item, true, liveProvenance(e.Provenance))
 		}
 	case *agentturn.ResponseEnd:
 		responseID := ""
@@ -1205,7 +1228,7 @@ func (v *View) Live(ev agentturn.Event) {
 	}
 }
 
-func (v *View) item(runID, responseID string, item openresponses.Item, done bool) {
+func (v *View) item(runID, responseID string, item openresponses.Item, done bool, prov *Provenance) {
 	if item == nil {
 		return
 	}
@@ -1228,10 +1251,13 @@ func (v *View) item(runID, responseID string, item openresponses.Item, done bool
 				o.responseID = responseID
 			}
 			o.done = o.done || done
+			if prov != nil {
+				o.prov = prov
+			}
 			return
 		}
 	}
-	v.items = append(v.items, &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done})
+	v.items = append(v.items, &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done, prov: prov})
 }
 
 func (v *View) call(runID, callID string) *ovCall {
@@ -1345,7 +1371,7 @@ func (v *View) Model() Model {
 			if !x.IsVisible() {
 				continue
 			}
-			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID]}
+			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID], Provenance: itemProvenance(x)}
 			if x.CopiedFrom != nil {
 				row.CopiedFrom = x.CopiedFrom.Session
 			}
@@ -1372,7 +1398,7 @@ func (v *View) Model() Model {
 		if !v.onLine(o.run) {
 			continue
 		}
-		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item)}
+		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item), Provenance: o.prov.clone()}
 		if fc, ok := o.item.(*openresponses.FunctionCall); ok {
 			row.Call = v.callView(fc, nil)
 			row.Call.Schema = schemaOf(settings.Tools, fc.Name)
@@ -1383,9 +1409,106 @@ func (v *View) Model() Model {
 	m.CutOff = append([]Permission(nil), v.cut...)
 	m.Questions = append([]agentturn.Question(nil), v.asked...)
 	for _, q := range v.queued {
-		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
+		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item), Provenance: q.Provenance.clone()})
 	}
 	return m
+}
+
+// itemProvenance is the provenance an item entry records for a message
+// the host composed: its instruction layers or its trust, with its
+// source. A copied item's trust is the copy's, and a message without
+// either is the person's, whatever its source (the run's trigger).
+func itemProvenance(e *agentsession.ItemEntry) *Provenance {
+	layers := e.Layers()
+	trust := e.Trust
+	if e.CopiedFrom != nil {
+		trust = nil
+	}
+	if len(layers) == 0 && trust == nil {
+		return nil
+	}
+	p := &Provenance{Layers: slices.Clone(layers), Trust: cloneTrust(trust)}
+	if e.Source != nil {
+		src := *e.Source
+		src.Unknown = nil
+		p.Source = &src
+	}
+	return p
+}
+
+// queuedProvenance reads the marks agentturn/session keeps on a queued
+// entry for an input the host marked (VisibleMember, TrustMember,
+// InstructionsPartMember), as its recorder reads them back.
+func queuedProvenance(q *agentsession.QueuedEntry) (hidden bool, prov *Provenance) {
+	if raw, ok := q.Unknown[session.VisibleMember]; ok {
+		var visible bool
+		hidden = json.Unmarshal(raw, &visible) == nil && !visible
+	}
+	var p Provenance
+	if raw, ok := q.Unknown[session.TrustMember]; ok {
+		var t agentsession.Trust
+		if json.Unmarshal(raw, &t) == nil {
+			p.Trust = &t
+		}
+	}
+	if raw, ok := q.Unknown[session.InstructionsPartMember]; ok {
+		var one agentsession.LayerRef
+		if json.Unmarshal(raw, &one) == nil && one.Source != "" {
+			p.Layers = []agentsession.LayerRef{one}
+		} else if json.Unmarshal(raw, &p.Layers) != nil {
+			p.Layers = nil
+		}
+	}
+	if p.Trust == nil && len(p.Layers) == 0 {
+		return hidden, nil
+	}
+	if q.Trigger != nil {
+		src := *q.Trigger
+		src.Unknown = nil
+		p.Source = &src
+	}
+	return hidden, &p
+}
+
+// liveProvenance is an item event's provenance, copied.
+func liveProvenance(lp *agentturn.Provenance) *Provenance {
+	if lp == nil {
+		return nil
+	}
+	p := &Provenance{}
+	for _, l := range lp.Layers {
+		p.Layers = append(p.Layers, agentsession.LayerRef{ID: l.ID, Source: l.Source})
+	}
+	if lp.Trust != nil {
+		p.Trust = &agentsession.Trust{Reads: make([]string, len(lp.Trust.Reads))}
+		for i, l := range lp.Trust.Reads {
+			p.Trust.Reads[i] = string(l)
+		}
+	}
+	if s := lp.Source; s.Kind != "" || s.Ref != "" || s.Source != "" {
+		p.Source = &agentsession.Trigger{Kind: s.Kind, Ref: s.Ref, Source: s.Source}
+	}
+	return p
+}
+
+func cloneTrust(t *agentsession.Trust) *agentsession.Trust {
+	if t == nil {
+		return nil
+	}
+	return &agentsession.Trust{Reads: slices.Clone(t.Reads)}
+}
+
+// clone copies p, so a Model shares nothing with the view.
+func (p *Provenance) clone() *Provenance {
+	if p == nil {
+		return nil
+	}
+	c := &Provenance{Layers: slices.Clone(p.Layers), Trust: cloneTrust(p.Trust)}
+	if p.Source != nil {
+		s := *p.Source
+		c.Source = &s
+	}
+	return c
 }
 
 // leftOutNow is leftOutOf the viewed line, from the cache while the line

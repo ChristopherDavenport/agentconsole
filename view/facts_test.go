@@ -201,3 +201,60 @@ func TestALiveWithdrawalIsNeverStarted(t *testing.T) {
 		t.Errorf("withdrawn live: %+v", c)
 	}
 }
+
+// A message the host composed from text the person did not write
+// (agentturn v0.0.37's WithProvenance) is recorded with its layers,
+// trust and source, and is shown as such, not as the person's words: on
+// the record, in the queued list (agentturn:instructions_part and
+// agentturn:trust on the queued entry, a hidden one left out), and live.
+func TestAComposedMessageIsNotThePersons(t *testing.T) {
+	l := newRecordsLog(t)
+	typed := l.append(itemEntry(openresponses.UserText("my own words"), ""))
+	composed := itemEntry(openresponses.UserText("contents of AGENTS.md"), "")
+	composed.InstructionsPart = &agentsession.LayerRef{Source: agentsession.LayerAgentsMD, ID: "sub/AGENTS.md"}
+	composed.Trust = &agentsession.Trust{Reads: []string{"untrusted"}}
+	composed.Source = &agentsession.Trigger{Kind: "hook", Source: "dax.agentsmd"}
+	cid := l.append(composed)
+
+	q := agentsession.NewQueued(openresponses.UserText("a template"), agentsession.ModeSteer)
+	q.Trigger = &agentsession.Trigger{Kind: "mcp", Source: "server:docs"}
+	q.Unknown = map[string]json.RawMessage{session.InstructionsPartMember: json.RawMessage(`{"source":"dax.prompts","id":"review"}`)}
+	l.append(q)
+	hidden := agentsession.NewQueued(openresponses.UserText("unseen"), agentsession.ModeSteer)
+	hidden.Unknown = map[string]json.RawMessage{session.VisibleMember: json.RawMessage(`false`)}
+	l.append(hidden)
+
+	m := l.v.Model()
+	byEntry := map[string]Row{}
+	for _, r := range m.Rows {
+		byEntry[r.EntryID] = r
+	}
+	if p := byEntry[typed].Provenance; p != nil {
+		t.Errorf("the person's message has a provenance: %+v", p)
+	}
+	p := byEntry[cid].Provenance
+	if p == nil || len(p.Layers) != 1 || p.Layers[0].ID != "sub/AGENTS.md" || p.Trust == nil || p.Trust.Reads[0] != "untrusted" || p.Source == nil || p.Source.Source != "dax.agentsmd" {
+		t.Errorf("the composed message: %+v", p)
+	}
+	if len(m.Queued) != 1 {
+		t.Fatalf("queued %+v, want the template alone", m.Queued)
+	}
+	if qp := m.Queued[0].Provenance; qp == nil || len(qp.Layers) != 1 || qp.Layers[0].Source != "dax.prompts" || qp.Source == nil || qp.Source.Kind != "mcp" {
+		t.Errorf("the queued template: %+v", qp)
+	}
+
+	// Live, before its entry lands.
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m9", "user", "a prompt template"),
+		Provenance: &agentturn.Provenance{Layers: []agentturn.Layer{{Source: "dax.prompts", ID: "fix"}}}})
+	var live *Row
+	m = l.v.Model()
+	for i := range m.Rows {
+		if m.Rows[i].Live {
+			live = &m.Rows[i]
+		}
+	}
+	if live == nil || live.Provenance == nil || live.Provenance.Layers[0].ID != "fix" {
+		t.Errorf("the live composed row: %+v", live)
+	}
+}
