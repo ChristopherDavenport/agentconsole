@@ -113,6 +113,11 @@ versions may break the API.
   tell it from the run's trigger (agentturn#303). A queued
   input marked hidden (`agentturn:visible` false) is not listed, as its
   item is not shown once drained.
+- Fixed (security): a key pressed as a permission or question panel
+  opened was taken as its answer, so a `y` typed in the middle of a
+  steer approved the call at once. A panel takes no answer for half a
+  second after it opens: keys typed meanwhile stay with the input line,
+  and Enter sends nothing until the panel is answered.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

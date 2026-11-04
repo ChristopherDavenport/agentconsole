@@ -316,7 +316,9 @@ func newAppRecord(t *testing.T, start starter, build func(context.Context, *sess
 	if wrap != nil {
 		driven = wrap(ctl)
 	}
-	a.m = tui.New(ctx, record, driven, client.Direct(driven), append([]tui.Option{tui.WithCopier(func(text string) {
+	// Tests press keys as soon as a panel is on screen: no settle,
+	// unless a test asks for one.
+	a.m = tui.New(ctx, record, driven, client.Direct(driven), append([]tui.Option{tui.WithPanelSettle(0), tui.WithCopier(func(text string) {
 		a.copyMu.Lock()
 		defer a.copyMu.Unlock()
 		a.copies = append(a.copies, text)

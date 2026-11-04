@@ -1287,6 +1287,19 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   tool call. `Direct` keeps `Queue` until a delivery that returns once
   it is accepted exists.
 
+## Decided in implementation, a panel settles before it answers
+
+- **A permission or question panel takes no answer for 500 ms after it
+  opens.** Bubble Tea renders after each update, so "the panel was
+  drawn" says nothing about whether the person saw it: a key already
+  typed (a `y` mid-word of a steer) reaches the panel on the next
+  update. The model notes when the panel on screen changed (a question's
+  ID, a permission's call ID) and, inside the settle, puts a key in the
+  input line where it was being typed, and drops Enter so the line is
+  not sent beside the question. A reason or a note being typed is not
+  held back. The settle and the clock are internal options of the
+  model, 0 in the tests that press keys as soon as a panel shows.
+
 ## Decided in implementation, provenance
 
 - **A composed message is not the person's.** agentturn v0.0.37 lets a

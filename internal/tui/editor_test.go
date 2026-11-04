@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -121,5 +123,57 @@ func TestAnIntentRefusalEndsAReasonBeingTyped(t *testing.T) {
 	s := a.waitFor("the draft back", func(s string) bool { return strings.Contains(inputLine(s), "my draft") })
 	if strings.Contains(s, "half a reason") {
 		t.Errorf("the half-typed reason stayed:\n%s", s)
+	}
+}
+
+// fakeClock is a clock a test moves.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Add(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+// A permission panel takes only keys pressed once it has settled: a y
+// typed mid-word as it opens stays with the input line and approves
+// nothing; a y pressed after the settle approves.
+func TestAPanelTakesOnlyKeysPressedAfterItOpens(t *testing.T) {
+	release := make(chan struct{})
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = func(ctx context.Context, _ agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "may I?"}, nil
+	}
+	clock := &fakeClock{now: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)}
+	a := newAppWith(t, cfg, nil, nil, tui.WithPanelSettle(time.Second), tui.WithClock(clock.Now))
+	a.submit("go")
+	a.typeText("the stea")
+	close(release)
+	a.waitFor("the permission", has("Permission requested"))
+	a.typeText("dy")
+	s := a.waitFor("the keys in the input", func(s string) bool { return strings.Contains(inputLine(s), "the steady") })
+	if !strings.Contains(s, "Permission requested") || strings.Contains(s, "done") {
+		t.Fatalf("a key typed as the panel opened answered it:\n%s", s)
+	}
+	a.key("enter") // nor does Enter send anything yet
+	clock.Add(2 * time.Second)
+	a.typeText("y")
+	s = a.waitFor("approved", has("done", "idle"))
+	if !strings.Contains(inputLine(s), "the steady") {
+		t.Errorf("the input lost what was typed:\n%s", s)
 	}
 }

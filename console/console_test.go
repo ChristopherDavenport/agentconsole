@@ -276,6 +276,8 @@ func TestRunApprovesAPolicysQuestionFromTheTerminal(t *testing.T) {
 	if ran.Load() != 0 {
 		t.Fatal("the tool ran before approval")
 	}
+	// A panel takes no answer until it has settled, as a person reads it.
+	time.Sleep(700 * time.Millisecond)
 	r.type_("y")
 	r.waitScreen("tool said ok")
 	if ran.Load() != 1 {

@@ -127,7 +127,7 @@ func newViewApp(t *testing.T, src client.Source, act client.Controller) *app {
 		t.Fatal(err)
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, record: record}
-	a.m = tui.New(ctx, record, src, act)
+	a.m = tui.New(ctx, record, src, act, tui.WithPanelSettle(0))
 	a.wait = tui.Attach(ctx, record, src, a.send)
 	t.Cleanup(func() {
 		cancel()

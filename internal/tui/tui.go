@@ -173,6 +173,14 @@ type Model struct {
 	// draft is what the input held when a refusal's reason or a note
 	// took it over, given back once the answer is sent or dropped.
 	draft string
+	// panel names the permission or question panel on screen and
+	// panelAt when it opened; it takes no answer until settle has passed
+	// on now's clock, so a key the user was already typing (a y mid-word
+	// of a steer) is not taken as the answer.
+	panelOn     string
+	panelAt     time.Time
+	panelSettle time.Duration
+	now         func() time.Time
 	// exec suspends the program for the editor (editor.go).
 	exec func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 	// The mouse selection (select.go): pressed is whether the left
@@ -214,6 +222,13 @@ func WithCost(fn client.Cost) Option { return func(m *Model) { m.cost = fn } }
 func WithExec(fn func(*exec.Cmd, tea.ExecCallback) tea.Cmd) Option {
 	return func(m *Model) { m.exec = fn }
 }
+
+// WithPanelSettle sets how long a permission or question panel takes
+// no answer after it opens (defaultPanelSettle).
+func WithPanelSettle(d time.Duration) Option { return func(m *Model) { m.panelSettle = d } }
+
+// WithClock sets the clock the panel's settle is measured on.
+func WithClock(now func() time.Time) Option { return func(m *Model) { m.now = now } }
 
 // WithHistory gives the input a history to walk with Up and Down: past,
 // oldest first, and record, called with each line sent, before what it
@@ -264,6 +279,9 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 		steers:   &steerQueue{},
 		inputY:   -1,
 		exec:     tea.ExecProcess,
+		now:      time.Now,
+
+		panelSettle: defaultPanelSettle,
 	}
 	for _, o := range options {
 		o(m)
@@ -696,6 +714,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+g" {
 		return m, m.editInput()
 	}
+	if m.settling() {
+		return m, m.keyBeforeSettle(msg)
+	}
 	if q, _, ok := m.question(); ok {
 		return m.questionKey(msg, q)
 	}
@@ -943,8 +964,18 @@ func (m *Model) relayout() {
 	}
 	m.reveal = false
 	m.drawn = m.screen
-	_, _, asking := m.question()
-	_, _, permitting := m.pending()
+	askedQ, _, asking := m.question()
+	askedP, _, permitting := m.pending()
+	on := ""
+	switch {
+	case asking:
+		on = "q:" + askedQ.ID
+	case permitting:
+		on = "p:" + askedP.CallID
+	}
+	if on != m.panelOn {
+		m.panelOn, m.panelAt = on, m.now()
+	}
 	if (asking && !m.refusingQ && !m.notingQ) || (!asking && permitting && !m.refusing) {
 		m.in.Blur()
 	} else {
@@ -1249,4 +1280,32 @@ func (m *Model) endAnswerText() {
 		m.in.SetValue(m.draft)
 		m.draft = ""
 	}
+}
+
+// defaultPanelSettle is how long a panel takes no answer after it opens:
+// longer than the gap between two keys of a word, shorter than reading
+// the question.
+const defaultPanelSettle = 500 * time.Millisecond
+
+// settling reports whether a permission or question panel is on screen,
+// waiting for y or n, and opened less than the settle ago. A reason or a
+// note being typed into the input is not a panel's key.
+func (m *Model) settling() bool {
+	if m.panelOn == "" || m.panelSettle <= 0 || m.refusing || m.refusingQ || m.notingQ {
+		return false
+	}
+	return m.now().Sub(m.panelAt) < m.panelSettle
+}
+
+// keyBeforeSettle keeps a key pressed as a panel opens with the input
+// line, where the user was typing it; Enter sends nothing, so the line
+// waits for the panel's answer.
+func (m *Model) keyBeforeSettle(msg tea.KeyPressMsg) tea.Cmd {
+	if msg.Code == tea.KeyEnter || isNewlineKey(msg) {
+		return nil
+	}
+	m.in.Focus()
+	cmd := m.updateInput(msg)
+	m.relayout()
+	return cmd
 }
