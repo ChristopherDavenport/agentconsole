@@ -8,6 +8,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/ChristopherDavenport/agentkit v0.0.16
+	github.com/ChristopherDavenport/agentmemory v0.0.12
 	github.com/ChristopherDavenport/agentpolicy v0.0.19
 	github.com/ChristopherDavenport/agentsession v0.0.37
 	github.com/ChristopherDavenport/agenttool v0.0.29
@@ -22,7 +23,6 @@ require (
 )
 
 require (
-	github.com/ChristopherDavenport/agentmemory v0.0.12 // indirect
 	github.com/ChristopherDavenport/agentskill v0.0.12 // indirect
 	github.com/ChristopherDavenport/agentsmd v0.0.4 // indirect
 	github.com/ChristopherDavenport/agenttool/mcpclient v0.0.29 // indirect

@@ -335,7 +335,11 @@ func (s Session) Lines() []string {
 		}
 	}
 	if m := s.Manifest; m != nil {
-		add("memory:   manifest in force: %d entries, %d left out", len(m.Entries), len(m.Omitted))
+		if m.Dropped() {
+			add("memory:   memory block left out this turn (%d entries not shown to the model)", len(m.Omitted))
+		} else {
+			add("memory:   manifest in force: %d entries, %d left out", len(m.Entries), len(m.Omitted))
+		}
 		for i, e := range m.Entries {
 			if i == maxListed {
 				add("          ... %d more", len(m.Entries)-maxListed)
@@ -358,7 +362,11 @@ func (s Session) Lines() []string {
 			add("          ... %d more refused", len(s.ManifestRefused)-maxListed)
 			break
 		}
-		add("          REFUSED manifest record %s: %s", short(r.Entry), clip(r.Why, 120))
+		kind := "malformed"
+		if r.Unresolved {
+			kind = "unresolved base"
+		}
+		add("          REFUSED manifest record %s (%s): %s", short(r.Entry), kind, clip(r.Why, 240))
 	}
 	if len(s.Grants) == 0 {
 		add("grants:   no skill grants on the line")

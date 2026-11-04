@@ -48,6 +48,13 @@ versions may break the API.
 - Changed: the binary's model adapter leaves out other providers'
   slug-prefixed items (`openresponses.WithProviderSlugs()`), since its
   endpoint is a provider's own API.
+- Changed: the session pane folds memory manifests with agentmemory's
+  `ManifestFold` (v0.0.12) in place of a local copy that had drifted
+  (#4). A manifest recording a block the product left out whole
+  (`dropped`) hashes and folds as agentmemory's does, where the copy
+  refused a delta carrying it, and reads "memory block left out this
+  turn"; a refused record says whether its base was unresolved or it
+  was malformed.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

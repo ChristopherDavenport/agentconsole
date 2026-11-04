@@ -3,11 +3,9 @@ package inspect
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/ChristopherDavenport/agentmemory"
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn/session"
 )
@@ -232,200 +230,44 @@ func grantsAt(path []agentsession.Entry, at int) []Grant {
 	return out
 }
 
-// Manifest is the memory manifest in force: what the model's memory block
-// held and what its bound left out.
+// Manifest is the memory manifest in force, as agentmemory's fold keeps
+// it: what the model's memory block held, what its bound left out, and
+// whether the product left the block out whole (Dropped).
 type Manifest struct {
-	Entries []ManifestEntry `json:"entries"`
-	Omitted []ManifestEntry `json:"omitted,omitempty"`
+	agentmemory.Manifest
 	// Entry is the record entry the manifest in force came from.
 	Entry string `json:"-"`
 }
 
-// ManifestEntry names one memory by scope and name.
-type ManifestEntry struct {
-	Scope  string `json:"scope"`
-	Name   string `json:"name"`
-	Hash   string `json:"hash"`
-	Bytes  int    `json:"bytes"`
-	Reason string `json:"reason,omitempty"`
-}
-
-// manifestNS is where agentmemory records its manifest. A record is
-// whole, or a delta on one of the manifests last in force: a base (that
-// manifest's hash), the result's hash, and per list a run of keeps and
-// entries written whole (agentmemory v0.0.10, render.go).
-const manifestNS = "agentmemory:render"
-
-// foldDepth is how many distinct manifests a delta's base may be among.
-const foldDepth = 8
-
-type manifestDelta struct {
-	Base    string       `json:"base"`
-	Hash    string       `json:"hash"`
-	Entries []manifestOp `json:"entries,omitempty"`
-	Omitted []manifestOp `json:"omitted,omitempty"`
-}
-
-type manifestOp struct {
-	Keep int `json:"keep,omitempty"`
-	*ManifestEntry
-}
-
-func (o *manifestOp) UnmarshalJSON(data []byte) error {
-	var probe struct {
-		Keep  int    `json:"keep"`
-		Scope string `json:"scope"`
-	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return err
-	}
-	if probe.Keep != 0 && probe.Scope != "" {
-		return errors.New("an element is both a keep and an entry")
-	}
-	if probe.Keep != 0 {
-		o.Keep = probe.Keep
-		return nil
-	}
-	var e ManifestEntry
-	if err := json.Unmarshal(data, &e); err != nil {
-		return err
-	}
-	o.ManifestEntry = &e
-	return nil
-}
-
-func manifestHash(m Manifest) string {
-	var b strings.Builder
-	for _, e := range m.Entries {
-		b.WriteString("+ " + e.Scope + "/" + e.Name + " " + e.Hash + " " + strconv.Itoa(e.Bytes) + "\n")
-	}
-	for _, e := range m.Omitted {
-		b.WriteString("- " + e.Scope + "/" + e.Name + " " + e.Hash + " " + strconv.Itoa(e.Bytes) + " " + e.Reason + "\n")
-	}
-	return sha256Hex(b.String())
-}
-
-// applyOps folds a list of ops onto prev, with agentmemory's checks: the
-// list in force names no entry twice, an entry names a scope and a name,
-// and a keep takes a positive number of the entries left.
-func applyOps(prev []ManifestEntry, ops []manifestOp) ([]ManifestEntry, error) {
-	at := map[string]int{}
-	for i, e := range prev {
-		k := e.Scope + "/" + e.Name
-		if _, dup := at[k]; dup {
-			return nil, errors.New("the manifest in force names an entry twice")
-		}
-		at[k] = i
-	}
-	var out []ManifestEntry
-	cursor := 0
-	for i, op := range ops {
-		switch {
-		case op.ManifestEntry != nil:
-			if op.Scope == "" || op.Name == "" {
-				return nil, fmt.Errorf("element %d names no entry", i)
-			}
-			out = append(out, *op.ManifestEntry)
-			if j, ok := at[op.Scope+"/"+op.Name]; ok {
-				cursor = j + 1
-			}
-		case op.Keep > 0 && op.Keep <= len(prev)-cursor:
-			out = append(out, prev[cursor:cursor+op.Keep]...)
-			cursor += op.Keep
-		case op.Keep > 0:
-			return nil, fmt.Errorf("element %d keeps %d entries and %d are left", i, op.Keep, len(prev)-cursor)
-		default:
-			return nil, fmt.Errorf("element %d is neither a positive keep nor an entry", i)
-		}
-	}
-	return out, nil
-}
-
 // Refusal is a manifest record the fold refused, and why. A refused record
 // leaves the manifest in force as it was, as agentmemory's fold does.
+// Unresolved says the delta's base is none of the manifests last in
+// force (agentmemory.ErrManifestBase); otherwise the record is malformed.
 type Refusal struct {
-	Entry string
-	Why   string
+	Entry      string
+	Why        string
+	Unresolved bool
 }
 
-// manifestIn folds the manifest records on the path, as agentmemory's
-// ManifestFold does, and returns the one in force. ok is false when the
-// path holds none. A record that does not fold is refused, with the
-// checks agentmemory makes: a delta's base is among the manifests last in
-// force, its elements are well formed, and the result hashes to the hash
-// the delta states (so a corrupt or invented delta is not shown as the
-// memory the model had).
+// manifestIn folds the manifest records on the path with agentmemory's
+// ManifestFold (RFC 0001 section 8.5) and returns the one in force. ok
+// is false when the path holds none. A record the fold refuses is
+// listed, so a corrupt or invented delta is never shown as the memory
+// the model had.
 func manifestIn(path []agentsession.Entry) (m Manifest, refused []Refusal, ok bool) {
-	var recent []Manifest
-	var hashes []string
-	push := func(m Manifest, hash string) {
-		if i := slices.Index(hashes, hash); i >= 0 {
-			recent, hashes = slices.Delete(recent, i, i+1), slices.Delete(hashes, i, i+1)
-		}
-		recent = append([]Manifest{m}, recent...)
-		hashes = append([]string{hash}, hashes...)
-		if len(recent) > foldDepth {
-			recent, hashes = recent[:foldDepth], hashes[:foldDepth]
-		}
-	}
+	var fold agentmemory.ManifestFold
 	for _, e := range path {
 		c, isCustom := e.(*agentsession.CustomEntry)
-		if !isCustom || c.NS != manifestNS {
+		if !isCustom || c.NS != agentmemory.ManifestNS {
 			continue
 		}
-		refuse := func(format string, a ...any) {
-			refused = append(refused, Refusal{Entry: c.ID, Why: fmt.Sprintf(format, a...)})
-		}
-		var probe struct {
-			Base *string `json:"base"`
-		}
-		if err := json.Unmarshal(c.Data, &probe); err != nil {
-			refuse("%v", err)
+		if err := fold.Apply(c.Data); err != nil {
+			refused = append(refused, Refusal{Entry: c.ID, Why: err.Error(), Unresolved: errors.Is(err, agentmemory.ErrManifestBase)})
 			continue
 		}
-		if probe.Base == nil {
-			var whole Manifest
-			if err := json.Unmarshal(c.Data, &whole); err != nil {
-				refuse("%v", err)
-				continue
-			}
-			whole.Entry = c.ID
-			push(whole, manifestHash(whole))
-			continue
-		}
-		var d manifestDelta
-		if err := json.Unmarshal(c.Data, &d); err != nil {
-			refuse("%v", err)
-			continue
-		}
-		var base Manifest
-		if i := slices.Index(hashes, d.Base); i >= 0 {
-			base = recent[i]
-		} else if !(len(recent) == 0 && d.Base == manifestHash(Manifest{})) {
-			refuse("the delta is based on %s, which is not among the manifests last in force", d.Base)
-			continue
-		}
-		var out Manifest
-		var err error
-		if out.Entries, err = applyOps(base.Entries, d.Entries); err != nil {
-			refuse("entries: %v", err)
-			continue
-		}
-		if out.Omitted, err = applyOps(base.Omitted, d.Omitted); err != nil {
-			refuse("omitted: %v", err)
-			continue
-		}
-		if got := manifestHash(out); got != d.Hash {
-			refuse("the delta says %s but the folded result hashes %s", d.Hash, got)
-			continue
-		}
-		out.Entry = c.ID
-		push(out, d.Hash)
+		m, ok = Manifest{Manifest: fold.Manifest(), Entry: c.ID}, true
 	}
-	if len(recent) == 0 {
-		return Manifest{}, refused, false
-	}
-	return recent[0], refused, true
+	return m, refused, ok
 }
 
 // elicitation is a question a tool put to the user and what came of it

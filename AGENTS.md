@@ -45,7 +45,8 @@ committed, and live events carry only what is not committed yet.
   - `internal/inspect`: the record-detail panes, computed on demand from
     a snapshot of the session (`Record.Read`), never from the follower's
     session. It decodes the records other products write (policy
-    verdicts, skill grants, memory manifests) from their JSON.
+    verdicts, skill grants) from their JSON, and folds memory manifests
+    with agentmemory's own `ManifestFold`.
   - `internal/tui`: the Bubble Tea model (conversation, turn status,
     permissions, input, the tree, the row cursor and the panes) and
     `Attach`, which feeds the view from the record and live streams and
