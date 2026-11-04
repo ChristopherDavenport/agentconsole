@@ -1331,9 +1331,15 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   `$EDITOR` when it is unset, split into words as a shell splits them
   (quotes and backslashes; no expansion), is run on a private file
   (0600, in a directory of its own, removed afterwards whatever
-  happened, since a prompt may hold a pasted secret) while Bubble Tea's
+  happened, with the swap files an editor keeps beside it; undo files
+  an editor keeps elsewhere, such as vim's undodir, and a directory left
+  by a process killed during the edit are beyond it) while Bubble Tea's
   `tea.ExecProcess` suspends the program. What is saved goes back in
-  the input, unsent. No editor, a failing editor, and Ctrl-G while a
+  the input, unsent. The editor must wait for the file to close (`code
+  --wait`, not `code`). What the input held when a refusal's reason or
+  a question's note takes it over comes back once the answer is sent or
+  dropped, so a prompt composed in the editor survives a permission
+  that came meanwhile. No editor, a failing editor, and Ctrl-G while a
   question or a permission is answered are said on the status line and
   leave the input as it was. The exec is an internal option of the
   model, so a test without a program runs the editor at once.

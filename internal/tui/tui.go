@@ -170,6 +170,9 @@ type Model struct {
 	forksOf string
 	// hist is the input's history (history.go).
 	hist history
+	// draft is what the input held when a refusal's reason or a note
+	// took it over, given back once the answer is sent or dropped.
+	draft string
 	// exec suspends the program for the editor (editor.go).
 	exec func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 	// The mouse selection (select.go): pressed is whether the left
@@ -531,7 +534,7 @@ func (m *Model) syncQuestions() {
 	}
 	if _, _, ok := m.question(); !ok && (m.refusingQ || m.notingQ) {
 		m.refusingQ, m.notingQ = false, false
-		m.in.Reset()
+		m.endAnswerText()
 	}
 }
 
@@ -733,11 +736,11 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 		switch msg.Code {
 		case tea.KeyEnter:
 			reason := strings.TrimSpace(m.in.Value())
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusing = false
 			return m.decide(refusal(p, reason))
 		case tea.KeyEscape:
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusing = false
 			m.relayout()
 			return m, nil
@@ -749,7 +752,7 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 		return m.decide(agentturn.Approve(p.CallID).WithBy(who))
 	case "n", "N":
 		m.refusing = true
-		m.in.Reset()
+		m.beginAnswerText()
 		m.relayout()
 	}
 	return m, nil
@@ -774,11 +777,11 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Mode
 			if m.notingQ {
 				action = agenttool.ActionAccept
 			}
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusingQ, m.notingQ = false, false
 			return m.reply(q, agenttool.Answer{Action: action, Note: note, By: agenttool.ByHuman})
 		case tea.KeyEscape:
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusingQ, m.notingQ = false, false
 			m.relayout()
 			return m, nil
@@ -793,12 +796,12 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Mode
 	case "a", "A":
 		if !asksForForm(q) {
 			m.notingQ = true
-			m.in.Reset()
+			m.beginAnswerText()
 			m.relayout()
 		}
 	case "n", "N":
 		m.refusingQ = true
-		m.in.Reset()
+		m.beginAnswerText()
 		m.relayout()
 	}
 	return m, nil
@@ -1222,4 +1225,23 @@ func truncate(s string, w int) string {
 		r = r[:len(r)-1]
 	}
 	return string(r)
+}
+
+// beginAnswerText clears the input for a refusal's reason or a note,
+// keeping what was in it: a draft, a prompt composed in the editor.
+func (m *Model) beginAnswerText() {
+	if v := m.in.Value(); v != "" {
+		m.draft = v
+	}
+	m.in.Reset()
+}
+
+// endAnswerText gives the input back its draft once the answer is sent
+// or dropped.
+func (m *Model) endAnswerText() {
+	m.in.Reset()
+	if m.draft != "" {
+		m.in.SetValue(m.draft)
+		m.draft = ""
+	}
 }

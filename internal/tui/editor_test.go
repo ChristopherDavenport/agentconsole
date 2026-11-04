@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/ChristopherDavenport/agenttool"
+	"github.com/ChristopherDavenport/agentturn"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -60,5 +64,33 @@ func TestCtrlGWithoutAnEditorSaysSo(t *testing.T) {
 	s := a.waitFor("the failure", has("editor", "exit status 1"))
 	if !strings.Contains(lineWith(s, "> "), "kept") {
 		t.Errorf("the input changed:\n%s", s)
+	}
+}
+
+// What was in the input when a permission came is kept through its
+// refusal: the reason is typed in the input, and the draft (a prompt
+// composed in the editor, say) comes back after.
+func TestADraftSurvivesARefusal(t *testing.T) {
+	release := make(chan struct{})
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = func(ctx context.Context, _ agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "may I?"}, nil
+	}
+	a := newApp(t, cfg)
+	a.submit("go")
+	a.typeText("a long composed draft")
+	close(release)
+	a.waitFor("the permission", has("Permission requested"))
+	a.rune('n')
+	a.typeText("not now")
+	a.key("enter")
+	s := a.waitFor("the draft back", func(s string) bool { return strings.Contains(inputLine(s), "a long composed draft") })
+	if strings.Contains(inputLine(s), "not now") {
+		t.Errorf("the reason was left in the input:\n%s", s)
 	}
 }

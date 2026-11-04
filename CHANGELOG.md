@@ -93,7 +93,9 @@ versions may break the API.
   temporary file, and puts what was saved back in the input without
   sending it (#46). The file is removed afterwards; no editor or a
   failing one is said on the status line, and the key is refused while
-  a question or a permission is answered.
+  a question or a permission is answered. The editor must wait for the
+  file (`code --wait`). What the input held when a refusal's reason or
+  a question's note takes it over comes back after the answer.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

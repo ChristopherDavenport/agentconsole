@@ -24,9 +24,15 @@ var errNoEditor = errors.New("no editor: set $VISUAL or $EDITOR")
 // editInput is Ctrl-G: the input is written to a private file (mode
 // 0600, in a directory of its own) and the program suspends for the
 // user's editor, $VISUAL or else $EDITOR, split as a shell splits it.
-// What the editor saved is put back in the input, not sent. The file is
-// removed afterwards, whatever the editor did, since a prompt may hold
-// a pasted secret. It is refused while a question or a permission is
+// What the editor saved is put back in the input, not sent. The
+// directory is removed afterwards, whatever the editor did, with any
+// swap or backup file the editor kept beside the file. That is not all
+// a pasted secret may leave: an editor that keeps undo or backup files
+// in a directory of its own (vim's undodir) keeps them there, and a
+// process killed while the editor runs leaves the directory behind. An
+// editor must wait until the file is closed: one that returns at once
+// (code without --wait) gives back the text unchanged, and the file is
+// removed under it. It is refused while a question or a permission is
 // being answered, whose keys are y and n.
 func (m *Model) editInput() tea.Cmd {
 	if _, _, ok := m.question(); ok {
