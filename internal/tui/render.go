@@ -159,6 +159,14 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 	switch {
 	case row.KeptFromModel:
 		tag = dimStyle.Render(" (kept from the model: not sent)")
+	case row.CopiedFrom != "":
+		tag = dimStyle.Render(" (context copied from " + shortID(row.CopiedFrom) + ", not this session's)")
+	case row.LeftOut == view.LeftOutQuarantined:
+		tag = warnStyle.Render(" (quarantined: the model is sent a placeholder)")
+	case row.LeftOut == view.LeftOutOmitted:
+		tag = dimStyle.Render(" (left out of the model's context)")
+	case row.LeftOut == view.LeftOutPlaceholder:
+		tag = dimStyle.Render(" (the model is sent a placeholder)")
 	case row.Live && row.Open:
 		tag = dimStyle.Render(" (streaming)")
 	case row.Live:
@@ -174,10 +182,13 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		// user typed is shown as typed.
 		var label string
 		body := it.Text()
-		switch it.Role {
-		case openresponses.RoleUser:
+		switch {
+		case row.Provenance != nil:
+			// Text the host composed: never shown as the person's words.
+			label = dimStyle.Render(provenanceText(row.Provenance))
+		case it.Role == openresponses.RoleUser:
 			label = userStyle.Render("user")
-		case openresponses.RoleAssistant:
+		case it.Role == openresponses.RoleAssistant:
 			label = assistantStyle.Render("agent")
 			body = md.render(body, width)
 		default:
@@ -250,7 +261,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	switch {
 	case moving(c):
 		name, state = runStyle.Render(dot(spin)+" "+c.Name), runStyle.Render(state)
-	case c.State == view.CallDeferred:
+	case c.State == view.CallDeferred && !c.HeldBeside:
 		name = warnStyle.Render("◆ " + c.Name)
 	}
 	r := tools[c.Name]
@@ -300,6 +311,10 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	}
 	switch c.State {
 	case view.CallDeferred:
+		if c.HeldBeside {
+			b.WriteString("\n" + pad + "  " + dimStyle.Render("waits on its batch's question: the answers decide it"))
+			break
+		}
 		q := c.Reason
 		if q == "" {
 			q = "waiting for permission"
@@ -325,6 +340,11 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + pad + "  " + errStyle.Render("blocked: ") + clip(c.Output, o.output))
 	case view.CallCutOff:
 		b.WriteString("\n" + pad + "  " + warnStyle.Render("cut off before it was answered"))
+	case view.CallReturned:
+		b.WriteString("\n" + pad + "  " + dimStyle.Render("ran; its result is recorded and is given to the model when the conversation goes on"))
+		if o.output && c.Output != "" {
+			b.WriteString("\n" + pad + "  ↳ " + indent(clip(c.Output, o.output), pad+"    "))
+		}
 	case view.CallEnded:
 		switch {
 		case hasBody:
@@ -339,6 +359,12 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
 			b.WriteString("\n" + pad + "  " + dimStyle.Render(countHint(n)))
 		}
+	}
+	if c.Failed && c.State == view.CallEnded {
+		b.WriteString("\n" + pad + "  " + errStyle.Render("failed: the output reports the failure"))
+	}
+	if c.Withdrawn != "" && c.State != view.CallRunning {
+		b.WriteString("\n" + pad + "  " + dimStyle.Render("never started: its hand-off was withdrawn ("+c.Withdrawn+")"))
 	}
 	if c.Verdict != "" && c.Verdict != "proceed" {
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
@@ -773,4 +799,28 @@ func compactTokens(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprint(n)
+}
+
+// provenanceText says where a message the host composed came from, and
+// that the person did not write it: "composed from agentsmd sub/AGENTS.md,
+// sent by hook dax.agentsmd, untrusted: not your words".
+func provenanceText(p *view.Provenance) string {
+	var parts []string
+	if len(p.Layers) > 0 {
+		var ls []string
+		for _, l := range p.Layers {
+			ls = append(ls, strings.TrimSpace(l.Source+" "+l.ID))
+		}
+		parts = append(parts, "composed from "+strings.Join(ls, ", "))
+	}
+	if s := p.Source; s != nil && (s.Kind != "" || s.Source != "") {
+		parts = append(parts, "sent by "+strings.TrimSpace(s.Kind+" "+s.Source))
+	}
+	if t := p.Trust; t != nil && len(t.Reads) > 0 {
+		parts = append(parts, strings.Join(t.Reads, ", "))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "composed by the host")
+	}
+	return strings.Join(parts, ", ") + ": not your words"
 }

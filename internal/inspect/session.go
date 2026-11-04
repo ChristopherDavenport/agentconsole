@@ -56,6 +56,24 @@ type Session struct {
 	// Grants are the skill grants in force at the end of the line, and
 	// those a revocation ended.
 	Grants []Grant
+	// Redaction is set for a redacted session (agentsession RFC 0001,
+	// The redacted session), nil otherwise.
+	Redaction *Redaction
+}
+
+// Redaction is what a redacted session says of itself. From is
+// redacted_from's session: since format 0.19 the original's keyed
+// pseudonym, never a session this client can name or open. Redacted
+// and Native count the session's entries that carry a redacted member
+// and those appended natively. IDErr notes a session ID that is not the
+// one its redacted_from derives (agentsession.CheckRedactedID), which
+// the format recommends and does not require.
+type Redaction struct {
+	From     string
+	Profile  string
+	Redacted int
+	Native   int
+	IDErr    string
 }
 
 // PathVerify is the result of checking every response on a line.
@@ -110,6 +128,7 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 		ParentSession: h.ParentSession, Base: h.Base, SpawnedBy: h.SpawnedBy,
 		Entries: s.Len(), Path: len(path),
 	}
+	out.Redaction = redactionOf(s)
 	if h.Harness != nil {
 		out.Harness = h.Harness.Name
 		if h.Harness.Version != "" {
@@ -183,4 +202,28 @@ func (in *Inspector) usage(out *Session, path []agentsession.Entry) {
 	out.Usage, out.UsageByModel = view.Usage(path)
 	p := view.Price(out.UsageByModel, in.cost)
 	out.Cost, out.Priced, out.Unpriced = p.Total, p.Priced, p.Unpriced
+}
+
+// redactionOf is what s says of its redaction, nil for a session that is
+// not redacted.
+func redactionOf(s *agentsession.Session) *Redaction {
+	h := s.Header()
+	if !h.Redacted {
+		return nil
+	}
+	r := &Redaction{}
+	if f := h.RedactedFrom; f != nil {
+		r.From, r.Profile = f.Session, f.Profile
+	}
+	for _, e := range s.Entries() {
+		if _, ok := agentsession.RedactedOf(e); ok {
+			r.Redacted++
+		} else {
+			r.Native++
+		}
+	}
+	if err := agentsession.CheckRedactedID(h); err != nil {
+		r.IDErr = err.Error()
+	}
+	return r
 }

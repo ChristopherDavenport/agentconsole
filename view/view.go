@@ -51,6 +51,7 @@ package view
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,6 +135,12 @@ const (
 	// CallCutOff: an abort or a failure ended the run with the call
 	// unanswered. It is not a question; the next prompt answers it.
 	CallCutOff
+	// CallReturned: the call's tool returned and the record holds its
+	// result (format 0.15), but the output did not join the
+	// conversation before the run stopped. It ran; it is never asked
+	// about or run again, and Output is the result the harness that
+	// continues will append.
+	CallReturned
 )
 
 // String names the state.
@@ -151,6 +158,8 @@ func (s CallState) String() string {
 		return "deferred"
 	case CallCutOff:
 		return "cut_off"
+	case CallReturned:
+		return "returned"
 	}
 	return "unknown"
 }
@@ -175,6 +184,20 @@ type Call struct {
 	// Committed is set when the output is on the record, so the call is
 	// answered for good; before that Output is live.
 	Committed bool
+	// Failed is set when the output reports that the call failed: the
+	// record's output entry is marked failed (format 0.14), or, live,
+	// the tool ended with an error.
+	Failed bool
+	// HeldBeside marks a deferred call held only beside another call's
+	// question (agentturn's ToolDecision.Held, the record's
+	// agentturn:held): it is not asked about, and the answers to its
+	// batch decide it.
+	HeldBeside bool
+	// Withdrawn is the reason of the latest withdrawal of the call's
+	// dispatch (a reject carrying withdrawn): the hand-off was taken
+	// back before the tool ran, and the call is read as never started.
+	// "" when there is none.
+	Withdrawn string
 	// Verdict and Reason are the last policy decision the record holds
 	// for the call, and Reason the question of a deferred one.
 	Verdict string
@@ -198,12 +221,40 @@ type Row struct {
 	KeptFromModel bool
 	ResponseID    string
 	Item          openresponses.Item
+	// CopiedFrom is the session a copied item was taken from (format
+	// 0.15's copied_from): context this session holds, made in another
+	// session, not this session's own item or call. "" for an item of
+	// this session.
+	CopiedFrom string
+	// LeftOut says the model's context at the viewed line leaves the
+	// item out or sends a placeholder for it, though the record holds
+	// it: LeftOutQuarantined, LeftOutOmitted or LeftOutPlaceholder. ""
+	// when the item is sent whole.
+	LeftOut string
+	// Provenance is set on a message the host composed from text the
+	// person did not write (agentturn's WithProvenance): it is not the
+	// person's words. nil for one the person typed.
+	Provenance *Provenance
 	// Call is set on the row of a function call.
 	Call *Call
 	// Fold is set on the row of a compaction entry: the point where the
 	// record folds what came before into a summary, which Item carries.
 	Fold *Fold
 }
+
+// What a row's LeftOut says.
+const (
+	// LeftOutQuarantined: a guard quarantined the output as untrusted,
+	// so the model is sent [agentturn.QuarantinedOutput] in its place.
+	LeftOutQuarantined = "quarantined"
+	// LeftOutOmitted: the omit in force leaves the item out of the
+	// model's context (a host's trim, a quarantined item that is not an
+	// output, reasoning written under another model).
+	LeftOutOmitted = "omitted"
+	// LeftOutPlaceholder: the model is sent a placeholder text in place
+	// of the output or of image parts (a host's trim of old results).
+	LeftOutPlaceholder = "placeholder"
+)
 
 // Fold is what a compaction entry says it folded.
 type Fold struct {
@@ -231,8 +282,8 @@ type Permission struct {
 	// Subject is the part of the call the question is about, when the
 	// policy decided on a part (one command of a compound line), from
 	// the decision that deferred it; "" for the whole call. The record
-	// does not hold it, so a permission read from the record alone has
-	// none.
+	// holds it on the hold decision (agentturn/session's SubjectMember);
+	// a hold written before that member has none.
 	Subject string
 	// MayHaveRun is set for a call that was handed to its tool before
 	// it was left unanswered: a call held after its dispatch, or one an
@@ -251,6 +302,19 @@ type Queued struct {
 	// Mode is agentsession.ModeSteer or agentsession.ModeFollowUp.
 	Mode string
 	Item openresponses.Item
+	// Provenance is set on an input the host composed, as on a Row.
+	Provenance *Provenance
+}
+
+// Provenance says where a message the host composed came from (agentturn
+// v0.0.37, agentsession RFC 0001 instructions_part, trust and source):
+// the instruction layers it was composed from, what sent it, and what
+// the host knows of its trust, nil when it said nothing and an empty
+// Reads when it judged the content clean.
+type Provenance struct {
+	Layers []agentsession.LayerRef
+	Source *agentsession.Trigger
+	Trust  *agentsession.Trust
 }
 
 // Model is what a client renders.
@@ -313,6 +377,7 @@ type ovItem struct {
 	responseID string
 	item       openresponses.Item
 	done       bool
+	prov       *Provenance
 }
 
 type ovCall struct {
@@ -326,6 +391,10 @@ type ovCall struct {
 	output   string
 	reason   string
 	finished bool
+	failed   bool
+	// withdrawn is why the call's hand-off was withdrawn before the
+	// tool ran (ToolEnd.Withdrawn), "" when it was not.
+	withdrawn string
 	// held and subject are from the decision that deferred the call:
 	// held beside another call's question, and the part it is about.
 	held    bool
@@ -383,12 +452,20 @@ type key struct {
 	id   string
 }
 
-// View reconciles the record with the live stream.
+// View reconciles the record with the live stream. It is not safe for
+// concurrent use, Model included: Model keeps what it computed for the
+// viewed line (what the omit leaves out), so it writes to the view too.
+// A caller feeding it from several goroutines holds one lock over
+// Record, Live and Model, as tui.Attach does.
 type View struct {
-	session string
-	leaf    string
-	leaves  []string
-	path    []agentsession.Entry
+	// leftOut is leftOutOf the viewed line, for the line leftOutKey names
+	// (session, tail, length): built once per line, not per model.
+	leftOut    map[string]string
+	leftOutKey string
+	session    string
+	leaf       string
+	leaves     []string
+	path       []agentsession.Entry
 	// branches, entries and origin are read from the session at each
 	// step, links from the entries that land.
 	branches []Branch
@@ -461,7 +538,7 @@ func (v *View) Record(ch agentsession.Change) {
 		v.rebuild(ch.Session)
 		v.reconcilePending()
 	case agentsession.Appended:
-		v.setSession(ch.Session, "")
+		v.setSession(ch.Session, leafOf(ch.Session))
 		v.land(ch.Entry)
 		// Any entry can move the viewed line (the follower's leaf is
 		// its newest entry), so what waits is read again.
@@ -485,12 +562,14 @@ func (v *View) Record(ch agentsession.Change) {
 // end is on its way. A live end the record has delivered, or one for a run
 // the viewed path moved off, says nothing about the viewed line.
 //
-// While the live end of the path's last run is in hand, a call its
-// decision only held beside another call's question ([agentturn.ToolDecision]'s
-// Held) is not asked about: answering the batch decides it, as agentkit's
-// Control releases it with the answers. Without that end, after a
-// restart, the record cannot tell a held call from an asked one, and
-// every pending call is asked about.
+// A call its decision only held beside another call's question
+// ([agentturn.ToolDecision]'s Held) is not asked about: answering the
+// batch decides it, as agentkit's Control releases it with the answers.
+// The live end says so while it is in hand; after a restart the record
+// does, on the hold decision agentturn/session marks with
+// [session.HeldMember], which also keeps the part of the call a
+// question is about ([session.SubjectMember]). A hold written before
+// those members is asked about.
 func (v *View) reconcilePending() {
 	if v.turn.State == Running {
 		return
@@ -560,23 +639,55 @@ func (v *View) reconcilePending() {
 			if known && held(lp.Decision) {
 				continue
 			}
-			p.Reason = string(agentturn.PendingDeferred)
+			var hold *agentsession.DecisionEntry
 			if n := len(c.Decisions); n > 0 {
-				p.Question = c.Decisions[n-1].Reason
+				hold = c.Decisions[n-1]
+			}
+			if !known && holdMember(hold, session.HeldMember, false) {
+				continue
+			}
+			p.Reason = string(agentturn.PendingDeferred)
+			if hold != nil {
+				p.Question = hold.Reason
+				p.Subject = holdMember(hold, session.SubjectMember, "")
 			}
 			if q := questionOf(old, p.CallID); q != "" {
 				p.Question = q
 			}
 			if known {
-				p.Subject = subjectOf(lp.Decision)
+				if sub := subjectOf(lp.Decision); sub != "" {
+					p.Subject = sub
+				}
 				p.MayHaveRun = p.MayHaveRun || lp.Dispatched
 			}
 			v.perms = append(v.perms, p)
 			continue
 		}
 		p.Reason = last.Reason
+		if c.Returned() {
+			// It ran and its result is recorded: owed that output, never
+			// an approval, which Resume refuses (ErrCallAnswered).
+			p.Reason, p.MayHaveRun = string(agentturn.PendingReturned), true
+		}
 		v.cut = append(v.cut, p)
 	}
+}
+
+// holdMember reads the member name of a hold decision as T, def when
+// the decision has none or it does not decode.
+func holdMember[T any](d *agentsession.DecisionEntry, name string, def T) T {
+	if d == nil {
+		return def
+	}
+	raw, ok := d.Unknown[name]
+	if !ok {
+		return def
+	}
+	v := def
+	if json.Unmarshal(raw, &v) != nil {
+		return def
+	}
+	return v
 }
 
 // held reports whether the decision deferred its call only beside
@@ -611,7 +722,7 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.parent = map[string]string{}
 	v.links = nil
 	v.runTip, v.tipOwner, v.runOrder = map[string]string{}, map[string]string{}, nil
-	v.setSession(s, "")
+	v.setSession(s, leafOf(s))
 	v.replaying = true
 	for _, e := range s.Entries() {
 		v.land(e)
@@ -619,14 +730,21 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.replaying = false
 }
 
+// leafOf is s's head, "" for none or the root.
+func leafOf(s *agentsession.Session) string {
+	if s == nil {
+		return ""
+	}
+	return s.Leaf()
+}
+
+// setSession takes s with its head at leaf, "" for the universal root:
+// the empty context, never "no head".
 func (v *View) setSession(s *agentsession.Session, leaf string) {
 	if s == nil {
 		return
 	}
 	v.session = s.ID()
-	if leaf == "" {
-		leaf = s.Leaf()
-	}
 	v.leaf = resting(s, leaf)
 	// The session is the follower's own and valid until the next step,
 	// so the path and the leaves are copied out.
@@ -639,7 +757,12 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	// and a queued entry there may belong to an item further on.
 	v.queued = nil
 	for _, q := range agentsession.Queued(s.Path(leaf)) {
-		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
+		hidden, prov := queuedProvenance(q)
+		if hidden {
+			// Not shown when it is drained either.
+			continue
+		}
+		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Provenance: prov})
 	}
 	v.leaves = tips(s)
 	v.branches = branchesOf(s, branchTips(s, v.leaf), v.leaf)
@@ -674,6 +797,9 @@ func resting(s *agentsession.Session, id string) string {
 // its run ended; but a head moved back to an interior item must show the
 // line as it stood there, with the model in force there.
 func lineEnd(s *agentsession.Session, id string) string {
+	if id == "" {
+		return ""
+	}
 	for hops := 0; hops <= s.Len(); hops++ {
 		next := ""
 		for _, c := range s.Children(id) {
@@ -1041,13 +1167,13 @@ func (v *View) Live(ev agentturn.Event) {
 		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == e.Turn })
 	case *agentturn.ItemStart:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, false)
+			v.item(e.RunID, e.ResponseID, e.Item, false, liveProvenance(e.Provenance))
 		}
 	case *agentturn.ItemUpdate:
-		v.item(e.RunID, e.ResponseID, e.Item, false)
+		v.item(e.RunID, e.ResponseID, e.Item, false, nil)
 	case *agentturn.ItemEnd:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, true)
+			v.item(e.RunID, e.ResponseID, e.Item, true, liveProvenance(e.Provenance))
 		}
 	case *agentturn.ResponseEnd:
 		responseID := ""
@@ -1106,7 +1232,7 @@ func (v *View) Live(ev agentturn.Event) {
 	}
 }
 
-func (v *View) item(runID, responseID string, item openresponses.Item, done bool) {
+func (v *View) item(runID, responseID string, item openresponses.Item, done bool, prov *Provenance) {
 	if item == nil {
 		return
 	}
@@ -1129,10 +1255,13 @@ func (v *View) item(runID, responseID string, item openresponses.Item, done bool
 				o.responseID = responseID
 			}
 			o.done = o.done || done
+			if prov != nil {
+				o.prov = prov
+			}
 			return
 		}
 	}
-	v.items = append(v.items, &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done})
+	v.items = append(v.items, &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done, prov: prov})
 }
 
 func (v *View) call(runID, callID string) *ovCall {
@@ -1163,10 +1292,25 @@ func (v *View) toolFinished(e *agentturn.ToolEnd) {
 		}
 	case e.Blocked:
 		c.state = CallBlocked
-	default:
-		c.state = CallEnded
+	case e.Cut:
+		// A cancellation or a failure cut the call off before it had
+		// a result of its own: no output is appended for it.
+		c.state, c.failed = CallCutOff, e.Err != nil
 		if e.Err != nil && c.output == "" {
 			c.output = e.Err.Error()
+		}
+	default:
+		c.state, c.failed = CallEnded, e.Err != nil
+		if e.Err != nil && c.output == "" {
+			c.output = e.Err.Error()
+		}
+	}
+	if e.Withdrawn {
+		// The tool never ran: its error is the subscriber's refusal of
+		// the hand-off, no failure of the tool.
+		c.failed, c.withdrawn = false, "withdrawn"
+		if e.Err != nil {
+			c.withdrawn = e.Err.Error()
 		}
 	}
 }
@@ -1202,7 +1346,9 @@ func (v *View) runEnded(e *agentturn.RunEnd) {
 	v.flushIfSettled(e.RunID)
 }
 
-// Model returns what to render now. It shares nothing with the view.
+// Model returns what to render now. It shares nothing with the view. It
+// updates the view's cache of the viewed line, so it is called under the
+// same lock as Record and Live, never beside them.
 func (v *View) Model() Model {
 	m := Model{
 		Session: v.session,
@@ -1221,6 +1367,7 @@ func (v *View) Model() Model {
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c
 	}
+	leftOut := v.leftOutNow()
 	var settings agentsession.Settings
 	for _, e := range v.path {
 		switch x := e.(type) {
@@ -1230,7 +1377,10 @@ func (v *View) Model() Model {
 			if !x.IsVisible() {
 				continue
 			}
-			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item}
+			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID], Provenance: itemProvenance(x)}
+			if x.CopiedFrom != nil {
+				row.CopiedFrom = x.CopiedFrom.Session
+			}
 			if fc, ok := x.Item.(*openresponses.FunctionCall); ok {
 				row.Call = v.callView(fc, committed[x.ID])
 				row.Call.Schema = schemaOf(settings.Tools, fc.Name)
@@ -1254,7 +1404,7 @@ func (v *View) Model() Model {
 		if !v.onLine(o.run) {
 			continue
 		}
-		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item)}
+		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item), Provenance: o.prov.clone()}
 		if fc, ok := o.item.(*openresponses.FunctionCall); ok {
 			row.Call = v.callView(fc, nil)
 			row.Call.Schema = schemaOf(settings.Tools, fc.Name)
@@ -1265,9 +1415,163 @@ func (v *View) Model() Model {
 	m.CutOff = append([]Permission(nil), v.cut...)
 	m.Questions = append([]agentturn.Question(nil), v.asked...)
 	for _, q := range v.queued {
-		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item)})
+		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item), Provenance: q.Provenance.clone()})
 	}
 	return m
+}
+
+// itemProvenance is the provenance an item entry records for a message
+// the host composed: its instruction layers or its trust, with its
+// source. A copied item's trust is the copy's, and a message without
+// either is the person's, whatever its source (the run's trigger).
+func itemProvenance(e *agentsession.ItemEntry) *Provenance {
+	layers := e.Layers()
+	trust := e.Trust
+	if e.CopiedFrom != nil {
+		trust = nil
+	}
+	if len(layers) == 0 && trust == nil {
+		return nil
+	}
+	p := &Provenance{Layers: slices.Clone(layers), Trust: cloneTrust(trust)}
+	if e.Source != nil {
+		src := *e.Source
+		src.Unknown = nil
+		p.Source = &src
+	}
+	return p
+}
+
+// queuedProvenance reads the marks agentturn/session keeps on a queued
+// entry for an input the host marked (VisibleMember, TrustMember,
+// InstructionsPartMember), as its recorder reads them back.
+func queuedProvenance(q *agentsession.QueuedEntry) (hidden bool, prov *Provenance) {
+	if raw, ok := q.Unknown[session.VisibleMember]; ok {
+		var visible bool
+		hidden = json.Unmarshal(raw, &visible) == nil && !visible
+	}
+	var p Provenance
+	if raw, ok := q.Unknown[session.TrustMember]; ok {
+		var t agentsession.Trust
+		if json.Unmarshal(raw, &t) == nil {
+			p.Trust = &t
+		}
+	}
+	if raw, ok := q.Unknown[session.InstructionsPartMember]; ok {
+		var one agentsession.LayerRef
+		if json.Unmarshal(raw, &one) == nil && one.Source != "" {
+			p.Layers = []agentsession.LayerRef{one}
+		} else if json.Unmarshal(raw, &p.Layers) != nil {
+			p.Layers = nil
+		}
+	}
+	if p.Trust == nil && len(p.Layers) == 0 {
+		return hidden, nil
+	}
+	if q.Trigger != nil {
+		src := *q.Trigger
+		src.Unknown = nil
+		p.Source = &src
+	}
+	return hidden, &p
+}
+
+// liveProvenance is an item event's provenance, copied, marking the
+// message as the record will: by its layers or its trust, an empty
+// trust included. A source alone marks nothing, since the record holds
+// every input's source and reads such a message as the person's; the
+// row would flip when its entry lands (agentturn#303).
+func liveProvenance(lp *agentturn.Provenance) *Provenance {
+	if lp == nil || (len(lp.Layers) == 0 && lp.Trust == nil) {
+		return nil
+	}
+	p := &Provenance{}
+	for _, l := range lp.Layers {
+		p.Layers = append(p.Layers, agentsession.LayerRef{ID: l.ID, Source: l.Source})
+	}
+	if lp.Trust != nil {
+		p.Trust = &agentsession.Trust{Reads: make([]string, len(lp.Trust.Reads))}
+		for i, l := range lp.Trust.Reads {
+			p.Trust.Reads[i] = string(l)
+		}
+	}
+	if s := lp.Source; s.Kind != "" || s.Ref != "" || s.Source != "" {
+		p.Source = &agentsession.Trigger{Kind: s.Kind, Ref: s.Ref, Source: s.Source}
+	}
+	return p
+}
+
+func cloneTrust(t *agentsession.Trust) *agentsession.Trust {
+	if t == nil {
+		return nil
+	}
+	return &agentsession.Trust{Reads: slices.Clone(t.Reads)}
+}
+
+// clone copies p, so a Model shares nothing with the view.
+func (p *Provenance) clone() *Provenance {
+	if p == nil {
+		return nil
+	}
+	c := &Provenance{Layers: slices.Clone(p.Layers), Trust: cloneTrust(p.Trust)}
+	if p.Source != nil {
+		s := *p.Source
+		c.Source = &s
+	}
+	return c
+}
+
+// leftOutNow is leftOutOf the viewed line, from the cache while the line
+// is the one it was computed for. An entry's ID is its content's hash,
+// so the tail and the length name the line.
+func (v *View) leftOutNow() map[string]string {
+	key := v.session + "\x00" + v.tail() + "\x00" + strconv.Itoa(len(v.path))
+	if key != v.leftOutKey {
+		v.leftOut, v.leftOutKey = leftOutOf(v.path), key
+	}
+	return v.leftOut
+}
+
+// buildContext is agentsession.BuildContext, a variable so a test counts
+// the rebuilds.
+var buildContext = agentsession.BuildContext
+
+// leftOutOf maps the item entries the model's context at the end of
+// path leaves out or sends a placeholder for to what it does, as the
+// omit in force says. A path with no omit costs a walk and no context.
+func leftOutOf(path []agentsession.Entry) map[string]string {
+	omits := false
+	for _, e := range path {
+		if c, ok := e.(*agentsession.ConfigEntry); ok && c.Omit != nil {
+			omits = true
+			break
+		}
+	}
+	if !omits {
+		return nil
+	}
+	ctx, err := buildContext(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, o := range ctx.OmittedItems {
+		out[o.Entry.ID] = LeftOutOmitted
+	}
+	sent := map[string]openresponses.Item{}
+	for i, e := range ctx.ItemEntries {
+		if i < len(ctx.Items) {
+			sent[e.Base().ID] = ctx.Items[i]
+		}
+	}
+	for _, r := range ctx.ReplacedItems {
+		why := LeftOutPlaceholder
+		if o, ok := sent[r.Entry.ID].(*openresponses.FunctionCallOutput); ok && o.Output.String() == agentturn.QuarantinedOutput {
+			why = LeftOutQuarantined
+		}
+		out[r.Entry.ID] = why
+	}
+	return out
 }
 
 // schemaOf is the parameters of the function tool named name in tools,
@@ -1292,11 +1596,32 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 			d := rec.Decisions[n-1]
 			c.Verdict, c.Reason = d.Verdict, d.Reason
 		}
+		if n := len(rec.Withdrawn); n > 0 && rec.Dispatch == nil {
+			if r := rec.Withdrawn[n-1].Reject; r != nil {
+				c.Withdrawn = r.Reason
+			}
+			if c.Withdrawn == "" {
+				c.Withdrawn = "withdrawn"
+			}
+		}
 		if rec.Output != nil {
 			if out, ok := rec.Output.Item.(*openresponses.FunctionCallOutput); ok {
-				c.State, c.Output, c.Committed = CallEnded, out.Output.String(), true
+				c.State, c.Output, c.Committed, c.Failed = CallEnded, out.Output.String(), true, rec.Failed()
 				return c
 			}
+		}
+		if rec.Returned() {
+			c.State = CallReturned
+			if out, ok := rec.Result.Item.(*openresponses.FunctionCallOutput); ok {
+				c.Output = out.Output.String()
+			}
+			return c
+		}
+		if rec.Held() {
+			// Waiting on an answer, as the record says after a restart
+			// too: never drawn as open or running.
+			c.State = CallDeferred
+			c.HeldBeside = holdMember(rec.Decisions[len(rec.Decisions)-1], session.HeldMember, false)
 		}
 	}
 	for _, o := range v.calls {
@@ -1305,7 +1630,13 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 			if o.state > c.State {
 				c.State = o.state
 			}
-			c.Partial, c.Output = o.partial, o.output
+			c.Partial, c.Output, c.Failed = o.partial, o.output, o.failed
+			if o.withdrawn != "" && c.Withdrawn == "" {
+				c.Withdrawn = o.withdrawn
+			}
+			if o.state == CallDeferred && o.held {
+				c.HeldBeside = true
+			}
 			if o.reason != "" {
 				c.Reason = o.reason
 			}
@@ -1320,7 +1651,7 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 		}
 	}
 	for _, p := range v.cut {
-		if p.CallID == fc.CallID && c.State != CallEnded {
+		if p.CallID == fc.CallID && c.State != CallEnded && c.State != CallReturned {
 			c.State = CallCutOff
 		}
 	}

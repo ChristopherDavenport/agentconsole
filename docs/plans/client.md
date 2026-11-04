@@ -1148,11 +1148,15 @@ agentturn's and agentkit's now.
   and agentkit's `Control.Resume`, behind `Direct`, releases it through
   the engine. This
   is the first part of agentconsole#9. Without that end (a restart),
-  the record cannot tell a held call from an asked one, and every
-  pending call is asked about, as agentkit's `Control.Resume` needs. A question
+  the record says it: agentturn/session marks the hold decision
+  `agentturn:held` and keeps the subject as `agentturn:subject`, the
+  view reads both off the hold, and agentkit's `Control.Resume` releases
+  a held call from that decision (the rest of #9). A hold written
+  before those members is asked about. The members are only Go
+  constants in agentturn/session so far; agentturn's RFC should state
+  them. A question
   shows its decision's `Subject`, the part of a compound call it is
-  about, unless the reason names it already; the record does not hold
-  it, so a permission read from the record alone has none. A call
+  about, unless the reason names it already. A call
   dispatched before it was held (`PendingCall.Dispatched`, or a
   dispatch entry on the record) says it may have run
   (`Permission.MayHaveRun`). The answers leave as one `Answer` intent.
@@ -1250,16 +1254,130 @@ sessions built by hand.
   embedder that takes this floor (dax, by version selection) with it. A
   reader built on agentsession before v0.0.24 refuses those files.
 
+## Decided in implementation, the record's new call and item facts
+
+The sibling bump to agentsession v0.0.37 (format 0.20) and agentturn
+v0.0.36 brought facts the record now carries; the view keeps each.
+
+- **`view.CallReturned`.** A call with a `result` and no output ran;
+  agentturn's `Pending` gives it as `PendingReturned` and `Resume`
+  refuses an approval of it. The view lists it with `CutOff`, reason
+  `returned`, `MayHaveRun` set, never among `Permissions`, and its row
+  shows the result as its output.
+- **`view.Call.Failed` and `Withdrawn`.** The failed call on the record,
+  an open question until format 0.14, is the output entry's `failed`.
+  A withdrawal (`reject` with `withdrawn` after a dispatch) is read as
+  agentsession reads it, a hand-off never made; the row says so and
+  keeps the reason.
+- **`view.Row.CopiedFrom` and `LeftOut`.** A copied item is context made
+  in another session. What the model is not sent is computed from the
+  `omit` in force at the end of the viewed line
+  (`agentsession.BuildContext`, only when the line holds an `omit`, and
+  once per line: the view keeps it while the session, the tail and the
+  line's length are the same, so a streamed delta builds nothing): an
+  output sent as `agentturn.QuarantinedOutput` is
+  `LeftOutQuarantined`, any other placeholder `LeftOutPlaceholder`, an
+  item left out `LeftOutOmitted`. The live `QuarantineAdded` event is
+  not read: the recorder writes its `omit`, and the record is the
+  truth.
+- **A steer does not go through `agentturn.Deliverer`.** Deliver waits
+  until the run takes the steer, and the agent's queued event is held
+  off by a quiet tool, so a controller built on it could not answer
+  promptly: the TUI's ordered send of a second steer would wait out the
+  tool call. `Direct` keeps `Queue` until a delivery that returns once
+  it is accepted exists.
+
+## Decided in implementation, a panel settles before it answers
+
+- **A permission or question panel takes no answer for 500 ms after it
+  opens.** Bubble Tea renders after each update, so "the panel was
+  drawn" says nothing about whether the person saw it: a key already
+  typed (a `y` mid-word of a steer) reaches the panel on the next
+  update. The model notes when the panel on screen changed (a question's
+  ID, a permission's call ID) and, inside the settle, puts a key in the
+  input line where it was being typed, and drops Enter so the line is
+  not sent beside the question. A reason or a note being typed is not
+  held back. The settle and the clock are internal options of the
+  model, 0 in the tests that press keys as soon as a panel shows.
+
+## Decided in implementation, provenance
+
+- **A composed message is not the person's.** agentturn v0.0.37 lets a
+  host mark a message it composed (`WithProvenance`): the instruction
+  layers, what sent it, its trust. The view carries it as
+  `view.Provenance` (agentsession's `LayerRef`, `Trigger` and `Trust`)
+  on a `Row` and a `Queued`, from the item entry's `instructions_part`
+  and `trust` (a copied item's trust is its copy's, not a mark), from
+  the queued entry's `agentturn:*` members, and from the live item
+  events; the TUI labels the message with it in place of "user". A
+  message with neither layers nor trust is the person's, whatever its
+  `source`, which every input carries as the run's trigger.
+
+## Decided in implementation, forks in the tree
+
+- **Listing is an optional `client.Lister`.** `client.Record` follows
+  and reads one session at a time; the tree also wants the sessions
+  forked from it, which only a store can list (agentsession RFC 0003,
+  List, the `parent_session` filter). `Lister` is
+  `List(ctx, parentSession) ([]agentsession.Summary, error)`, the empty
+  ID the followed session, separate from `Record` so a record with no
+  store (a foreign agent's synthesized one) need not offer it. It
+  returns summaries, not sessions: the header says what each is, and
+  nothing is read whole until the tree opens one. `RecordOf` returns a
+  `Lister` (a recorder's store always lists), capped at 256 sessions. A
+  record that scopes what `Read` may read must scope `List` alike, or not
+  offer it.
+- **A listed session with a `base`, no `spawned_by` and no link is read
+  as made from this one.** A header cannot tell a fork from a judge or
+  a subagent (agentsession's `ListFilter`); only the parent's links
+  can. Subsessions, children a host started and judges are reached
+  through those links, and a listed session a link already names is
+  not listed again; what is left is most likely a fork, and the tree
+  says no more than that: "sessions made from this one", by their full
+  ID (two forks made
+  in one millisecond share the 8 characters the tree shows of other
+  sessions) and the entry each was forked at, in a command when the
+  tree opens, never from `Update`. A fork is a conversation of its own:
+  it opens read only, and continuing from it here is refused as for any
+  other session.
+
+## Decided in implementation, input history and the editor
+
+- **`console.WithHistory(past, record)`.** The host keeps the history
+  file (dax's `~/.dax/history`); the client keeps the lines of this
+  run beside `past` and hands each line sent to `record` as Enter takes
+  it, before the submit function decides what it is, so a slash line
+  and a line the host refuses are kept too. Up on the input's first row
+  and Down on its last walk it, newest first; the draft is kept and
+  comes back past the newest. A recalled line is only put in the input.
+  Without the option Up and Down only move the input's cursor. A line
+  may hold a secret, and the client does not judge which: `record` is
+  where the host leaves out what it will not keep (its redaction rules,
+  a slash command it knows takes a token); the walk keeps every line of
+  this run in memory only.
+  `record` runs on the program's goroutine, like a renderer, and must
+  return promptly.
+- **Ctrl-G edits the input in the user's editor.** `$VISUAL`, or
+  `$EDITOR` when it is unset, split into words as a shell splits them
+  (quotes and backslashes; no expansion), is run on a private file
+  (0600, in a directory of its own, removed afterwards whatever
+  happened, with the swap files an editor keeps beside it; undo files
+  an editor keeps elsewhere, such as vim's undodir, and a directory left
+  by a process killed during the edit are beyond it) while Bubble Tea's
+  `tea.ExecProcess` suspends the program. What is saved goes back in
+  the input, unsent. The editor must wait for the file to close (`code
+  --wait`, not `code`). What the input held when a refusal's reason or
+  a question's note takes it over comes back once the answer is sent or
+  dropped, so a prompt composed in the editor survives a permission
+  that came meanwhile. No editor, a failing editor, and Ctrl-G while a
+  question or a permission is answered are said on the status line and
+  leave the input as it was. The exec is an internal option of the
+  model, so a test without a program runs the editor at once.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
   once. A reviewer's argument edit, which agentpolicy supports, has no
   ACP shape. It shows only on native backends until ACP has one.
-- **A failed call on the record.** A tool that failed can be named on
-  the live row (`ToolFinished.Err`), but the call's entry carries only
-  the output the model saw, so once the entry lands the row cannot say
-  the call failed. Distinguishing failed calls after the fact needs a
-  field on the call's record, an `agentsession` change; until then a
-  collapsed failed call shows only its line count like any other.
 - **The repository's name.** `agentconsole` is a working name. It is
   fixed before the first push, since it is the module path.

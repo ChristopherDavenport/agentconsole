@@ -24,7 +24,7 @@ func TestLastRunIsTheLastStartAndWhatFollowsIt(t *testing.T) {
 		&agentsession.ResponseEntry{EntryBase: at(12), ResponseID: "b", Usage: usage(300, 20)},
 		&agentsession.ResponseEntry{EntryBase: at(15), ResponseID: "c", Usage: usage(400, 30)},
 	}
-	if got := lastRun(nil); got != (Run{}) {
+	if got := lastRun(nil); got.ID != "" || !got.Started.IsZero() || !got.Ended.IsZero() || got.Usage.TotalTokens != 0 {
 		t.Errorf("no run on the line: %+v", got)
 	}
 

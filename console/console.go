@@ -64,6 +64,9 @@ type config struct {
 	cost    client.Cost
 	tools   toolview.Renderers
 	submit  func(context.Context, Line) (Submit, error)
+	past    []string
+	record  func(string)
+	history bool
 }
 
 // Option configures [Run].
@@ -151,6 +154,22 @@ func WithSubmit(fn func(ctx context.Context, l Line) (Submit, error)) Option {
 	return func(c *config) { c.submit = fn }
 }
 
+// WithHistory gives the input a history: Up on its first line and Down
+// on its last walk the lines sent, newest first, starting from past
+// (oldest first), and bring back what was being typed. record is called
+// with each line as it is sent, slash lines and lines the submit
+// function refuses included, so the host keeps it, in a file of its own
+// (dax keeps ~/.dax/history); the client keeps no file. A line may hold
+// a secret (a slash command's token, a pasted key): what to keep is the
+// host's to decide, and record may leave any line out of its file; the
+// walk still offers it until the program ends. record runs on
+// the program's goroutine and must return promptly; nil records
+// nothing. A line from the history is only put in the input: Enter
+// sends it.
+func WithHistory(past []string, record func(line string)) Option {
+	return func(c *config) { c.past, c.record, c.history = past, record, true }
+}
+
 // Run runs the terminal client over the session rec follows and the
 // events src gives, sending what the user asks to act, until the user
 // quits, ctx is done, or the program fails, and returns the program's
@@ -182,6 +201,9 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 		out = cfg.out
 	}
 	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out))}
+	if cfg.history {
+		topts = append(topts, tui.WithHistory(cfg.past, cfg.record))
+	}
 	if fn := cfg.submit; fn != nil {
 		topts = append(topts, tui.WithSubmit(func(ctx context.Context, l tui.Line) (tui.Submission, error) {
 			s, err := fn(ctx, Line(l))

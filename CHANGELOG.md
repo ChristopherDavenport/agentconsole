@@ -7,6 +7,119 @@ versions may break the API.
 
 ## Unreleased
 
+- Dependencies: agentturn and agentturn/session v0.0.37, agentsession
+  v0.0.37, agentkit v0.0.16, agentpolicy v0.0.19, agenttool v0.0.29,
+  openresponses v0.0.18, agentmemory v0.0.12 (now direct).
+- Changed: with agentsession v0.0.37 the binary raises every session it
+  appends to to format 0.20, and so does an embedder that takes this
+  release's floor by version selection (dax). A reader built on
+  agentsession before v0.0.37 refuses those files until it is upgraded.
+- Changed, breaking: `view.Run` holds an `openresponses.Usage`, which
+  openresponses v0.0.18 made not comparable, so a `Run` can no longer
+  be compared with `==`.
+- Changed: the inspect panes read a skill grant from what agentpolicy
+  v0.0.19 records as members (`grant`, `source`, `scope`), no longer
+  from the reason: a revocation ends only its source's set under its
+  scope, a scope's revocation only that scope's sets, and an activation
+  replaces its source's set under its scope ("replaced at"). A grant
+  shows the scope it was made under. A record written before v0.0.19 is
+  still read by its reason.
+- Added: a call the record holds a `result` for and no output (agentturn
+  v0.0.36's `PendingReturned`: its tool returned and the process
+  stopped before the batch's outputs were appended) is
+  `view.CallReturned`, "ran; its result is recorded", with the result
+  as its output. It is listed with the cut-off calls, never asked
+  about, since agentturn's Resume refuses an approval of it; before, it
+  read as cut off and may have run.
+- Added: `view.Call.Failed`, an output the record marks `failed` or a
+  tool that ended with an error live, shown as "failed"; and
+  `view.Call.Withdrawn`, the reason of a dispatch withdrawn before the
+  tool ran (a `reject` with `withdrawn`), shown as never started; a live
+  `tool_end` marked `Withdrawn` says so at once, and is not a failed
+  call. A live `tool_end` that agentturn marks `Cut` reads as cut off,
+  not ended.
+- Added: `view.Row.CopiedFrom`, the session a copied item (format 0.15
+  `copied_from`) was taken from, shown as context copied from another
+  session; and `view.Row.LeftOut`, `LeftOutQuarantined`,
+  `LeftOutOmitted` or `LeftOutPlaceholder`, from the `omit` in force at
+  the viewed line, so an output a guard quarantined is shown as sent to
+  the model as the quarantine's placeholder, and a trimmed item as left
+  out.
+- Changed: answers to a running call's question name `agenttool.ByHuman`,
+  as the permission panel's answers already do.
+- Changed: the binary's model adapter leaves out other providers'
+  slug-prefixed items (`openresponses.WithProviderSlugs()`), since its
+  endpoint is a provider's own API.
+- Changed: the session pane folds memory manifests with agentmemory's
+  `ManifestFold` (v0.0.12) in place of a local copy that had drifted
+  (#4). A manifest recording a block the product left out whole
+  (`dropped`) hashes and folds as agentmemory's does, where the copy
+  refused a delta carrying it, and reads "memory block left out this
+  turn"; a refused record says whether its base was unresolved or it
+  was malformed.
+- Fixed: after a restart, a call its hold marks held (agentturn/session's
+  `agentturn:held`), deferred only beside another call's question, is
+  no longer asked about, and the asked call's question names the part
+  of it the hold records (`agentturn:subject`), as the live end already
+  did (#9). The view reads the hold decision's members, so no media is
+  resolved and a sidecar session needs no blob reader for it. A held
+  call is drawn deferred after a restart as on the live path, never as
+  open or running, and `view.Call.HeldBeside` marks one held only beside
+  another's question: "waits on its batch's question".
+- Fixed: a call's detail in a fork shows the dispatch of a call in the
+  fork's prefix, which the session the fork was made from holds
+  (`agentsession.OriginDispatches`, read through the record): "dispatched
+  in origin SESSION, off this path: may have run", with its key, where
+  it said "dispatch: none recorded" (#5). An origin the store does not
+  hold shows none; a chain of forks that does not end is shown. The
+  call's state is read through the session, so a prefix call is no
+  longer "never_started" under the fork's records promise.
+- Added: `client.Lister`, an optional capability of a `client.Record`:
+  `List(ctx, parentSession)` gives the summaries of the sessions whose
+  header names the session as parent (agentsession RFC 0003, List).
+  `RecordOf`'s record offers it.
+- Added: the tree lists the sessions made from the followed one under
+  "sessions made from this one", each with the entry it was made at,
+  when the record can list them (#6): a listed session with a base, no
+  spawned_by and no link of this session naming it, most likely a fork,
+  since a header alone cannot tell a fork from a judge. Subsessions and
+  children a host started stay with the links. Such a session opens
+  read only.
+- Added: `console.WithHistory(past, record)`: Up on the input's first
+  line and Down on its last walk the lines sent, newest first, from the
+  host's history on, and bring the draft back (#44). The host keeps the
+  file; `record` is handed each line as it is sent, a slash line or one
+  the submit function refuses included. A recalled line is sent only
+  with Enter.
+- Added: Ctrl-G opens the input in `$VISUAL`, or `$EDITOR`, on a private
+  temporary file, and puts what was saved back in the input without
+  sending it (#46). The file is removed afterwards; no editor or a
+  failing one is said on the status line, and the key is refused while
+  a question or a permission is answered. The editor must wait for the
+  file (`code --wait`). What the input held when a refusal's reason or
+  a question's note takes it over comes back after the answer, and
+  after an intent's refusal that lands while a reason is being typed,
+  which drops the half-typed reason as Esc does.
+- Added: a message the host composed from text the person did not write
+  (agentturn v0.0.37's `WithProvenance`: instruction layers, a source,
+  trust) is shown as such, "composed from LAYERS, sent by SOURCE, LABELS:
+  not your words", never under "user": on the record (the item's
+  `instructions_part` and `trust`), live (`ItemStart`/`ItemEnd`'s
+  `Provenance`, copied by `client.Copy`) and in the queued list (the
+  queued entry's `agentturn:instructions_part` and `agentturn:trust`).
+  `view.Row.Provenance` and `view.Queued.Provenance` carry it. Live and
+  on the record alike a message is marked by its layers or its trust;
+  a provenance naming only a source marks nothing, as the record cannot
+  tell it from the run's trigger (agentturn#303). A queued
+  input marked hidden (`agentturn:visible` false) is not listed, as its
+  item is not shown once drained.
+- Fixed (security): a key pressed as a permission or question panel
+  opened was taken as its answer, so a `y` typed in the middle of a
+  steer approved the call at once. A panel takes no answer for half a
+  second after it opens: keys typed meanwhile stay with the input line,
+  and Enter sends nothing until the panel is answered.
+- Fixed: a head on the universal root is the empty line, never read as
+  "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit
   v0.0.14, up from v0.0.13. A redacted session now hashes
   independently: a redactor gives each redacted response the
@@ -14,8 +127,16 @@ versions may break the API.
   so readers verify it with no exception for redacted entries. The
   inspect pane's verify tally, which has none, no longer reports a
   redacted session made under that rule as FAILED, which answers the
-  report in #38; the pane rows #38 suggests for a redaction's origin
-  and spans are not added.
+  report in #38.
+- Added: the session pane of a redacted session says so (#38): "redacted
+  from PSEUDONYM (profile P)", with its counts of redacted and native
+  entries. Since format 0.19 `redacted_from.session` is the original's
+  keyed pseudonym, so the pane never offers it as a session to open. A
+  session whose ID is not the one its `redacted_from` derives
+  (`agentsession.CheckRedactedID`) is noted, as `agentsession verify`
+  notes it, and does not fail. An entry's pane gives the original
+  entries a redacted entry was made from ("made from original entries
+  3-7"), or says the redaction added it.
 
 ## v0.0.14 - 2026-10-18
 

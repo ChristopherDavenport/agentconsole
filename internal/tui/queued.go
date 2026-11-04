@@ -92,6 +92,9 @@ func (m *Model) queuedLines() []string {
 			text = msg.Text()
 		}
 		text = strings.Join(strings.Fields(text), " ")
+		if q.Provenance != nil {
+			label += " (" + provenanceText(q.Provenance) + ")"
+		}
 		lines = append(lines, dimStyle.Render(truncate("  "+label+": "+text, m.width)))
 	}
 	return lines

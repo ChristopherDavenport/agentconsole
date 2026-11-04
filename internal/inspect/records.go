@@ -3,11 +3,9 @@ package inspect
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/ChristopherDavenport/agentmemory"
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn/session"
 )
@@ -92,6 +90,10 @@ type Verdict struct {
 	Held       bool   `json:"held,omitempty"`
 	Subject    string `json:"subject,omitempty"`
 	Confined   string `json:"confined,omitempty"`
+	// Grant, with Source and Scope, says what a grant or a revocation
+	// did (agentpolicy v0.0.19).
+	Grant string `json:"grant,omitempty"`
+	Scope string `json:"scope,omitempty"`
 }
 
 func verdictOf(e agentsession.Entry) (Verdict, bool) {
@@ -113,48 +115,103 @@ type Grant struct {
 	// granted under.
 	Skill  string
 	Source string
-	Rule   string
+	// Scope is the grant scope the rule was granted under, "" for none
+	// or a record that does not say (agentpolicy before v0.0.19).
+	Scope string
+	Rule  string
 	// Since is the verdict entry that recorded the grant.
 	Since string
 	// Ended is the verdict entry that revoked the source's grants, "" while
-	// they hold on the whole path.
-	Ended string
+	// they hold on the whole path; Replaced says it was the activation of
+	// the source's set again under the scope, not a revocation.
+	Ended    string
+	Replaced bool
 }
 
-// grants replays the path's verdicts: each "granted <rule>" allow of a
-// skill's source makes a grant, and the revocation verdict of a source
-// ends the ones it holds. It returns every grant, with the index on the
-// path it began and ended at (-1 for none).
+// The kinds agentpolicy (v0.0.19, RFC 0001 draft 0.4, The record)
+// writes in a grant's or a revocation's grant member. A reader takes
+// the kind, source and scope from the members and parses the reason
+// only for a record written before them.
+const (
+	kindGrant       = "grant"
+	kindGrantOver   = "grant_over"
+	kindGrantSet    = "grant_set"
+	kindActivate    = "activate"
+	kindRevoke      = "revoke"
+	kindRevokeScope = "revoke_scope"
+)
+
+// grantKey is a set's key in agentpolicy's engine: its scope and its
+// source. A grant made by Engine.Grant or GrantOver joins the policy,
+// which no revocation touches, and is keyed apart (always).
+type grantKey struct {
+	scope, source string
+	always        bool
+}
+
+// grants replays the path's verdicts. Each allow a skill's source
+// granted makes a grant; an activation replaces its source's set under
+// its scope, a revocation ends its source's set under its scope, and a
+// scope's revocation every set of the scope. A record with no grant
+// member is read by its reason, as agentpolicy wrote it before
+// v0.0.19: there a scope's revocation, which named no scope a grant
+// could be matched to, ends every grant. It returns every grant, with
+// the index on the path it began and ended at (-1 for none).
 func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
-	live := map[string][]int{} // source -> indexes into all
+	live := map[grantKey][]int{} // set -> indexes into all
 	reads := skillReads(path)
+	end := func(i int, v Verdict, match func(grantKey) bool) {
+		for k, gs := range live {
+			if !match(k) {
+				continue
+			}
+			for _, g := range gs {
+				all[g].Ended, all[g].Replaced, ended[g] = v.Entry, v.Grant == kindActivate, i
+			}
+			delete(live, k)
+		}
+	}
+	add := func(i int, v Verdict, k grantKey) {
+		skill, ok := skillOf(v.Source, reads)
+		if !ok {
+			return
+		}
+		all = append(all, Grant{Skill: skill, Source: v.Source, Scope: v.Scope, Rule: v.Rule, Since: v.Entry})
+		began, ended = append(began, i), append(ended, -1)
+		live[k] = append(live[k], len(all)-1)
+	}
 	for i, e := range path {
 		v, ok := verdictOf(e)
 		if !ok {
 			continue
 		}
+		if v.Grant != "" {
+			set := grantKey{scope: v.Scope, source: v.Source}
+			switch v.Grant {
+			case kindActivate, kindRevoke:
+				end(i, v, func(k grantKey) bool { return k == set })
+			case kindRevokeScope:
+				end(i, v, func(k grantKey) bool { return !k.always && k.scope == v.Scope })
+			case kindGrantSet:
+				// A refused rule is recorded as a block of the set.
+				if v.Action == "allow" && v.Rule != "" {
+					add(i, v, set)
+				}
+			case kindGrant, kindGrantOver:
+				if v.Action == "allow" && v.Rule != "" {
+					add(i, v, grantKey{source: v.Source, always: true})
+				}
+			}
+			continue
+		}
 		switch {
 		case strings.HasPrefix(v.Reason, revokedScopePrefix) || v.Reason == revokedUnscoped:
-			for src, gs := range live {
-				for _, g := range gs {
-					all[g].Ended, ended[g] = v.Entry, i
-				}
-				delete(live, src)
-			}
+			end(i, v, func(grantKey) bool { return true })
 		case strings.HasPrefix(v.Reason, revokedPrefix):
 			src := strings.TrimPrefix(v.Reason, revokedPrefix)
-			for _, g := range live[src] {
-				all[g].Ended, ended[g] = v.Entry, i
-			}
-			delete(live, src)
+			end(i, v, func(k grantKey) bool { return k.source == src })
 		case v.Action == "allow" && v.Rule != "" && strings.HasPrefix(v.Reason, "granted "):
-			skill, ok := skillOf(v.Source, reads)
-			if !ok {
-				continue
-			}
-			all = append(all, Grant{Skill: skill, Source: v.Source, Rule: v.Rule, Since: v.Entry})
-			began, ended = append(began, i), append(ended, -1)
-			live[v.Source] = append(live[v.Source], len(all)-1)
+			add(i, v, grantKey{source: v.Source})
 		}
 	}
 	return all, began, ended
@@ -173,200 +230,44 @@ func grantsAt(path []agentsession.Entry, at int) []Grant {
 	return out
 }
 
-// Manifest is the memory manifest in force: what the model's memory block
-// held and what its bound left out.
+// Manifest is the memory manifest in force, as agentmemory's fold keeps
+// it: what the model's memory block held, what its bound left out, and
+// whether the product left the block out whole (Dropped).
 type Manifest struct {
-	Entries []ManifestEntry `json:"entries"`
-	Omitted []ManifestEntry `json:"omitted,omitempty"`
+	agentmemory.Manifest
 	// Entry is the record entry the manifest in force came from.
 	Entry string `json:"-"`
 }
 
-// ManifestEntry names one memory by scope and name.
-type ManifestEntry struct {
-	Scope  string `json:"scope"`
-	Name   string `json:"name"`
-	Hash   string `json:"hash"`
-	Bytes  int    `json:"bytes"`
-	Reason string `json:"reason,omitempty"`
-}
-
-// manifestNS is where agentmemory records its manifest. A record is
-// whole, or a delta on one of the manifests last in force: a base (that
-// manifest's hash), the result's hash, and per list a run of keeps and
-// entries written whole (agentmemory v0.0.10, render.go).
-const manifestNS = "agentmemory:render"
-
-// foldDepth is how many distinct manifests a delta's base may be among.
-const foldDepth = 8
-
-type manifestDelta struct {
-	Base    string       `json:"base"`
-	Hash    string       `json:"hash"`
-	Entries []manifestOp `json:"entries,omitempty"`
-	Omitted []manifestOp `json:"omitted,omitempty"`
-}
-
-type manifestOp struct {
-	Keep int `json:"keep,omitempty"`
-	*ManifestEntry
-}
-
-func (o *manifestOp) UnmarshalJSON(data []byte) error {
-	var probe struct {
-		Keep  int    `json:"keep"`
-		Scope string `json:"scope"`
-	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return err
-	}
-	if probe.Keep != 0 && probe.Scope != "" {
-		return errors.New("an element is both a keep and an entry")
-	}
-	if probe.Keep != 0 {
-		o.Keep = probe.Keep
-		return nil
-	}
-	var e ManifestEntry
-	if err := json.Unmarshal(data, &e); err != nil {
-		return err
-	}
-	o.ManifestEntry = &e
-	return nil
-}
-
-func manifestHash(m Manifest) string {
-	var b strings.Builder
-	for _, e := range m.Entries {
-		b.WriteString("+ " + e.Scope + "/" + e.Name + " " + e.Hash + " " + strconv.Itoa(e.Bytes) + "\n")
-	}
-	for _, e := range m.Omitted {
-		b.WriteString("- " + e.Scope + "/" + e.Name + " " + e.Hash + " " + strconv.Itoa(e.Bytes) + " " + e.Reason + "\n")
-	}
-	return sha256Hex(b.String())
-}
-
-// applyOps folds a list of ops onto prev, with agentmemory's checks: the
-// list in force names no entry twice, an entry names a scope and a name,
-// and a keep takes a positive number of the entries left.
-func applyOps(prev []ManifestEntry, ops []manifestOp) ([]ManifestEntry, error) {
-	at := map[string]int{}
-	for i, e := range prev {
-		k := e.Scope + "/" + e.Name
-		if _, dup := at[k]; dup {
-			return nil, errors.New("the manifest in force names an entry twice")
-		}
-		at[k] = i
-	}
-	var out []ManifestEntry
-	cursor := 0
-	for i, op := range ops {
-		switch {
-		case op.ManifestEntry != nil:
-			if op.Scope == "" || op.Name == "" {
-				return nil, fmt.Errorf("element %d names no entry", i)
-			}
-			out = append(out, *op.ManifestEntry)
-			if j, ok := at[op.Scope+"/"+op.Name]; ok {
-				cursor = j + 1
-			}
-		case op.Keep > 0 && op.Keep <= len(prev)-cursor:
-			out = append(out, prev[cursor:cursor+op.Keep]...)
-			cursor += op.Keep
-		case op.Keep > 0:
-			return nil, fmt.Errorf("element %d keeps %d entries and %d are left", i, op.Keep, len(prev)-cursor)
-		default:
-			return nil, fmt.Errorf("element %d is neither a positive keep nor an entry", i)
-		}
-	}
-	return out, nil
-}
-
 // Refusal is a manifest record the fold refused, and why. A refused record
 // leaves the manifest in force as it was, as agentmemory's fold does.
+// Unresolved says the delta's base is none of the manifests last in
+// force (agentmemory.ErrManifestBase); otherwise the record is malformed.
 type Refusal struct {
-	Entry string
-	Why   string
+	Entry      string
+	Why        string
+	Unresolved bool
 }
 
-// manifestIn folds the manifest records on the path, as agentmemory's
-// ManifestFold does, and returns the one in force. ok is false when the
-// path holds none. A record that does not fold is refused, with the
-// checks agentmemory makes: a delta's base is among the manifests last in
-// force, its elements are well formed, and the result hashes to the hash
-// the delta states (so a corrupt or invented delta is not shown as the
-// memory the model had).
+// manifestIn folds the manifest records on the path with agentmemory's
+// ManifestFold (RFC 0001 section 8.5) and returns the one in force. ok
+// is false when the path holds none. A record the fold refuses is
+// listed, so a corrupt or invented delta is never shown as the memory
+// the model had.
 func manifestIn(path []agentsession.Entry) (m Manifest, refused []Refusal, ok bool) {
-	var recent []Manifest
-	var hashes []string
-	push := func(m Manifest, hash string) {
-		if i := slices.Index(hashes, hash); i >= 0 {
-			recent, hashes = slices.Delete(recent, i, i+1), slices.Delete(hashes, i, i+1)
-		}
-		recent = append([]Manifest{m}, recent...)
-		hashes = append([]string{hash}, hashes...)
-		if len(recent) > foldDepth {
-			recent, hashes = recent[:foldDepth], hashes[:foldDepth]
-		}
-	}
+	var fold agentmemory.ManifestFold
 	for _, e := range path {
 		c, isCustom := e.(*agentsession.CustomEntry)
-		if !isCustom || c.NS != manifestNS {
+		if !isCustom || c.NS != agentmemory.ManifestNS {
 			continue
 		}
-		refuse := func(format string, a ...any) {
-			refused = append(refused, Refusal{Entry: c.ID, Why: fmt.Sprintf(format, a...)})
-		}
-		var probe struct {
-			Base *string `json:"base"`
-		}
-		if err := json.Unmarshal(c.Data, &probe); err != nil {
-			refuse("%v", err)
+		if err := fold.Apply(c.Data); err != nil {
+			refused = append(refused, Refusal{Entry: c.ID, Why: err.Error(), Unresolved: errors.Is(err, agentmemory.ErrManifestBase)})
 			continue
 		}
-		if probe.Base == nil {
-			var whole Manifest
-			if err := json.Unmarshal(c.Data, &whole); err != nil {
-				refuse("%v", err)
-				continue
-			}
-			whole.Entry = c.ID
-			push(whole, manifestHash(whole))
-			continue
-		}
-		var d manifestDelta
-		if err := json.Unmarshal(c.Data, &d); err != nil {
-			refuse("%v", err)
-			continue
-		}
-		var base Manifest
-		if i := slices.Index(hashes, d.Base); i >= 0 {
-			base = recent[i]
-		} else if !(len(recent) == 0 && d.Base == manifestHash(Manifest{})) {
-			refuse("the delta is based on %s, which is not among the manifests last in force", d.Base)
-			continue
-		}
-		var out Manifest
-		var err error
-		if out.Entries, err = applyOps(base.Entries, d.Entries); err != nil {
-			refuse("entries: %v", err)
-			continue
-		}
-		if out.Omitted, err = applyOps(base.Omitted, d.Omitted); err != nil {
-			refuse("omitted: %v", err)
-			continue
-		}
-		if got := manifestHash(out); got != d.Hash {
-			refuse("the delta says %s but the folded result hashes %s", d.Hash, got)
-			continue
-		}
-		out.Entry = c.ID
-		push(out, d.Hash)
+		m, ok = Manifest{Manifest: fold.Manifest(), Entry: c.ID}, true
 	}
-	if len(recent) == 0 {
-		return Manifest{}, refused, false
-	}
-	return recent[0], refused, true
+	return m, refused, ok
 }
 
 // elicitation is a question a tool put to the user and what came of it

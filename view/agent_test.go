@@ -369,10 +369,9 @@ func TestItemCompletedBeforeTheStreamNamesItsResponse(t *testing.T) {
 }
 
 // TestBranchAndHead moves a session's head between branches under a
-// follower. An append under an earlier entry starts a branch, and with
-// no head recorded the newest entry is the leaf, as a read would say; a
-// recorded head moves it, and the rendering follows the path there and
-// back.
+// follower. An append under an earlier entry starts a branch and leaves
+// the head where it was (agentsession v0.0.31's live rule); a recorded
+// head moves it, and the rendering follows the path there and back.
 func TestBranchAndHead(t *testing.T) {
 	r := newRig(t, agentturn.Config{Model: &echo.Adapter{}, ModelName: "echo"})
 	r.allowDrop = true
@@ -389,12 +388,9 @@ func TestBranchAndHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m = r.waitFor("the side branch", func(m view.Model) bool { return m.Leaf == sideID })
-	if len(m.Leaves) != 2 || len(m.Rows) != 2 {
-		t.Errorf("after the branch: %d leaves, rows %s", len(m.Leaves), describe(m))
-	}
-	if msg, ok := m.Rows[1].Item.(*openresponses.Message); !ok || msg.Text() != "side" {
-		t.Errorf("rows on the side branch = %s", describe(m))
+	m = r.waitFor("the side branch", func(m view.Model) bool { return len(m.Leaves) == 2 })
+	if m.Leaf != trunkLeaf || len(m.Rows) != 2 || len(assistantRows(m)) != 1 {
+		t.Errorf("after the branch the head moved to %q, rows %s", m.Leaf, describe(m))
 	}
 
 	moveHead := func(to string) {
@@ -410,6 +406,12 @@ func TestBranchAndHead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	moveHead(sideID)
+	m = r.waitFor("the head on the side branch", func(m view.Model) bool { return m.Leaf == sideID })
+	if msg, ok := m.Rows[1].Item.(*openresponses.Message); len(m.Rows) != 2 || !ok || msg.Text() != "side" {
+		t.Errorf("rows on the side branch = %s", describe(m))
+	}
+
 	moveHead(trunkLeaf)
 	m = r.waitFor("the head back on the trunk", func(m view.Model) bool { return m.Leaf == trunkLeaf })
 	if len(m.Rows) != 2 || len(assistantRows(m)) != 1 || text(assistantRows(m)[0].Item) != "trunk" {
@@ -513,5 +515,26 @@ func TestLateAttachedViewSeesThePermission(t *testing.T) {
 	}
 	if p := m.Permissions[0]; p.CallID != "call_1" || p.Name != "upper" || p.Question != "may I run upper?" {
 		t.Errorf("permission = %+v", p)
+	}
+}
+
+// TestAHeadOnTheRootShowsAnEmptyLine moves the head to the universal
+// root (agentsession v0.0.31): the empty context, which a reader takes
+// as the head and not as "no head, the newest entry".
+func TestAHeadOnTheRootShowsAnEmptyLine(t *testing.T) {
+	r := newRig(t, agentturn.Config{Model: &echo.Adapter{}, ModelName: "echo"})
+	r.allowDrop = true
+	r.finish(r.prompt("trunk"))
+	m := r.waitFor("the trunk", func(m view.Model) bool { return idle(m) && len(m.Rows) == 2 })
+	hs, ok := r.store.(agentsession.HeadStore)
+	if !ok {
+		t.Skip("the store moves no head")
+	}
+	if err := hs.SetHead(r.ctx, r.sess.ID(), r.sess.Leaf(), ""); err != nil {
+		t.Fatal(err)
+	}
+	m = r.waitFor("the head on the root", func(m view.Model) bool { return m.Leaf == "" && m.Entries > 0 })
+	if len(m.Rows) != 0 || m.Tail != "" {
+		t.Errorf("on the root: tail %q, rows %s", m.Tail, describe(m))
 	}
 }

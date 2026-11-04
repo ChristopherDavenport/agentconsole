@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ChristopherDavenport/agentmemory"
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentsession/jsonl"
 	"github.com/ChristopherDavenport/agenttool"
@@ -506,14 +507,14 @@ func TestManifestDeltasFold(t *testing.T) {
 	e := func(scope, name, hash string, n int) map[string]any {
 		return map[string]any{"scope": scope, "name": name, "hash": hash, "bytes": n}
 	}
-	first := inspect.Manifest{Entries: []inspect.ManifestEntry{
+	first := agentmemory.Manifest{Entries: []agentmemory.ManifestEntry{
 		{Scope: "user", Name: "a", Hash: "sha256:1", Bytes: 1}, {Scope: "user", Name: "b", Hash: "sha256:2", Bytes: 2}, {Scope: "user", Name: "c", Hash: "sha256:3", Bytes: 3}}}
 	r.annotate("agentmemory:render", first)
 	// b moved: keep a, write b whole, keep c. The hash is what the writer
 	// computed; the reader takes the delta's.
-	wantHash := inspect.ManifestHash(inspect.Manifest{Entries: []inspect.ManifestEntry{
-		{Scope: "user", Name: "a", Hash: "sha256:1", Bytes: 1}, {Scope: "user", Name: "b", Hash: "sha256:9", Bytes: 7}, {Scope: "user", Name: "c", Hash: "sha256:3", Bytes: 3}}})
-	r.annotate("agentmemory:render", map[string]any{"base": inspect.ManifestHash(first), "hash": wantHash,
+	wantHash := (agentmemory.Manifest{Entries: []agentmemory.ManifestEntry{
+		{Scope: "user", Name: "a", Hash: "sha256:1", Bytes: 1}, {Scope: "user", Name: "b", Hash: "sha256:9", Bytes: 7}, {Scope: "user", Name: "c", Hash: "sha256:3", Bytes: 3}}}).Hash()
+	r.annotate("agentmemory:render", map[string]any{"base": first.Hash(), "hash": wantHash,
 		"entries": []any{map[string]any{"keep": 1}, e("user", "b", "sha256:9", 7), map[string]any{"keep": 1}}})
 	m := r.model()
 	s, err := r.in.Session(r.ctx, "", m.Tail, m.Entries)
@@ -662,7 +663,7 @@ func TestAProductsOwnSkillSourceNamesAreGrants(t *testing.T) {
 func TestRefusedManifestDeltasAreShownAsRefused(t *testing.T) {
 	r := newRig(t, agentturn.Config{ModelName: "m", Model: &script{responses: []step{say("hi")}}})
 	r.prompt("hello")
-	a := inspect.Manifest{Entries: []inspect.ManifestEntry{{Scope: "user", Name: "a", Hash: "sha256:1", Bytes: 1}}}
+	a := agentmemory.Manifest{Entries: []agentmemory.ManifestEntry{{Scope: "user", Name: "a", Hash: "sha256:1", Bytes: 1}}}
 	r.annotate("agentmemory:render", a)
 	entry := func(scope, name string) map[string]any {
 		return map[string]any{"scope": scope, "name": name, "hash": "sha256:x", "bytes": 1}
@@ -670,13 +671,13 @@ func TestRefusedManifestDeltasAreShownAsRefused(t *testing.T) {
 	keep := map[string]any{"keep": 1}
 	bad := []map[string]any{
 		// the reviewer's: keeps a and adds evil under a hash that is not the result's
-		{"base": inspect.ManifestHash(a), "hash": "sha256:deadbeef", "entries": []any{keep, entry("user", "evil")}},
+		{"base": a.Hash(), "hash": "sha256:deadbeef", "entries": []any{keep, entry("user", "evil")}},
 		// keep and entry on one element
-		{"base": inspect.ManifestHash(a), "hash": "sha256:x", "entries": []any{map[string]any{"keep": 1, "scope": "user", "name": "z"}}},
+		{"base": a.Hash(), "hash": "sha256:x", "entries": []any{map[string]any{"keep": 1, "scope": "user", "name": "z"}}},
 		// an entry naming nothing
-		{"base": inspect.ManifestHash(a), "hash": "sha256:x", "entries": []any{keep, entry("", "")}},
+		{"base": a.Hash(), "hash": "sha256:x", "entries": []any{keep, entry("", "")}},
 		// keeping more than is left
-		{"base": inspect.ManifestHash(a), "hash": "sha256:x", "entries": []any{map[string]any{"keep": 5}}},
+		{"base": a.Hash(), "hash": "sha256:x", "entries": []any{map[string]any{"keep": 5}}},
 	}
 	for _, d := range bad {
 		r.annotate("agentmemory:render", d)

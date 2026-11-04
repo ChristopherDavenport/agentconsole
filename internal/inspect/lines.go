@@ -3,9 +3,11 @@ package inspect
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
@@ -97,6 +99,9 @@ func (e Entry) Lines() []string {
 	if e.KeptFromModel {
 		add("note:     kept from the model: the context leaves it out of every request")
 	}
+	if e.Redacted {
+		add("redacted: %s", spansText(e.Spans))
+	}
 	if c := e.Call; c != nil {
 		add("")
 		add("call %s %s", c.CallID, c.Name)
@@ -153,8 +158,17 @@ func (e Entry) Lines() []string {
 				s += ", key " + d.IdempotencyKey
 			}
 			l = append(l, s)
+		} else if d := c.OriginDispatch; d != nil {
+			s := fmt.Sprintf("  dispatch: dispatched in origin %s, off this path: may have run (entry %s)", d.Session, short(d.Entry))
+			if d.IdempotencyKey != "" {
+				s += ", key " + d.IdempotencyKey
+			}
+			l = append(l, s)
 		} else {
 			add("  dispatch: none recorded")
+		}
+		if c.OriginErr != "" {
+			add("  origin:   %s", clip(c.OriginErr, 200))
 		}
 		for _, k := range c.Callees {
 			l = append(l, "  callee:   "+k.line())
@@ -168,8 +182,11 @@ func (e Entry) Lines() []string {
 			add("  grants:   no skill grant in force")
 		}
 		for _, g := range c.Grants {
-			s := fmt.Sprintf("  grant:    %s allowed %s (entry %s)", g.Skill, g.Rule, short(g.Since))
-			if g.Ended != "" {
+			s := fmt.Sprintf("  grant:    %s allowed %s%s (entry %s)", g.Skill, g.Rule, underScope(g.Scope), short(g.Since))
+			switch {
+			case g.Replaced:
+				s += fmt.Sprintf(", replaced later at %s", short(g.Ended))
+			case g.Ended != "":
 				s += fmt.Sprintf(", revoked later at %s", short(g.Ended))
 			}
 			l = append(l, s)
@@ -286,6 +303,17 @@ func (s Session) Lines() []string {
 	if s.SpawnedBy != "" {
 		add("spawned:  by call %s", s.SpawnedBy)
 	}
+	if r := s.Redaction; r != nil {
+		from := "redacted from " + orNone(r.From)
+		if r.Profile != "" {
+			from += " (profile " + r.Profile + ")"
+		}
+		add("redacted: %s; %d redacted, %d native entries", from, r.Redacted, r.Native)
+		add("          the original is named by its pseudonym: not a session to open")
+		if r.IDErr != "" {
+			add("          note: %s", clip(r.IDErr, 200))
+		}
+	}
 	v := s.Verify
 	switch {
 	case v.Responses == 0:
@@ -332,7 +360,11 @@ func (s Session) Lines() []string {
 		}
 	}
 	if m := s.Manifest; m != nil {
-		add("memory:   manifest in force: %d entries, %d left out", len(m.Entries), len(m.Omitted))
+		if m.Dropped() {
+			add("memory:   memory block left out this turn (%d entries not shown to the model)", len(m.Omitted))
+		} else {
+			add("memory:   manifest in force: %d entries, %d left out", len(m.Entries), len(m.Omitted))
+		}
 		for i, e := range m.Entries {
 			if i == maxListed {
 				add("          ... %d more", len(m.Entries)-maxListed)
@@ -355,7 +387,11 @@ func (s Session) Lines() []string {
 			add("          ... %d more refused", len(s.ManifestRefused)-maxListed)
 			break
 		}
-		add("          REFUSED manifest record %s: %s", short(r.Entry), clip(r.Why, 120))
+		kind := "malformed"
+		if r.Unresolved {
+			kind = "unresolved base"
+		}
+		add("          REFUSED manifest record %s (%s): %s", short(r.Entry), kind, clip(r.Why, 240))
 	}
 	if len(s.Grants) == 0 {
 		add("grants:   no skill grants on the line")
@@ -366,10 +402,42 @@ func (s Session) Lines() []string {
 			break
 		}
 		state := "in force"
-		if g.Ended != "" {
+		switch {
+		case g.Replaced:
+			state = "replaced at " + short(g.Ended)
+		case g.Ended != "":
 			state = "revoked at " + short(g.Ended)
 		}
-		add("grants:   %s allowed %s, %s", g.Skill, g.Rule, state)
+		add("grants:   %s allowed %s%s, %s", g.Skill, g.Rule, underScope(g.Scope), state)
 	}
 	return l
+}
+
+// underScope names the grant scope a grant was made under, if any.
+func underScope(scope string) string {
+	if scope == "" {
+		return ""
+	}
+	return " under " + scope
+}
+
+// spansText says what original entries a redacted entry was made from:
+// "made from original entry 2", "made from original entries 3-7, 9", or
+// "added by the redaction" for none.
+func spansText(spans []agentsession.Span) string {
+	if len(spans) == 0 {
+		return "added by the redaction, made from no original entry"
+	}
+	parts := make([]string, len(spans))
+	for i, sp := range spans {
+		parts[i] = strconv.Itoa(sp.From)
+		if sp.To != sp.From {
+			parts[i] += "-" + strconv.Itoa(sp.To)
+		}
+	}
+	noun := "entries"
+	if len(spans) == 1 && spans[0].From == spans[0].To {
+		noun = "entry"
+	}
+	return "made from original " + noun + " " + strings.Join(parts, ", ")
 }

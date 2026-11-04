@@ -271,6 +271,13 @@ func newKitApp(t *testing.T, kopts []agentkit.Option, wrap func(agentturn.Contro
 // session's recorder.
 func newAppFrom(t *testing.T, start starter, build func(context.Context, *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error), wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
 	t.Helper()
+	return newAppRecord(t, start, build, nil, wrap, opts...)
+}
+
+// newAppRecord is newAppFrom with the record the model reads wrapped, to
+// play a record that lacks a capability RecordOf's has.
+func newAppRecord(t *testing.T, start starter, build func(context.Context, *session.Recorder) (*agentkit.Kit, *agentturn.Agent, error), wrapRecord func(client.Record) client.Record, wrap func(agentturn.Control) agentturn.Control, opts ...tui.Option) *app {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
 	if err != nil {
@@ -301,12 +308,17 @@ func newAppFrom(t *testing.T, start starter, build func(context.Context, *sessio
 	if err != nil {
 		t.Fatal(err)
 	}
+	if wrapRecord != nil {
+		record = wrapRecord(record)
+	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, ctl: ctl, record: record}
 	var driven agentturn.Control = ctl
 	if wrap != nil {
 		driven = wrap(ctl)
 	}
-	a.m = tui.New(ctx, record, driven, client.Direct(driven), append([]tui.Option{tui.WithCopier(func(text string) {
+	// Tests press keys as soon as a panel is on screen: no settle,
+	// unless a test asks for one.
+	a.m = tui.New(ctx, record, driven, client.Direct(driven), append([]tui.Option{tui.WithPanelSettle(0), tui.WithCopier(func(text string) {
 		a.copyMu.Lock()
 		defer a.copyMu.Unlock()
 		a.copies = append(a.copies, text)

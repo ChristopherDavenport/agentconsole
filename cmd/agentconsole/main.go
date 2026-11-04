@@ -69,7 +69,10 @@ func run() error {
 		clientOpts = append(clientOpts, openresponses.WithAPIKey(key))
 	}
 	kopts := []agentkit.Option{
-		agentkit.WithModel(openresponses.NewClient(*baseURL, clientOpts...).AsAdapter(), *model),
+		// The endpoint is a provider's own API, which accepts no other
+		// provider's slug-prefixed items, so the adapter leaves them out
+		// (openresponses docs/extensions.md 1.6).
+		agentkit.WithModel(openresponses.NewClient(*baseURL, clientOpts...).AsAdapter(openresponses.WithProviderSlugs()), *model),
 		agentkit.WithMaxTurns(*maxTurns),
 		agentkit.WithRecorder(rec),
 		// The client answers the agent's questions, so they are events.

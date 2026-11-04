@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,6 +164,25 @@ type Model struct {
 	reveal   bool
 	panes    paneState
 	treeCur  int
+	// forks are the sessions forked from the followed one, as the
+	// record's Lister last listed them (nav.go), for the session forksOf.
+	forks   []fork
+	forksOf string
+	// hist is the input's history (history.go).
+	hist history
+	// draft is what the input held when a refusal's reason or a note
+	// took it over, given back once the answer is sent or dropped.
+	draft string
+	// panel names the permission or question panel on screen and
+	// panelAt when it opened; it takes no answer until settle has passed
+	// on now's clock, so a key the user was already typing (a y mid-word
+	// of a steer) is not taken as the answer.
+	panelOn     string
+	panelAt     time.Time
+	panelSettle time.Duration
+	now         func() time.Time
+	// exec suspends the program for the editor (editor.go).
+	exec func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 	// The mouse selection (select.go): pressed is whether the left
 	// button is down, pressX and pressY where it went down, sel the region
 	// being dragged over, lines the frame's lines and content the
@@ -195,6 +215,33 @@ type Option func(*Model)
 // it feeds the session pane's total. Without it the pane shows tokens
 // but no cost.
 func WithCost(fn client.Cost) Option { return func(m *Model) { m.cost = fn } }
+
+// WithExec sets how the program suspends for an external command, the
+// editor Ctrl-G opens: tea.ExecProcess by default. A test with no
+// program runs the command at once.
+func WithExec(fn func(*exec.Cmd, tea.ExecCallback) tea.Cmd) Option {
+	return func(m *Model) { m.exec = fn }
+}
+
+// WithPanelSettle sets how long a permission or question panel takes
+// no answer after it opens (defaultPanelSettle).
+func WithPanelSettle(d time.Duration) Option { return func(m *Model) { m.panelSettle = d } }
+
+// WithClock sets the clock the panel's settle is measured on.
+func WithClock(now func() time.Time) Option { return func(m *Model) { m.now = now } }
+
+// WithHistory gives the input a history to walk with Up and Down: past,
+// oldest first, and record, called with each line sent, before what it
+// is is decided, so the host keeps it. The host keeps the file; the
+// model keeps nothing beyond this run. record runs on the program's
+// goroutine and must return promptly; nil records nothing.
+func WithHistory(past []string, record func(line string)) Option {
+	return func(m *Model) {
+		m.hist.lines = append([]string(nil), past...)
+		m.hist.at = len(m.hist.lines)
+		m.hist.record = record
+	}
+}
 
 // WithToolRenderers sets the renderers of the tools' calls, by tool
 // name; a call to any other tool shows its arguments as key=value pairs.
@@ -231,6 +278,10 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 		replied:  map[string]bool{},
 		steers:   &steerQueue{},
 		inputY:   -1,
+		exec:     tea.ExecProcess,
+		now:      time.Now,
+
+		panelSettle: defaultPanelSettle,
 	}
 	for _, o := range options {
 		o(m)
@@ -381,6 +432,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.relayout()
 		}
 		return m, nil
+	case editedMsg:
+		m.edited(msg)
+		return m, nil
+	case forksMsg:
+		if msg.err != nil {
+			m.err = "listing the forks: " + msg.err.Error()
+		}
+		if msg.session == m.view.Session {
+			m.forks, m.forksOf = msg.forks, msg.session
+		}
+		m.relayout()
+		return m, nil
 	case openMsg:
 		if msg.err != nil {
 			m.err = msg.err.Error()
@@ -443,6 +506,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.kind == "abort" {
 			m.aborting = false
 		}
+		if m.refusing {
+			// The reason being typed goes, as Esc would drop it, and the
+			// draft the input held comes back.
+			m.endAnswerText()
+		}
 		m.refusing = false
 		m.err = msg.kind + ": " + msg.err.Error()
 		m.in.Focus()
@@ -489,7 +557,7 @@ func (m *Model) syncQuestions() {
 	}
 	if _, _, ok := m.question(); !ok && (m.refusingQ || m.notingQ) {
 		m.refusingQ, m.notingQ = false, false
-		m.in.Reset()
+		m.endAnswerText()
 	}
 }
 
@@ -578,6 +646,8 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					m.treeCur = i
 				}
 			}
+			m.relayout()
+			return m, m.listForks()
 		}
 		m.relayout()
 		return m, nil
@@ -641,6 +711,12 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	}
+	if msg.String() == "ctrl+g" {
+		return m, m.editInput()
+	}
+	if m.settling() {
+		return m, m.keyBeforeSettle(msg)
+	}
 	if q, _, ok := m.question(); ok {
 		return m.questionKey(msg, q)
 	}
@@ -652,6 +728,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Code == tea.KeyEnter {
 		return m.send()
+	}
+	if cmd, ok := m.walkHistory(msg); ok {
+		return m, cmd
 	}
 	return m, m.updateInput(msg)
 }
@@ -683,11 +762,11 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 		switch msg.Code {
 		case tea.KeyEnter:
 			reason := strings.TrimSpace(m.in.Value())
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusing = false
 			return m.decide(refusal(p, reason))
 		case tea.KeyEscape:
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusing = false
 			m.relayout()
 			return m, nil
@@ -699,7 +778,7 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 		return m.decide(agentturn.Approve(p.CallID).WithBy(who))
 	case "n", "N":
 		m.refusing = true
-		m.in.Reset()
+		m.beginAnswerText()
 		m.relayout()
 	}
 	return m, nil
@@ -724,11 +803,11 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Mode
 			if m.notingQ {
 				action = agenttool.ActionAccept
 			}
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusingQ, m.notingQ = false, false
-			return m.reply(q, agenttool.Answer{Action: action, Note: note})
+			return m.reply(q, agenttool.Answer{Action: action, Note: note, By: agenttool.ByHuman})
 		case tea.KeyEscape:
-			m.in.Reset()
+			m.endAnswerText()
 			m.refusingQ, m.notingQ = false, false
 			m.relayout()
 			return m, nil
@@ -738,17 +817,17 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Mode
 	switch msg.String() {
 	case "y", "Y":
 		if !asksForForm(q) {
-			return m.reply(q, agenttool.Answer{Action: agenttool.ActionAccept})
+			return m.reply(q, agenttool.Answer{Action: agenttool.ActionAccept, By: agenttool.ByHuman})
 		}
 	case "a", "A":
 		if !asksForForm(q) {
 			m.notingQ = true
-			m.in.Reset()
+			m.beginAnswerText()
 			m.relayout()
 		}
 	case "n", "N":
 		m.refusingQ = true
-		m.in.Reset()
+		m.beginAnswerText()
 		m.relayout()
 	}
 	return m, nil
@@ -810,6 +889,7 @@ func (m *Model) send() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.in.Reset()
+	m.hist.sent(text)
 	if m.submit != nil {
 		return m.submitted(text)
 	}
@@ -884,8 +964,18 @@ func (m *Model) relayout() {
 	}
 	m.reveal = false
 	m.drawn = m.screen
-	_, _, asking := m.question()
-	_, _, permitting := m.pending()
+	askedQ, _, asking := m.question()
+	askedP, _, permitting := m.pending()
+	on := ""
+	switch {
+	case asking:
+		on = "q:" + askedQ.ID
+	case permitting:
+		on = "p:" + askedP.CallID
+	}
+	if on != m.panelOn {
+		m.panelOn, m.panelAt = on, m.now()
+	}
 	if (asking && !m.refusingQ && !m.notingQ) || (!asking && permitting && !m.refusing) {
 		m.in.Blur()
 	} else {
@@ -1171,4 +1261,51 @@ func truncate(s string, w int) string {
 		r = r[:len(r)-1]
 	}
 	return string(r)
+}
+
+// beginAnswerText clears the input for a refusal's reason or a note,
+// keeping what was in it: a draft, a prompt composed in the editor.
+func (m *Model) beginAnswerText() {
+	if v := m.in.Value(); v != "" {
+		m.draft = v
+	}
+	m.in.Reset()
+}
+
+// endAnswerText gives the input back its draft once the answer is sent
+// or dropped.
+func (m *Model) endAnswerText() {
+	m.in.Reset()
+	if m.draft != "" {
+		m.in.SetValue(m.draft)
+		m.draft = ""
+	}
+}
+
+// defaultPanelSettle is how long a panel takes no answer after it opens:
+// longer than the gap between two keys of a word, shorter than reading
+// the question.
+const defaultPanelSettle = 500 * time.Millisecond
+
+// settling reports whether a permission or question panel is on screen,
+// waiting for y or n, and opened less than the settle ago. A reason or a
+// note being typed into the input is not a panel's key.
+func (m *Model) settling() bool {
+	if m.panelOn == "" || m.panelSettle <= 0 || m.refusing || m.refusingQ || m.notingQ {
+		return false
+	}
+	return m.now().Sub(m.panelAt) < m.panelSettle
+}
+
+// keyBeforeSettle keeps a key pressed as a panel opens with the input
+// line, where the user was typing it; Enter sends nothing, so the line
+// waits for the panel's answer.
+func (m *Model) keyBeforeSettle(msg tea.KeyPressMsg) tea.Cmd {
+	if msg.Code == tea.KeyEnter || isNewlineKey(msg) {
+		return nil
+	}
+	m.in.Focus()
+	cmd := m.updateInput(msg)
+	m.relayout()
+	return cmd
 }

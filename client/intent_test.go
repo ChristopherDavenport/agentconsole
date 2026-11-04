@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
+	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 	"github.com/ChristopherDavenport/openresponses/echo"
 )
@@ -102,5 +104,39 @@ func TestDirectQueuesAndReplies(t *testing.T) {
 	}
 	if err := act(context.Background(), Reply{ID: "q-none"}); !errors.Is(err, agentturn.ErrNoQuestion) {
 		t.Fatalf("reply to no question: %v, want ErrNoQuestion", err)
+	}
+}
+
+// RecordOf over a store lists the sessions made from the followed one,
+// through the optional Lister.
+func TestRecordOfListsTheSessionsMadeFromOne(t *testing.T) {
+	ctx := context.Background()
+	store := agentsession.NewMemoryStore()
+	rec, s, err := session.Start(ctx, store, agentsession.Header{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.Append(ctx, s.ID(), agentsession.NewItemEntry(openresponses.UserText("hi")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, err := store.Create(ctx, agentsession.Header{ParentSession: s.ID(), Base: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := RecordOf(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, ok := r.(Lister)
+	if !ok {
+		t.Fatal("RecordOf over a store is no Lister")
+	}
+	got, err := l.List(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Header.ID != fork.ID() || got[0].Header.Base != id {
+		t.Errorf("listed %+v, want the fork", got)
 	}
 }

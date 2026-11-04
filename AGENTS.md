@@ -31,7 +31,8 @@ committed, and live events carry only what is not committed yet.
     (`Prompt`, `Queue`, `Abort`, `Answer`, `Reply`, `ContinueFrom`) and
     `Controller`, `Direct`, `Live` (a source's events, copied, queued),
     `Copy` (what the view keeps of an event), `RecordOf` (a `Record`
-    over a `session.Recorder`'s store), `Cost`.
+    over a `session.Recorder`'s store), `Lister` (a `Record` that lists
+    the sessions made from one, optional), `Cost`.
   - `view`: the reconciler. A pure model: record `Change`s and
     agentturn's events in, what a client renders out. No goroutines, no
     I/O, no terminal.
@@ -41,11 +42,13 @@ committed, and live events carry only what is not committed yet.
     lines with roles; the TUI styles them.
   - `console`: `Run(ctx, record, source, controller, ...Option)`, the program, the feeds,
     signals and the drain at exit. The input is the embedder's:
-    `WithSubmit` hands it each submitted line to decide what it is.
+    `WithSubmit` hands it each submitted line to decide what it is, and
+    `WithHistory` gives the input the host's history to walk.
   - `internal/inspect`: the record-detail panes, computed on demand from
     a snapshot of the session (`Record.Read`), never from the follower's
     session. It decodes the records other products write (policy
-    verdicts, skill grants, memory manifests) from their JSON.
+    verdicts, skill grants) from their JSON, and folds memory manifests
+    with agentmemory's own `ManifestFold`.
   - `internal/tui`: the Bubble Tea model (conversation, turn status,
     permissions, input, the tree, the row cursor and the panes) and
     `Attach`, which feeds the view from the record and live streams and
