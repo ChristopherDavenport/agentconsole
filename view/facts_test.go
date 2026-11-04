@@ -1,10 +1,12 @@
 package view
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
+	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
@@ -108,5 +110,41 @@ func TestRowsSayWhatTheModelIsNotSent(t *testing.T) {
 	}
 	if r := byEntry[fc]; r.LeftOut != "" {
 		t.Errorf("the call is sent whole: %+v", r)
+	}
+}
+
+// After a restart the view has no live end, only the record: a hold
+// agentturn/session marks held (session.HeldMember), deferred only
+// beside another call's question, is not asked about, and the asked
+// call's question is about the part its hold names
+// (session.SubjectMember) (#9).
+func TestARestartAsksOnlyAboutTheAskedCall(t *testing.T) {
+	l := newRecordsLog(t)
+	l.append(agentsession.NewRunStart("run1", agentsession.SourceInput, ""))
+	l.append(itemEntry(openresponses.UserText("go"), ""))
+	asked := l.append(itemEntry(&openresponses.FunctionCall{ID: "fc_a", CallID: "c_asked", Name: "bash", Arguments: `{"command":"ls && git push"}`}, "resp1"))
+	held := l.append(itemEntry(&openresponses.FunctionCall{ID: "fc_h", CallID: "c_held", Name: "read", Arguments: `{}`}, "resp1"))
+	ask := agentsession.NewDecision("c_asked", asked, agentsession.VerdictHold, "policy")
+	ask.Reason = "git push touches the remote"
+	ask.Unknown = map[string]json.RawMessage{session.SubjectMember: json.RawMessage(`"git push"`)}
+	l.append(ask)
+	hold := agentsession.NewDecision("c_held", held, agentsession.VerdictHold, "policy")
+	hold.Reason = "held while another call of its batch is asked about"
+	hold.Unknown = map[string]json.RawMessage{session.HeldMember: json.RawMessage(`true`)}
+	l.append(hold)
+	l.append(agentsession.NewRunEnd("run1", agentsession.ReasonInputRequired, "", []string{"c_asked", "c_held"}))
+
+	// A view started on the record alone, as after a restart.
+	v := New()
+	v.Record(agentsession.Change{Kind: agentsession.Snapshot, Session: l.s})
+	m := v.Model()
+	if len(m.Permissions) != 1 || m.Permissions[0].CallID != "c_asked" {
+		t.Fatalf("permissions = %+v, want c_asked alone", m.Permissions)
+	}
+	if p := m.Permissions[0]; p.Subject != "git push" || p.Question != "git push touches the remote" {
+		t.Errorf("the asked call: %+v", p)
+	}
+	if c := callRow(t, m, "c_held").Call; c.State == CallDeferred {
+		t.Errorf("the held call reads as asked about: %+v", c)
 	}
 }

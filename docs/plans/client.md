@@ -1148,11 +1148,15 @@ agentturn's and agentkit's now.
   and agentkit's `Control.Resume`, behind `Direct`, releases it through
   the engine. This
   is the first part of agentconsole#9. Without that end (a restart),
-  the record cannot tell a held call from an asked one, and every
-  pending call is asked about, as agentkit's `Control.Resume` needs. A question
+  the record says it: agentturn/session marks the hold decision
+  `agentturn:held` and keeps the subject as `agentturn:subject`, the
+  view reads both off the hold, and agentkit's `Control.Resume` releases
+  a held call from that decision (the rest of #9). A hold written
+  before those members is asked about. The members are only Go
+  constants in agentturn/session so far; agentturn's RFC should state
+  them. A question
   shows its decision's `Subject`, the part of a compound call it is
-  about, unless the reason names it already; the record does not hold
-  it, so a permission read from the record alone has none. A call
+  about, unless the reason names it already. A call
   dispatched before it was held (`PendingCall.Dispatched`, or a
   dispatch entry on the record) says it may have run
   (`Permission.MayHaveRun`). The answers leave as one `Answer` intent.

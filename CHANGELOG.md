@@ -55,6 +55,12 @@ versions may break the API.
   refused a delta carrying it, and reads "memory block left out this
   turn"; a refused record says whether its base was unresolved or it
   was malformed.
+- Fixed: after a restart, a call its hold marks held (agentturn/session's
+  `agentturn:held`), deferred only beside another call's question, is
+  no longer asked about, and the asked call's question names the part
+  of it the hold records (`agentturn:subject`), as the live end already
+  did (#9). The view reads the hold decision's members, so no media is
+  resolved and a sidecar session needs no blob reader for it.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

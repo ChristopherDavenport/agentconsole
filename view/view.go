@@ -272,8 +272,8 @@ type Permission struct {
 	// Subject is the part of the call the question is about, when the
 	// policy decided on a part (one command of a compound line), from
 	// the decision that deferred it; "" for the whole call. The record
-	// does not hold it, so a permission read from the record alone has
-	// none.
+	// holds it on the hold decision (agentturn/session's SubjectMember);
+	// a hold written before that member has none.
 	Subject string
 	// MayHaveRun is set for a call that was handed to its tool before
 	// it was left unanswered: a call held after its dispatch, or one an
@@ -527,12 +527,14 @@ func (v *View) Record(ch agentsession.Change) {
 // end is on its way. A live end the record has delivered, or one for a run
 // the viewed path moved off, says nothing about the viewed line.
 //
-// While the live end of the path's last run is in hand, a call its
-// decision only held beside another call's question ([agentturn.ToolDecision]'s
-// Held) is not asked about: answering the batch decides it, as agentkit's
-// Control releases it with the answers. Without that end, after a
-// restart, the record cannot tell a held call from an asked one, and
-// every pending call is asked about.
+// A call its decision only held beside another call's question
+// ([agentturn.ToolDecision]'s Held) is not asked about: answering the
+// batch decides it, as agentkit's Control releases it with the answers.
+// The live end says so while it is in hand; after a restart the record
+// does, on the hold decision agentturn/session marks with
+// [session.HeldMember], which also keeps the part of the call a
+// question is about ([session.SubjectMember]). A hold written before
+// those members is asked about.
 func (v *View) reconcilePending() {
 	if v.turn.State == Running {
 		return
@@ -602,15 +604,25 @@ func (v *View) reconcilePending() {
 			if known && held(lp.Decision) {
 				continue
 			}
-			p.Reason = string(agentturn.PendingDeferred)
+			var hold *agentsession.DecisionEntry
 			if n := len(c.Decisions); n > 0 {
-				p.Question = c.Decisions[n-1].Reason
+				hold = c.Decisions[n-1]
+			}
+			if !known && holdMember(hold, session.HeldMember, false) {
+				continue
+			}
+			p.Reason = string(agentturn.PendingDeferred)
+			if hold != nil {
+				p.Question = hold.Reason
+				p.Subject = holdMember(hold, session.SubjectMember, "")
 			}
 			if q := questionOf(old, p.CallID); q != "" {
 				p.Question = q
 			}
 			if known {
-				p.Subject = subjectOf(lp.Decision)
+				if sub := subjectOf(lp.Decision); sub != "" {
+					p.Subject = sub
+				}
 				p.MayHaveRun = p.MayHaveRun || lp.Dispatched
 			}
 			v.perms = append(v.perms, p)
@@ -624,6 +636,23 @@ func (v *View) reconcilePending() {
 		}
 		v.cut = append(v.cut, p)
 	}
+}
+
+// holdMember reads the member name of a hold decision as T, def when
+// the decision has none or it does not decode.
+func holdMember[T any](d *agentsession.DecisionEntry, name string, def T) T {
+	if d == nil {
+		return def
+	}
+	raw, ok := d.Unknown[name]
+	if !ok {
+		return def
+	}
+	v := def
+	if json.Unmarshal(raw, &v) != nil {
+		return def
+	}
+	return v
 }
 
 // held reports whether the decision deferred its call only beside
