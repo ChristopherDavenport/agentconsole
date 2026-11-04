@@ -24,7 +24,7 @@ var keyGroups = []keyGroup{
 		{"Enter", "send a prompt or steer the run; Shift-Enter, Alt-Enter, Ctrl-J: new line"},
 		{"Ctrl-C", "copy the selection when one is drawn; otherwise abort the run, quit when idle (a second one quits at once)"},
 		{"PgUp PgDn", "scroll a page"},
-		{"Ctrl-Up Ctrl-Down", "scroll a line"},
+		{"Ctrl-Up Ctrl-Down", "scroll a line; Up Down on the input's first or last line: the history"},
 		{"Ctrl-Home Ctrl-End", "scroll to the top or the bottom"},
 		{"mouse wheel", "scroll"},
 		{"mouse drag", "select text; it stays on the text as it scrolls, until the next key or press"},

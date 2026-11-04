@@ -167,6 +167,8 @@ type Model struct {
 	// record's Lister last listed them (nav.go), for the session forksOf.
 	forks   []fork
 	forksOf string
+	// hist is the input's history (history.go).
+	hist history
 	// The mouse selection (select.go): pressed is whether the left
 	// button is down, pressX and pressY where it went down, sel the region
 	// being dragged over, lines the frame's lines and content the
@@ -199,6 +201,19 @@ type Option func(*Model)
 // it feeds the session pane's total. Without it the pane shows tokens
 // but no cost.
 func WithCost(fn client.Cost) Option { return func(m *Model) { m.cost = fn } }
+
+// WithHistory gives the input a history to walk with Up and Down: past,
+// oldest first, and record, called with each line sent, before what it
+// is is decided, so the host keeps it. The host keeps the file; the
+// model keeps nothing beyond this run. record runs on the program's
+// goroutine and must return promptly; nil records nothing.
+func WithHistory(past []string, record func(line string)) Option {
+	return func(m *Model) {
+		m.hist.lines = append([]string(nil), past...)
+		m.hist.at = len(m.hist.lines)
+		m.hist.record = record
+	}
+}
 
 // WithToolRenderers sets the renderers of the tools' calls, by tool
 // name; a call to any other tool shows its arguments as key=value pairs.
@@ -668,6 +683,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.Code == tea.KeyEnter {
 		return m.send()
 	}
+	if cmd, ok := m.walkHistory(msg); ok {
+		return m, cmd
+	}
 	return m, m.updateInput(msg)
 }
 
@@ -825,6 +843,7 @@ func (m *Model) send() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.in.Reset()
+	m.hist.sent(text)
 	if m.submit != nil {
 		return m.submitted(text)
 	}

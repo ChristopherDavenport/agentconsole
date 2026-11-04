@@ -79,6 +79,12 @@ versions may break the API.
   the record can list them (#6). A fork has a base and no spawned_by;
   subsessions and children a host started stay with the links. A fork
   opens read only.
+- Added: `console.WithHistory(past, record)`: Up on the input's first
+  line and Down on its last walk the lines sent, newest first, from the
+  host's history on, and bring the draft back (#44). The host keeps the
+  file; `record` is handed each line as it is sent, a slash line or one
+  the submit function refuses included. A recalled line is sent only
+  with Enter.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit

@@ -42,7 +42,8 @@ committed, and live events carry only what is not committed yet.
     lines with roles; the TUI styles them.
   - `console`: `Run(ctx, record, source, controller, ...Option)`, the program, the feeds,
     signals and the drain at exit. The input is the embedder's:
-    `WithSubmit` hands it each submitted line to decide what it is.
+    `WithSubmit` hands it each submitted line to decide what it is, and
+    `WithHistory` gives the input the host's history to walk.
   - `internal/inspect`: the record-detail panes, computed on demand from
     a snapshot of the session (`Record.Read`), never from the follower's
     session. It decodes the records other products write (policy

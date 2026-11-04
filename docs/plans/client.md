@@ -1309,6 +1309,19 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   it opens read only, and continuing from it here is refused as for any
   other session.
 
+## Decided in implementation, input history and the editor
+
+- **`console.WithHistory(past, record)`.** The host keeps the history
+  file (dax's `~/.dax/history`); the client keeps the lines of this
+  run beside `past` and hands each line sent to `record` as Enter takes
+  it, before the submit function decides what it is, so a slash line
+  and a line the host refuses are kept too. Up on the input's first row
+  and Down on its last walk it, newest first; the draft is kept and
+  comes back past the newest. A recalled line is only put in the input.
+  Without the option Up and Down only move the input's cursor.
+  `record` runs on the program's goroutine, like a renderer, and must
+  return promptly.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
