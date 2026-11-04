@@ -374,6 +374,9 @@ type ovCall struct {
 	reason   string
 	finished bool
 	failed   bool
+	// withdrawn is why the call's hand-off was withdrawn before the
+	// tool ran (ToolEnd.Withdrawn), "" when it was not.
+	withdrawn string
 	// held and subject are from the decision that deferred the call:
 	// held beside another call's question, and the part it is about.
 	held    bool
@@ -1272,6 +1275,14 @@ func (v *View) toolFinished(e *agentturn.ToolEnd) {
 			c.output = e.Err.Error()
 		}
 	}
+	if e.Withdrawn {
+		// The tool never ran: its error is the subscriber's refusal of
+		// the hand-off, no failure of the tool.
+		c.failed, c.withdrawn = false, "withdrawn"
+		if e.Err != nil {
+			c.withdrawn = e.Err.Error()
+		}
+	}
 }
 
 func (v *View) permit(p Permission) {
@@ -1487,6 +1498,9 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 				c.State = o.state
 			}
 			c.Partial, c.Output, c.Failed = o.partial, o.output, o.failed
+			if o.withdrawn != "" && c.Withdrawn == "" {
+				c.Withdrawn = o.withdrawn
+			}
 			if o.state == CallDeferred && o.held {
 				c.HeldBeside = true
 			}

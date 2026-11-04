@@ -360,7 +360,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	if c.Failed && c.State == view.CallEnded {
 		b.WriteString("\n" + pad + "  " + errStyle.Render("failed: the output reports the failure"))
 	}
-	if c.Withdrawn != "" && (c.State == view.CallOpen || c.State == view.CallCutOff) {
+	if c.Withdrawn != "" && c.State != view.CallRunning {
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("never started: its hand-off was withdrawn ("+c.Withdrawn+")"))
 	}
 	if c.Verdict != "" && c.Verdict != "proceed" {

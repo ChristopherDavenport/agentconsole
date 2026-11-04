@@ -34,8 +34,10 @@ versions may break the API.
 - Added: `view.Call.Failed`, an output the record marks `failed` or a
   tool that ended with an error live, shown as "failed"; and
   `view.Call.Withdrawn`, the reason of a dispatch withdrawn before the
-  tool ran (a `reject` with `withdrawn`), shown as never started. A live
-  `tool_end` that agentturn marks `Cut` reads as cut off, not ended.
+  tool ran (a `reject` with `withdrawn`), shown as never started; a live
+  `tool_end` marked `Withdrawn` says so at once, and is not a failed
+  call. A live `tool_end` that agentturn marks `Cut` reads as cut off,
+  not ended.
 - Added: `view.Row.CopiedFrom`, the session a copied item (format 0.15
   `copied_from`) was taken from, shown as context copied from another
   session; and `view.Row.LeftOut`, `LeftOutQuarantined`,

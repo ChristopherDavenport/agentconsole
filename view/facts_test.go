@@ -2,6 +2,7 @@ package view
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/ChristopherDavenport/agentsession"
@@ -183,5 +184,20 @@ func TestWhatIsLeftOutIsComputedOncePerLine(t *testing.T) {
 	l.v.Model()
 	if builds != 2 {
 		t.Errorf("a new entry did not rebuild: %d builds", builds)
+	}
+}
+
+// A live tool_end that says the hand-off was withdrawn reads as never
+// started at once, not as a failed or cut-off run of the tool.
+func TestALiveWithdrawalIsNeverStarted(t *testing.T) {
+	l := newRecordsLog(t)
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	fc := &openresponses.FunctionCall{ID: "fc_1", CallID: "c1", Name: "upper", Arguments: `{}`}
+	l.stream("run1", "resp1", fc, true)
+	l.v.Live(&agentturn.ToolEnd{RunID: "run1", CallID: "c1", Name: "upper", Withdrawn: true, Cut: true,
+		Err: errors.New("a subscriber refused the dispatch")})
+	c := callRow(t, l.v.Model(), "c1").Call
+	if c.Withdrawn == "" || c.Failed {
+		t.Errorf("withdrawn live: %+v", c)
 	}
 }
