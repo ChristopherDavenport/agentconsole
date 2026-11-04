@@ -153,8 +153,17 @@ func (e Entry) Lines() []string {
 				s += ", key " + d.IdempotencyKey
 			}
 			l = append(l, s)
+		} else if d := c.OriginDispatch; d != nil {
+			s := fmt.Sprintf("  dispatch: dispatched in origin %s, off this path: may have run (entry %s)", d.Session, short(d.Entry))
+			if d.IdempotencyKey != "" {
+				s += ", key " + d.IdempotencyKey
+			}
+			l = append(l, s)
 		} else {
 			add("  dispatch: none recorded")
+		}
+		if c.OriginErr != "" {
+			add("  origin:   %s", clip(c.OriginErr, 200))
 		}
 		for _, k := range c.Callees {
 			l = append(l, "  callee:   "+k.line())

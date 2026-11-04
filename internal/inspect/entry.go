@@ -63,6 +63,13 @@ type Call struct {
 	Asked []session.Elicitation
 	// Dispatch is the dispatch entry, when the call was handed to its tool.
 	Dispatch *Dispatch
+	// OriginDispatch is, for a call in a fork's prefix with no dispatch
+	// in the fork, the dispatch the session the fork was made from holds
+	// (agentsession.OriginDispatches), its Session naming that session:
+	// off this path, the call may have run. OriginErr is why the walk up
+	// the forks failed, "" when it did not.
+	OriginDispatch *Dispatch
+	OriginErr      string
 	// Callees are the call's subsession and peer links on the path, in
 	// order, with what became of each.
 	Callees []Callee
@@ -87,6 +94,9 @@ type Decision struct {
 
 // Dispatch is a dispatch entry.
 type Dispatch struct {
+	// Session is the session holding the dispatch when it is not the
+	// viewed one.
+	Session        string
 	Entry          string
 	Target         string
 	IdempotencyKey string
@@ -161,7 +171,7 @@ func (in *Inspector) Entry(ctx context.Context, sessionID, tail, entryID string,
 	switch x := e.(type) {
 	case *agentsession.ItemEntry:
 		out.Title = itemTitle(x.Item)
-		in.fill(&out, s, path, at, x.Item, x.ResponseID)
+		in.fill(ctx, &out, s, path, at, x.Item, x.ResponseID)
 	case *agentsession.CustomEntry:
 		item, resp, ok := session.MarkedItem(x)
 		if !ok {
@@ -170,7 +180,7 @@ func (in *Inspector) Entry(ctx context.Context, sessionID, tail, entryID string,
 		}
 		out.KeptFromModel = true
 		out.Title = itemTitle(item)
-		in.fill(&out, s, path, at, item, resp)
+		in.fill(ctx, &out, s, path, at, item, resp)
 	case *agentsession.CompactionEntry:
 		out.Title = "compaction"
 		out.Fold = foldOf(path, at, x)
@@ -185,7 +195,7 @@ func (in *Inspector) Entry(ctx context.Context, sessionID, tail, entryID string,
 
 // fill adds what an item's entry has: the response that produced it and,
 // for a call or an output, the call.
-func (in *Inspector) fill(out *Entry, s *agentsession.Session, path []agentsession.Entry, at int, item openresponses.Item, responseID string) {
+func (in *Inspector) fill(ctx context.Context, out *Entry, s *agentsession.Session, path []agentsession.Entry, at int, item openresponses.Item, responseID string) {
 	if responseID != "" {
 		for i := at + 1; i < len(path); i++ {
 			if r, ok := path[i].(*agentsession.ResponseEntry); ok && r.ResponseID == responseID {
@@ -203,11 +213,14 @@ func (in *Inspector) fill(out *Entry, s *agentsession.Session, path []agentsessi
 	default:
 		return
 	}
-	for _, c := range agentsession.Calls(path) {
+	for _, c := range callsOn(s, path) {
 		if c.ID() != callID {
 			continue
 		}
 		out.Call = callOf(s, path, c)
+		if out.Call.Dispatch == nil && s.Prefix(c.Entry.ID) {
+			in.originDispatch(ctx, out.Call, s, c.Entry.ID)
+		}
 	}
 	if out.Call == nil {
 		// An output whose call is not on the path, or a call the path cut.
@@ -222,6 +235,36 @@ func (in *Inspector) responseOf(s *agentsession.Session, path []agentsession.Ent
 		Usage: r.Usage, LatencyMS: r.LatencyMS, Attempts: r.Calls(), RequestHash: r.RequestHash,
 		Verify: in.verifyResponse(s, path, i),
 	}
+}
+
+// callsOn are the calls on path, the viewed line of s, read through the
+// session so a call in a fork's prefix is known as one: its state does
+// not read the header's promise as covering it.
+func callsOn(s *agentsession.Session, path []agentsession.Entry) []*agentsession.Call {
+	if len(path) > 0 {
+		if calls, err := s.Calls(path[len(path)-1].Base().ID); err == nil {
+			return calls
+		}
+	}
+	return agentsession.Calls(path)
+}
+
+// originDispatch reads the dispatch of a call in a fork's prefix from
+// the sessions the fork was made from, through the source, as
+// agentsession.OriginDispatches walks them (agentsession RFC 0001,
+// dispatch). An origin the source does not hold gives none, and a chain
+// that does not end is reported.
+func (in *Inspector) originDispatch(ctx context.Context, c *Call, s *agentsession.Session, callEntry string) {
+	origin, ds, err := agentsession.OriginDispatches(ctx, in.src, s, callEntry)
+	if err != nil {
+		c.OriginErr = err.Error()
+		return
+	}
+	if origin == nil || len(ds) == 0 {
+		return
+	}
+	d := ds[len(ds)-1]
+	c.OriginDispatch = &Dispatch{Session: origin.ID(), Entry: d.ID, Target: d.Target, IdempotencyKey: d.IdempotencyKey, Time: d.Timestamp}
 }
 
 func callOf(s *agentsession.Session, path []agentsession.Entry, c *agentsession.Call) *Call {

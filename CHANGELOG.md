@@ -61,6 +61,14 @@ versions may break the API.
   of it the hold records (`agentturn:subject`), as the live end already
   did (#9). The view reads the hold decision's members, so no media is
   resolved and a sidecar session needs no blob reader for it.
+- Fixed: a call's detail in a fork shows the dispatch of a call in the
+  fork's prefix, which the session the fork was made from holds
+  (`agentsession.OriginDispatches`, read through the record): "dispatched
+  in origin SESSION, off this path: may have run", with its key, where
+  it said "dispatch: none recorded" (#5). An origin the store does not
+  hold shows none; a chain of forks that does not end is shown. The
+  call's state is read through the session, so a prefix call is no
+  longer "never_started" under the fork's records promise.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit
