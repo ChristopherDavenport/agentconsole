@@ -1476,9 +1476,13 @@ func queuedProvenance(q *agentsession.QueuedEntry) (hidden bool, prov *Provenanc
 	return hidden, &p
 }
 
-// liveProvenance is an item event's provenance, copied.
+// liveProvenance is an item event's provenance, copied, marking the
+// message as the record will: by its layers or its trust, an empty
+// trust included. A source alone marks nothing, since the record holds
+// every input's source and reads such a message as the person's; the
+// row would flip when its entry lands (agentturn#303).
 func liveProvenance(lp *agentturn.Provenance) *Provenance {
-	if lp == nil {
+	if lp == nil || (len(lp.Layers) == 0 && lp.Trust == nil) {
 		return nil
 	}
 	p := &Provenance{}

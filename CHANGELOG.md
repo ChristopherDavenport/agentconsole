@@ -107,7 +107,10 @@ versions may break the API.
   `instructions_part` and `trust`), live (`ItemStart`/`ItemEnd`'s
   `Provenance`, copied by `client.Copy`) and in the queued list (the
   queued entry's `agentturn:instructions_part` and `agentturn:trust`).
-  `view.Row.Provenance` and `view.Queued.Provenance` carry it. A queued
+  `view.Row.Provenance` and `view.Queued.Provenance` carry it. Live and
+  on the record alike a message is marked by its layers or its trust;
+  a provenance naming only a source marks nothing, as the record cannot
+  tell it from the run's trigger (agentturn#303). A queued
   input marked hidden (`agentturn:visible` false) is not listed, as its
   item is not shown once drained.
 - Fixed: a head on the universal root is the empty line, never read as

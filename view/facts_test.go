@@ -258,3 +258,28 @@ func TestAComposedMessageIsNotThePersons(t *testing.T) {
 		t.Errorf("the live composed row: %+v", live)
 	}
 }
+
+// The live mark matches the record's: layers or a trust (an empty one
+// included) mark a message composed; a source alone does not, since the
+// record holds every input's source and reads such a message as the
+// person's, so it would flip when its entry lands (agentturn#303).
+func TestALiveProvenanceMarksAsTheRecordDoes(t *testing.T) {
+	l := newRecordsLog(t)
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m1", "user", "source only"),
+		Provenance: &agentturn.Provenance{Source: agentturn.Trigger{Kind: "hook", Source: "dax.x"}}})
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m2", "user", "judged clean"),
+		Provenance: &agentturn.Provenance{Trust: &agentturn.Trust{}}})
+	got := map[string]*Provenance{}
+	for _, r := range l.v.Model().Rows {
+		if m, ok := r.Item.(*openresponses.Message); ok {
+			got[m.Text()] = r.Provenance
+		}
+	}
+	if got["source only"] != nil {
+		t.Errorf("a source alone marked the message: %+v", got["source only"])
+	}
+	if p := got["judged clean"]; p == nil || p.Trust == nil || len(p.Trust.Reads) != 0 {
+		t.Errorf("an empty trust did not mark the message: %+v", p)
+	}
+}
