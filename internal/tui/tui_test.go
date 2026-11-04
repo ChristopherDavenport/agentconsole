@@ -705,6 +705,7 @@ func TestTheInputSitsBetweenTwoBarsUnderTheRunLineAndTheScreenStillFits(t *testi
 
 func TestCtrlSlashOrF1ShowsTheKeysAndTakesNoInput(t *testing.T) {
 	a := newApp(t, cfgWith(say(nil, nil, "hi")))
+	a.resize(100, 40) // the whole list, which outgrew the default
 	a.exchange("hello", "hi")
 	if s := a.screen(); !strings.Contains(s, "ctrl+/ for keys") {
 		t.Fatalf("the input does not say how to get the keys:\n%s", s)

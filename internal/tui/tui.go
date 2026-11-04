@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -169,6 +170,8 @@ type Model struct {
 	forksOf string
 	// hist is the input's history (history.go).
 	hist history
+	// exec suspends the program for the editor (editor.go).
+	exec func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 	// The mouse selection (select.go): pressed is whether the left
 	// button is down, pressX and pressY where it went down, sel the region
 	// being dragged over, lines the frame's lines and content the
@@ -201,6 +204,13 @@ type Option func(*Model)
 // it feeds the session pane's total. Without it the pane shows tokens
 // but no cost.
 func WithCost(fn client.Cost) Option { return func(m *Model) { m.cost = fn } }
+
+// WithExec sets how the program suspends for an external command, the
+// editor Ctrl-G opens: tea.ExecProcess by default. A test with no
+// program runs the command at once.
+func WithExec(fn func(*exec.Cmd, tea.ExecCallback) tea.Cmd) Option {
+	return func(m *Model) { m.exec = fn }
+}
 
 // WithHistory gives the input a history to walk with Up and Down: past,
 // oldest first, and record, called with each line sent, before what it
@@ -250,6 +260,7 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 		replied:  map[string]bool{},
 		steers:   &steerQueue{},
 		inputY:   -1,
+		exec:     tea.ExecProcess,
 	}
 	for _, o := range options {
 		o(m)
@@ -399,6 +410,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.relayout()
 		}
+		return m, nil
+	case editedMsg:
+		m.edited(msg)
 		return m, nil
 	case forksMsg:
 		if msg.err != nil {
@@ -670,6 +684,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.curEntry, m.pane, m.panes = "", paneNone, paneState{}
 		m.relayout()
 		return m, nil
+	}
+	if msg.String() == "ctrl+g" {
+		return m, m.editInput()
 	}
 	if q, _, ok := m.question(); ok {
 		return m.questionKey(msg, q)

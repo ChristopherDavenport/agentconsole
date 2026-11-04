@@ -85,6 +85,11 @@ versions may break the API.
   file; `record` is handed each line as it is sent, a slash line or one
   the submit function refuses included. A recalled line is sent only
   with Enter.
+- Added: Ctrl-G opens the input in `$VISUAL`, or `$EDITOR`, on a private
+  temporary file, and puts what was saved back in the input without
+  sending it (#46). The file is removed afterwards; no editor or a
+  failing one is said on the status line, and the key is refused while
+  a question or a permission is answered.
 - Fixed: a head on the universal root is the empty line, never read as
   "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit
