@@ -97,7 +97,9 @@ versions may break the API.
   failing one is said on the status line, and the key is refused while
   a question or a permission is answered. The editor must wait for the
   file (`code --wait`). What the input held when a refusal's reason or
-  a question's note takes it over comes back after the answer.
+  a question's note takes it over comes back after the answer, and
+  after an intent's refusal that lands while a reason is being typed,
+  which drops the half-typed reason as Esc does.
 - Added: a message the host composed from text the person did not write
   (agentturn v0.0.37's `WithProvenance`: instruction layers, a source,
   trust) is shown as such, "composed from LAYERS, sent by SOURCE, LABELS:

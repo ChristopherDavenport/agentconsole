@@ -488,6 +488,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.kind == "abort" {
 			m.aborting = false
 		}
+		if m.refusing {
+			// The reason being typed goes, as Esc would drop it, and the
+			// draft the input held comes back.
+			m.endAnswerText()
+		}
 		m.refusing = false
 		m.err = msg.kind + ": " + msg.err.Error()
 		m.in.Focus()
