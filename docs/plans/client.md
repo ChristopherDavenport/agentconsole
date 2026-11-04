@@ -1296,8 +1296,7 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   store (a foreign agent's synthesized one) need not offer it. It
   returns summaries, not sessions: the header says what each is, and
   nothing is read whole until the tree opens one. `RecordOf` returns a
-  `Lister` when the recorder's store is an `agentsession.Store`, capped
-  at 256 sessions.
+  `Lister` (a recorder's store always lists), capped at 256 sessions.
 - **A fork is a listed session with a `base` and no `spawned_by`.**
   Subsessions, children a host started and judges also name the
   session as parent; they are reached through its links, and a listed

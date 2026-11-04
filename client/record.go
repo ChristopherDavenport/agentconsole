@@ -19,37 +19,26 @@ import (
 //
 // The followed session is rec's at the call: a head move rebases the
 // recorder within its session, which a follower sees as a head change.
-// When the store is an [agentsession.Store] the record is a [Lister]
-// too, listing through the store's List.
+// The record is a [Lister] too, listing through the store's List.
 func RecordOf(rec *session.Recorder) (Record, error) {
 	f, ok := rec.Store().(agentsession.Follower)
 	if !ok {
 		return nil, fmt.Errorf("client: store %T cannot be followed", rec.Store())
 	}
-	r := record{rec: rec, store: f}
-	if st, ok := rec.Store().(agentsession.Store); ok {
-		return listing{record: r, st: st}, nil
-	}
-	return r, nil
+	return record{rec: rec, store: f}, nil
 }
 
 // maxListed bounds a listing: a tree is read at a glance.
 const maxListed = 256
 
-// listing is a record over a store that lists.
-type listing struct {
-	record
-	st agentsession.Store
-}
-
 // List lists the sessions whose header names id, the followed session
 // for "", as parent_session, newest first, at most maxListed.
-func (l listing) List(ctx context.Context, id string) ([]agentsession.Summary, error) {
+func (r record) List(ctx context.Context, id string) ([]agentsession.Summary, error) {
 	if id == "" {
-		id = l.rec.SessionID()
+		id = r.rec.SessionID()
 	}
 	var out []agentsession.Summary
-	for sum, err := range l.st.List(ctx, agentsession.ListFilter{ParentSession: id, Limit: maxListed}) {
+	for sum, err := range r.rec.Store().List(ctx, agentsession.ListFilter{ParentSession: id, Limit: maxListed}) {
 		if err != nil {
 			return out, err
 		}

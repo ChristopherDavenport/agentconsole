@@ -72,8 +72,7 @@ versions may break the API.
 - Added: `client.Lister`, an optional capability of a `client.Record`:
   `List(ctx, parentSession)` gives the summaries of the sessions whose
   header names the session as parent (agentsession RFC 0003, List).
-  `RecordOf` offers it when the recorder's store is an
-  `agentsession.Store`.
+  `RecordOf`'s record offers it.
 - Added: the tree lists the sessions forked from the followed one under
   "forks of this session", each with the entry it was forked at, when
   the record can list them (#6). A fork has a base and no spawned_by;
