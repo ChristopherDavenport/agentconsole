@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,11 @@ type Entry struct {
 	Call *Call
 	// Fold is set for a compaction.
 	Fold *Fold
+	// Redacted is set for an entry a redaction wrote, and Spans are the
+	// positions of the original's entries it was made from, in the
+	// original's file order: none for an entry the redaction added.
+	Redacted bool
+	Spans    []agentsession.Span
 }
 
 // Response is a response entry and how it verifies.
@@ -168,6 +174,9 @@ func (in *Inspector) Entry(ctx context.Context, sessionID, tail, entryID string,
 	}
 	e := path[at]
 	out := Entry{ID: entryID, Type: e.EntryType(), Time: e.Base().Timestamp}
+	if spans, ok := agentsession.RedactedOf(e); ok {
+		out.Redacted, out.Spans = true, slices.Clone(spans)
+	}
 	switch x := e.(type) {
 	case *agentsession.ItemEntry:
 		out.Title = itemTitle(x.Item)

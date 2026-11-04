@@ -78,8 +78,16 @@ versions may break the API.
   so readers verify it with no exception for redacted entries. The
   inspect pane's verify tally, which has none, no longer reports a
   redacted session made under that rule as FAILED, which answers the
-  report in #38; the pane rows #38 suggests for a redaction's origin
-  and spans are not added.
+  report in #38.
+- Added: the session pane of a redacted session says so (#38): "redacted
+  from PSEUDONYM (profile P)", with its counts of redacted and native
+  entries. Since format 0.19 `redacted_from.session` is the original's
+  keyed pseudonym, so the pane never offers it as a session to open. A
+  session whose ID is not the one its `redacted_from` derives
+  (`agentsession.CheckRedactedID`) is noted, as `agentsession verify`
+  notes it, and does not fail. An entry's pane gives the original
+  entries a redacted entry was made from ("made from original entries
+  3-7"), or says the redaction added it.
 
 ## v0.0.14 - 2026-10-18
 

@@ -3,9 +3,11 @@ package inspect
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
@@ -96,6 +98,9 @@ func (e Entry) Lines() []string {
 	}
 	if e.KeptFromModel {
 		add("note:     kept from the model: the context leaves it out of every request")
+	}
+	if e.Redacted {
+		add("redacted: %s", spansText(e.Spans))
 	}
 	if c := e.Call; c != nil {
 		add("")
@@ -298,6 +303,17 @@ func (s Session) Lines() []string {
 	if s.SpawnedBy != "" {
 		add("spawned:  by call %s", s.SpawnedBy)
 	}
+	if r := s.Redaction; r != nil {
+		from := "redacted from " + orNone(r.From)
+		if r.Profile != "" {
+			from += " (profile " + r.Profile + ")"
+		}
+		add("redacted: %s; %d redacted, %d native entries", from, r.Redacted, r.Native)
+		add("          the original is named by its pseudonym: not a session to open")
+		if r.IDErr != "" {
+			add("          note: %s", clip(r.IDErr, 200))
+		}
+	}
 	v := s.Verify
 	switch {
 	case v.Responses == 0:
@@ -403,4 +419,25 @@ func underScope(scope string) string {
 		return ""
 	}
 	return " under " + scope
+}
+
+// spansText says what original entries a redacted entry was made from:
+// "made from original entry 2", "made from original entries 3-7, 9", or
+// "added by the redaction" for none.
+func spansText(spans []agentsession.Span) string {
+	if len(spans) == 0 {
+		return "added by the redaction, made from no original entry"
+	}
+	parts := make([]string, len(spans))
+	for i, sp := range spans {
+		parts[i] = strconv.Itoa(sp.From)
+		if sp.To != sp.From {
+			parts[i] += "-" + strconv.Itoa(sp.To)
+		}
+	}
+	noun := "entries"
+	if len(spans) == 1 && spans[0].From == spans[0].To {
+		noun = "entry"
+	}
+	return "made from original " + noun + " " + strings.Join(parts, ", ")
 }
