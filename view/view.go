@@ -187,6 +187,11 @@ type Call struct {
 	// record's output entry is marked failed (format 0.14), or, live,
 	// the tool ended with an error.
 	Failed bool
+	// HeldBeside marks a deferred call held only beside another call's
+	// question (agentturn's ToolDecision.Held, the record's
+	// agentturn:held): it is not asked about, and the answers to its
+	// batch decide it.
+	HeldBeside bool
 	// Withdrawn is the reason of the latest withdrawal of the call's
 	// dispatch (a reject carrying withdrawn): the hand-off was taken
 	// back before the tool ran, and the call is read as never started.
@@ -1448,6 +1453,12 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 			}
 			return c
 		}
+		if rec.Held() {
+			// Waiting on an answer, as the record says after a restart
+			// too: never drawn as open or running.
+			c.State = CallDeferred
+			c.HeldBeside = holdMember(rec.Decisions[len(rec.Decisions)-1], session.HeldMember, false)
+		}
 	}
 	for _, o := range v.calls {
 		switch {
@@ -1456,6 +1467,9 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 				c.State = o.state
 			}
 			c.Partial, c.Output, c.Failed = o.partial, o.output, o.failed
+			if o.state == CallDeferred && o.held {
+				c.HeldBeside = true
+			}
 			if o.reason != "" {
 				c.Reason = o.reason
 			}

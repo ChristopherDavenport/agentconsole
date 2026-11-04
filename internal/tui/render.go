@@ -258,7 +258,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	switch {
 	case moving(c):
 		name, state = runStyle.Render(dot(spin)+" "+c.Name), runStyle.Render(state)
-	case c.State == view.CallDeferred:
+	case c.State == view.CallDeferred && !c.HeldBeside:
 		name = warnStyle.Render("◆ " + c.Name)
 	}
 	r := tools[c.Name]
@@ -308,6 +308,10 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	}
 	switch c.State {
 	case view.CallDeferred:
+		if c.HeldBeside {
+			b.WriteString("\n" + pad + "  " + dimStyle.Render("waits on its batch's question: the answers decide it"))
+			break
+		}
 		q := c.Reason
 		if q == "" {
 			q = "waiting for permission"

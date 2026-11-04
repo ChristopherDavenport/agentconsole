@@ -144,7 +144,12 @@ func TestARestartAsksOnlyAboutTheAskedCall(t *testing.T) {
 	if p := m.Permissions[0]; p.Subject != "git push" || p.Question != "git push touches the remote" {
 		t.Errorf("the asked call: %+v", p)
 	}
-	if c := callRow(t, m, "c_held").Call; c.State == CallDeferred {
-		t.Errorf("the held call reads as asked about: %+v", c)
+	// It waits on the batch's question, as on the live path: deferred,
+	// not open or running, and marked as held beside the question.
+	if c := callRow(t, m, "c_held").Call; c.State != CallDeferred || !c.HeldBeside {
+		t.Errorf("the held call: %+v, want deferred and held beside", c)
+	}
+	if c := callRow(t, m, "c_asked").Call; c.State != CallDeferred || c.HeldBeside {
+		t.Errorf("the asked call: %+v", c)
 	}
 }

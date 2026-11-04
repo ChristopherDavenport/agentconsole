@@ -60,7 +60,10 @@ versions may break the API.
   no longer asked about, and the asked call's question names the part
   of it the hold records (`agentturn:subject`), as the live end already
   did (#9). The view reads the hold decision's members, so no media is
-  resolved and a sidecar session needs no blob reader for it.
+  resolved and a sidecar session needs no blob reader for it. A held
+  call is drawn deferred after a restart as on the live path, never as
+  open or running, and `view.Call.HeldBeside` marks one held only beside
+  another's question: "waits on its batch's question".
 - Fixed: a call's detail in a fork shows the dispatch of a call in the
   fork's prefix, which the session the fork was made from holds
   (`agentsession.OriginDispatches`, read through the record): "dispatched
