@@ -1324,7 +1324,11 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   and a line the host refuses are kept too. Up on the input's first row
   and Down on its last walk it, newest first; the draft is kept and
   comes back past the newest. A recalled line is only put in the input.
-  Without the option Up and Down only move the input's cursor.
+  Without the option Up and Down only move the input's cursor. A line
+  may hold a secret, and the client does not judge which: `record` is
+  where the host leaves out what it will not keep (its redaction rules,
+  a slash command it knows takes a token); the walk keeps every line of
+  this run in memory only.
   `record` runs on the program's goroutine, like a renderer, and must
   return promptly.
 - **Ctrl-G edits the input in the user's editor.** `$VISUAL`, or

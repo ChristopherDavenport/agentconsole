@@ -159,7 +159,10 @@ func WithSubmit(fn func(ctx context.Context, l Line) (Submit, error)) Option {
 // (oldest first), and bring back what was being typed. record is called
 // with each line as it is sent, slash lines and lines the submit
 // function refuses included, so the host keeps it, in a file of its own
-// (dax keeps ~/.dax/history); the client keeps no file. record runs on
+// (dax keeps ~/.dax/history); the client keeps no file. A line may hold
+// a secret (a slash command's token, a pasted key): what to keep is the
+// host's to decide, and record may leave any line out of its file; the
+// walk still offers it until the program ends. record runs on
 // the program's goroutine and must return promptly; nil records
 // nothing. A line from the history is only put in the input: Enter
 // sends it.
