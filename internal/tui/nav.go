@@ -487,7 +487,7 @@ func (m *Model) treeItems() []treeItem {
 			}
 			// A fork is a conversation of its own: it opens read only,
 			// and is never continued from here.
-			out = append(out, treeItem{group: "forks of this session", text: "  fork: session " + f.session + " (forked at entry " + shortID(f.base) + ")",
+			out = append(out, treeItem{group: "sessions made from this one", text: "  session " + f.session + " (made at entry " + shortID(f.base) + ")",
 				session: f.session, title: "fork " + shortID(f.session)})
 		}
 	}
@@ -658,10 +658,12 @@ func (m *Model) noteHead(entry string) {
 	m.note = "head moved to " + shortID(entry) + " at " + time.Now().Format("15:04:05")
 }
 
-// fork is a session forked from the followed one: a listed session whose
-// header has a base and no spawned_by. A subsession, a child the host
-// started and a judge name the session as parent too, and are reached
-// through its links.
+// fork is a session made from the followed one at a base: a listed
+// session whose header has a base and no spawned_by, and that no link of
+// the session names. A header cannot tell a fork from a judge or a
+// subagent (agentsession's ListFilter); the links can, and a session
+// they name is shown with them, so what is left is most likely a fork,
+// and is labelled no more than "made from this one".
 type fork struct {
 	session, base string
 }

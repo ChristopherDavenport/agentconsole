@@ -1298,12 +1298,17 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   store (a foreign agent's synthesized one) need not offer it. It
   returns summaries, not sessions: the header says what each is, and
   nothing is read whole until the tree opens one. `RecordOf` returns a
-  `Lister` (a recorder's store always lists), capped at 256 sessions.
-- **A fork is a listed session with a `base` and no `spawned_by`.**
-  Subsessions, children a host started and judges also name the
-  session as parent; they are reached through its links, and a listed
-  session a link already names is not listed again. The tree lists the
-  forks under "forks of this session", by their full ID (two forks made
+  `Lister` (a recorder's store always lists), capped at 256 sessions. A
+  record that scopes what `Read` may read must scope `List` alike, or not
+  offer it.
+- **A listed session with a `base`, no `spawned_by` and no link is read
+  as made from this one.** A header cannot tell a fork from a judge or
+  a subagent (agentsession's `ListFilter`); only the parent's links
+  can. Subsessions, children a host started and judges are reached
+  through those links, and a listed session a link already names is
+  not listed again; what is left is most likely a fork, and the tree
+  says no more than that: "sessions made from this one", by their full
+  ID (two forks made
   in one millisecond share the 8 characters the tree shows of other
   sessions) and the entry each was forked at, in a command when the
   tree opens, never from `Update`. A fork is a conversation of its own:

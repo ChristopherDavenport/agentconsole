@@ -64,13 +64,13 @@ func forkedTwice(t *testing.T, wrapRecord func(client.Record) client.Record) (*a
 func TestTheTreeListsTheSessionsForkedFromThisOne(t *testing.T) {
 	a, forks, bases := forkedTwice(t, nil)
 	a.key("ctrl+t")
-	s := a.waitFor("the forks", has("forks of this session", "fork: session "+forks[0], "fork: session "+forks[1]))
+	s := a.waitFor("the forks", has("sessions made from this one", "session "+forks[0]+" (made at", "session "+forks[1]+" (made at"))
 	for i, f := range forks {
 		if l := lineWith(s, f); !strings.Contains(l, entryID(bases[i])) {
 			t.Errorf("fork %s does not name its base %s: %q", f, bases[i], l)
 		}
 	}
-	if n := strings.Count(s, "fork: session"); n != 2 {
+	if n := strings.Count(s, "(made at entry"); n != 2 {
 		t.Errorf("%d forks listed, want 2:\n%s", n, s)
 	}
 }
@@ -81,7 +81,7 @@ func TestARecordThatCannotListShowsNoForks(t *testing.T) {
 	a, _, _ := forkedTwice(t, func(r client.Record) client.Record { return bareRecord{r} })
 	a.key("ctrl+t")
 	s := a.waitFor("the tree", has("branches of session"))
-	if strings.Contains(s, "fork") {
+	if strings.Contains(s, "made from this one") {
 		t.Errorf("forks listed without a lister:\n%s", s)
 	}
 }

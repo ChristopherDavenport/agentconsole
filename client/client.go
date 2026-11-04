@@ -51,8 +51,13 @@ type Source interface {
 // optional, since a record that only follows one session (a foreign
 // agent's synthesized one) has no store to list; a client tests for it
 // and shows nothing it cannot list. The empty ID is the followed
-// session. The header says which each is: a fork has a base and no
-// spawned_by.
+// session. A header cannot say which each is (agentsession's
+// ListFilter): a judge, a subagent and a fork all name their parent, and
+// only the parent's links tell them apart. A client reads a listed
+// session that no link of the parent names, with a base and no
+// spawned_by, as made from it at that base, most likely a fork. A record
+// that scopes what Read may read must scope List alike, or not offer
+// it.
 type Lister interface {
 	List(ctx context.Context, parentSession string) ([]agentsession.Summary, error)
 }

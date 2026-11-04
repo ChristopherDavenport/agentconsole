@@ -76,11 +76,13 @@ versions may break the API.
   `List(ctx, parentSession)` gives the summaries of the sessions whose
   header names the session as parent (agentsession RFC 0003, List).
   `RecordOf`'s record offers it.
-- Added: the tree lists the sessions forked from the followed one under
-  "forks of this session", each with the entry it was forked at, when
-  the record can list them (#6). A fork has a base and no spawned_by;
-  subsessions and children a host started stay with the links. A fork
-  opens read only.
+- Added: the tree lists the sessions made from the followed one under
+  "sessions made from this one", each with the entry it was made at,
+  when the record can list them (#6): a listed session with a base, no
+  spawned_by and no link of this session naming it, most likely a fork,
+  since a header alone cannot tell a fork from a judge. Subsessions and
+  children a host started stay with the links. Such a session opens
+  read only.
 - Added: `console.WithHistory(past, record)`: Up on the input's first
   line and Down on its last walk the lines sent, newest first, from the
   host's history on, and bring the draft back (#44). The host keeps the
