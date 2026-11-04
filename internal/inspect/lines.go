@@ -168,8 +168,11 @@ func (e Entry) Lines() []string {
 			add("  grants:   no skill grant in force")
 		}
 		for _, g := range c.Grants {
-			s := fmt.Sprintf("  grant:    %s allowed %s (entry %s)", g.Skill, g.Rule, short(g.Since))
-			if g.Ended != "" {
+			s := fmt.Sprintf("  grant:    %s allowed %s%s (entry %s)", g.Skill, g.Rule, underScope(g.Scope), short(g.Since))
+			switch {
+			case g.Replaced:
+				s += fmt.Sprintf(", replaced later at %s", short(g.Ended))
+			case g.Ended != "":
 				s += fmt.Sprintf(", revoked later at %s", short(g.Ended))
 			}
 			l = append(l, s)
@@ -366,10 +369,21 @@ func (s Session) Lines() []string {
 			break
 		}
 		state := "in force"
-		if g.Ended != "" {
+		switch {
+		case g.Replaced:
+			state = "replaced at " + short(g.Ended)
+		case g.Ended != "":
 			state = "revoked at " + short(g.Ended)
 		}
-		add("grants:   %s allowed %s, %s", g.Skill, g.Rule, state)
+		add("grants:   %s allowed %s%s, %s", g.Skill, g.Rule, underScope(g.Scope), state)
 	}
 	return l
+}
+
+// underScope names the grant scope a grant was made under, if any.
+func underScope(scope string) string {
+	if scope == "" {
+		return ""
+	}
+	return " under " + scope
 }

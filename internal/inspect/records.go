@@ -92,6 +92,10 @@ type Verdict struct {
 	Held       bool   `json:"held,omitempty"`
 	Subject    string `json:"subject,omitempty"`
 	Confined   string `json:"confined,omitempty"`
+	// Grant, with Source and Scope, says what a grant or a revocation
+	// did (agentpolicy v0.0.19).
+	Grant string `json:"grant,omitempty"`
+	Scope string `json:"scope,omitempty"`
 }
 
 func verdictOf(e agentsession.Entry) (Verdict, bool) {
@@ -113,48 +117,103 @@ type Grant struct {
 	// granted under.
 	Skill  string
 	Source string
-	Rule   string
+	// Scope is the grant scope the rule was granted under, "" for none
+	// or a record that does not say (agentpolicy before v0.0.19).
+	Scope string
+	Rule  string
 	// Since is the verdict entry that recorded the grant.
 	Since string
 	// Ended is the verdict entry that revoked the source's grants, "" while
-	// they hold on the whole path.
-	Ended string
+	// they hold on the whole path; Replaced says it was the activation of
+	// the source's set again under the scope, not a revocation.
+	Ended    string
+	Replaced bool
 }
 
-// grants replays the path's verdicts: each "granted <rule>" allow of a
-// skill's source makes a grant, and the revocation verdict of a source
-// ends the ones it holds. It returns every grant, with the index on the
-// path it began and ended at (-1 for none).
+// The kinds agentpolicy (v0.0.19, RFC 0001 draft 0.4, The record)
+// writes in a grant's or a revocation's grant member. A reader takes
+// the kind, source and scope from the members and parses the reason
+// only for a record written before them.
+const (
+	kindGrant       = "grant"
+	kindGrantOver   = "grant_over"
+	kindGrantSet    = "grant_set"
+	kindActivate    = "activate"
+	kindRevoke      = "revoke"
+	kindRevokeScope = "revoke_scope"
+)
+
+// grantKey is a set's key in agentpolicy's engine: its scope and its
+// source. A grant made by Engine.Grant or GrantOver joins the policy,
+// which no revocation touches, and is keyed apart (always).
+type grantKey struct {
+	scope, source string
+	always        bool
+}
+
+// grants replays the path's verdicts. Each allow a skill's source
+// granted makes a grant; an activation replaces its source's set under
+// its scope, a revocation ends its source's set under its scope, and a
+// scope's revocation every set of the scope. A record with no grant
+// member is read by its reason, as agentpolicy wrote it before
+// v0.0.19: there a scope's revocation, which named no scope a grant
+// could be matched to, ends every grant. It returns every grant, with
+// the index on the path it began and ended at (-1 for none).
 func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
-	live := map[string][]int{} // source -> indexes into all
+	live := map[grantKey][]int{} // set -> indexes into all
 	reads := skillReads(path)
+	end := func(i int, v Verdict, match func(grantKey) bool) {
+		for k, gs := range live {
+			if !match(k) {
+				continue
+			}
+			for _, g := range gs {
+				all[g].Ended, all[g].Replaced, ended[g] = v.Entry, v.Grant == kindActivate, i
+			}
+			delete(live, k)
+		}
+	}
+	add := func(i int, v Verdict, k grantKey) {
+		skill, ok := skillOf(v.Source, reads)
+		if !ok {
+			return
+		}
+		all = append(all, Grant{Skill: skill, Source: v.Source, Scope: v.Scope, Rule: v.Rule, Since: v.Entry})
+		began, ended = append(began, i), append(ended, -1)
+		live[k] = append(live[k], len(all)-1)
+	}
 	for i, e := range path {
 		v, ok := verdictOf(e)
 		if !ok {
 			continue
 		}
+		if v.Grant != "" {
+			set := grantKey{scope: v.Scope, source: v.Source}
+			switch v.Grant {
+			case kindActivate, kindRevoke:
+				end(i, v, func(k grantKey) bool { return k == set })
+			case kindRevokeScope:
+				end(i, v, func(k grantKey) bool { return !k.always && k.scope == v.Scope })
+			case kindGrantSet:
+				// A refused rule is recorded as a block of the set.
+				if v.Action == "allow" && v.Rule != "" {
+					add(i, v, set)
+				}
+			case kindGrant, kindGrantOver:
+				if v.Action == "allow" && v.Rule != "" {
+					add(i, v, grantKey{source: v.Source, always: true})
+				}
+			}
+			continue
+		}
 		switch {
 		case strings.HasPrefix(v.Reason, revokedScopePrefix) || v.Reason == revokedUnscoped:
-			for src, gs := range live {
-				for _, g := range gs {
-					all[g].Ended, ended[g] = v.Entry, i
-				}
-				delete(live, src)
-			}
+			end(i, v, func(grantKey) bool { return true })
 		case strings.HasPrefix(v.Reason, revokedPrefix):
 			src := strings.TrimPrefix(v.Reason, revokedPrefix)
-			for _, g := range live[src] {
-				all[g].Ended, ended[g] = v.Entry, i
-			}
-			delete(live, src)
+			end(i, v, func(k grantKey) bool { return k.source == src })
 		case v.Action == "allow" && v.Rule != "" && strings.HasPrefix(v.Reason, "granted "):
-			skill, ok := skillOf(v.Source, reads)
-			if !ok {
-				continue
-			}
-			all = append(all, Grant{Skill: skill, Source: v.Source, Rule: v.Rule, Since: v.Entry})
-			began, ended = append(began, i), append(ended, -1)
-			live[v.Source] = append(live[v.Source], len(all)-1)
+			add(i, v, grantKey{source: v.Source})
 		}
 	}
 	return all, began, ended

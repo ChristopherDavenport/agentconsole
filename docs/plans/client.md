@@ -1250,16 +1250,41 @@ sessions built by hand.
   embedder that takes this floor (dax, by version selection) with it. A
   reader built on agentsession before v0.0.24 refuses those files.
 
+## Decided in implementation, the record's new call and item facts
+
+The sibling bump to agentsession v0.0.37 (format 0.20) and agentturn
+v0.0.36 brought facts the record now carries; the view keeps each.
+
+- **`view.CallReturned`.** A call with a `result` and no output ran;
+  agentturn's `Pending` gives it as `PendingReturned` and `Resume`
+  refuses an approval of it. The view lists it with `CutOff`, reason
+  `returned`, `MayHaveRun` set, never among `Permissions`, and its row
+  shows the result as its output.
+- **`view.Call.Failed` and `Withdrawn`.** The failed call on the record,
+  an open question until format 0.14, is the output entry's `failed`.
+  A withdrawal (`reject` with `withdrawn` after a dispatch) is read as
+  agentsession reads it, a hand-off never made; the row says so and
+  keeps the reason.
+- **`view.Row.CopiedFrom` and `LeftOut`.** A copied item is context made
+  in another session. What the model is not sent is computed from the
+  `omit` in force at the end of the viewed line
+  (`agentsession.BuildContext`, only when the line holds an `omit`): an
+  output sent as `agentturn.QuarantinedOutput` is
+  `LeftOutQuarantined`, any other placeholder `LeftOutPlaceholder`, an
+  item left out `LeftOutOmitted`. The live `QuarantineAdded` event is
+  not read: the recorder writes its `omit`, and the record is the
+  truth.
+- **A steer does not go through `agentturn.Deliverer`.** Deliver waits
+  until the run takes the steer, and the agent's queued event is held
+  off by a quiet tool, so a controller built on it could not answer
+  promptly: the TUI's ordered send of a second steer would wait out the
+  tool call. `Direct` keeps `Queue` until a delivery that returns once
+  it is accepted exists.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
   once. A reviewer's argument edit, which agentpolicy supports, has no
   ACP shape. It shows only on native backends until ACP has one.
-- **A failed call on the record.** A tool that failed can be named on
-  the live row (`ToolFinished.Err`), but the call's entry carries only
-  the output the model saw, so once the entry lands the row cannot say
-  the call failed. Distinguishing failed calls after the fact needs a
-  field on the call's record, an `agentsession` change; until then a
-  collapsed failed call shows only its line count like any other.
 - **The repository's name.** `agentconsole` is a working name. It is
   fixed before the first push, since it is the module path.

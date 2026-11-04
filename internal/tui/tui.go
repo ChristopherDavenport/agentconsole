@@ -726,7 +726,7 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Mode
 			}
 			m.in.Reset()
 			m.refusingQ, m.notingQ = false, false
-			return m.reply(q, agenttool.Answer{Action: action, Note: note})
+			return m.reply(q, agenttool.Answer{Action: action, Note: note, By: agenttool.ByHuman})
 		case tea.KeyEscape:
 			m.in.Reset()
 			m.refusingQ, m.notingQ = false, false
@@ -738,7 +738,7 @@ func (m *Model) questionKey(msg tea.KeyPressMsg, q agentturn.Question) (tea.Mode
 	switch msg.String() {
 	case "y", "Y":
 		if !asksForForm(q) {
-			return m.reply(q, agenttool.Answer{Action: agenttool.ActionAccept})
+			return m.reply(q, agenttool.Answer{Action: agenttool.ActionAccept, By: agenttool.ByHuman})
 		}
 	case "a", "A":
 		if !asksForForm(q) {

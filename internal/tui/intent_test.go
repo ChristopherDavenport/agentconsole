@@ -202,7 +202,7 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 	a.typeText("a")
 	a.typeText("only the notes")
 	a.key("enter")
-	if in, ok := next().(client.Reply); !ok || in.ID != "q1" || in.Answer.Action != agenttool.ActionAccept || in.Answer.Note != "only the notes" {
+	if in, ok := next().(client.Reply); !ok || in.ID != "q1" || in.Answer.Action != agenttool.ActionAccept || in.Answer.Note != "only the notes" || in.Answer.By != agenttool.ByHuman {
 		t.Fatalf("intent = %#v, want q1 accepted with the note", in)
 	}
 	src.emit(&agentturn.QuestionClosed{ID: "q1", RunID: "run3"})

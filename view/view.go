@@ -134,6 +134,12 @@ const (
 	// CallCutOff: an abort or a failure ended the run with the call
 	// unanswered. It is not a question; the next prompt answers it.
 	CallCutOff
+	// CallReturned: the call's tool returned and the record holds its
+	// result (format 0.15), but the output did not join the
+	// conversation before the run stopped. It ran; it is never asked
+	// about or run again, and Output is the result the harness that
+	// continues will append.
+	CallReturned
 )
 
 // String names the state.
@@ -151,6 +157,8 @@ func (s CallState) String() string {
 		return "deferred"
 	case CallCutOff:
 		return "cut_off"
+	case CallReturned:
+		return "returned"
 	}
 	return "unknown"
 }
@@ -175,6 +183,15 @@ type Call struct {
 	// Committed is set when the output is on the record, so the call is
 	// answered for good; before that Output is live.
 	Committed bool
+	// Failed is set when the output reports that the call failed: the
+	// record's output entry is marked failed (format 0.14), or, live,
+	// the tool ended with an error.
+	Failed bool
+	// Withdrawn is the reason of the latest withdrawal of the call's
+	// dispatch (a reject carrying withdrawn): the hand-off was taken
+	// back before the tool ran, and the call is read as never started.
+	// "" when there is none.
+	Withdrawn string
 	// Verdict and Reason are the last policy decision the record holds
 	// for the call, and Reason the question of a deferred one.
 	Verdict string
@@ -198,12 +215,36 @@ type Row struct {
 	KeptFromModel bool
 	ResponseID    string
 	Item          openresponses.Item
+	// CopiedFrom is the session a copied item was taken from (format
+	// 0.15's copied_from): context this session holds, made in another
+	// session, not this session's own item or call. "" for an item of
+	// this session.
+	CopiedFrom string
+	// LeftOut says the model's context at the viewed line leaves the
+	// item out or sends a placeholder for it, though the record holds
+	// it: LeftOutQuarantined, LeftOutOmitted or LeftOutPlaceholder. ""
+	// when the item is sent whole.
+	LeftOut string
 	// Call is set on the row of a function call.
 	Call *Call
 	// Fold is set on the row of a compaction entry: the point where the
 	// record folds what came before into a summary, which Item carries.
 	Fold *Fold
 }
+
+// What a row's LeftOut says.
+const (
+	// LeftOutQuarantined: a guard quarantined the output as untrusted,
+	// so the model is sent [agentturn.QuarantinedOutput] in its place.
+	LeftOutQuarantined = "quarantined"
+	// LeftOutOmitted: the omit in force leaves the item out of the
+	// model's context (a host's trim, a quarantined item that is not an
+	// output, reasoning written under another model).
+	LeftOutOmitted = "omitted"
+	// LeftOutPlaceholder: the model is sent a placeholder text in place
+	// of the output or of image parts (a host's trim of old results).
+	LeftOutPlaceholder = "placeholder"
+)
 
 // Fold is what a compaction entry says it folded.
 type Fold struct {
@@ -326,6 +367,7 @@ type ovCall struct {
 	output   string
 	reason   string
 	finished bool
+	failed   bool
 	// held and subject are from the decision that deferred the call:
 	// held beside another call's question, and the part it is about.
 	held    bool
@@ -461,7 +503,7 @@ func (v *View) Record(ch agentsession.Change) {
 		v.rebuild(ch.Session)
 		v.reconcilePending()
 	case agentsession.Appended:
-		v.setSession(ch.Session, "")
+		v.setSession(ch.Session, leafOf(ch.Session))
 		v.land(ch.Entry)
 		// Any entry can move the viewed line (the follower's leaf is
 		// its newest entry), so what waits is read again.
@@ -575,6 +617,11 @@ func (v *View) reconcilePending() {
 			continue
 		}
 		p.Reason = last.Reason
+		if c.Returned() {
+			// It ran and its result is recorded: owed that output, never
+			// an approval, which Resume refuses (ErrCallAnswered).
+			p.Reason, p.MayHaveRun = string(agentturn.PendingReturned), true
+		}
 		v.cut = append(v.cut, p)
 	}
 }
@@ -611,7 +658,7 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.parent = map[string]string{}
 	v.links = nil
 	v.runTip, v.tipOwner, v.runOrder = map[string]string{}, map[string]string{}, nil
-	v.setSession(s, "")
+	v.setSession(s, leafOf(s))
 	v.replaying = true
 	for _, e := range s.Entries() {
 		v.land(e)
@@ -619,14 +666,21 @@ func (v *View) rebuild(s *agentsession.Session) {
 	v.replaying = false
 }
 
+// leafOf is s's head, "" for none or the root.
+func leafOf(s *agentsession.Session) string {
+	if s == nil {
+		return ""
+	}
+	return s.Leaf()
+}
+
+// setSession takes s with its head at leaf, "" for the universal root:
+// the empty context, never "no head".
 func (v *View) setSession(s *agentsession.Session, leaf string) {
 	if s == nil {
 		return
 	}
 	v.session = s.ID()
-	if leaf == "" {
-		leaf = s.Leaf()
-	}
 	v.leaf = resting(s, leaf)
 	// The session is the follower's own and valid until the next step,
 	// so the path and the leaves are copied out.
@@ -674,6 +728,9 @@ func resting(s *agentsession.Session, id string) string {
 // its run ended; but a head moved back to an interior item must show the
 // line as it stood there, with the model in force there.
 func lineEnd(s *agentsession.Session, id string) string {
+	if id == "" {
+		return ""
+	}
 	for hops := 0; hops <= s.Len(); hops++ {
 		next := ""
 		for _, c := range s.Children(id) {
@@ -1163,8 +1220,15 @@ func (v *View) toolFinished(e *agentturn.ToolEnd) {
 		}
 	case e.Blocked:
 		c.state = CallBlocked
+	case e.Cut:
+		// A cancellation or a failure cut the call off before it had
+		// a result of its own: no output is appended for it.
+		c.state, c.failed = CallCutOff, e.Err != nil
+		if e.Err != nil && c.output == "" {
+			c.output = e.Err.Error()
+		}
 	default:
-		c.state = CallEnded
+		c.state, c.failed = CallEnded, e.Err != nil
 		if e.Err != nil && c.output == "" {
 			c.output = e.Err.Error()
 		}
@@ -1221,6 +1285,7 @@ func (v *View) Model() Model {
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c
 	}
+	leftOut := leftOutOf(v.path)
 	var settings agentsession.Settings
 	for _, e := range v.path {
 		switch x := e.(type) {
@@ -1230,7 +1295,10 @@ func (v *View) Model() Model {
 			if !x.IsVisible() {
 				continue
 			}
-			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item}
+			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID]}
+			if x.CopiedFrom != nil {
+				row.CopiedFrom = x.CopiedFrom.Session
+			}
 			if fc, ok := x.Item.(*openresponses.FunctionCall); ok {
 				row.Call = v.callView(fc, committed[x.ID])
 				row.Call.Schema = schemaOf(settings.Tools, fc.Name)
@@ -1270,6 +1338,44 @@ func (v *View) Model() Model {
 	return m
 }
 
+// leftOutOf maps the item entries the model's context at the end of
+// path leaves out or sends a placeholder for to what it does, as the
+// omit in force says. A path with no omit costs a walk and no context.
+func leftOutOf(path []agentsession.Entry) map[string]string {
+	omits := false
+	for _, e := range path {
+		if c, ok := e.(*agentsession.ConfigEntry); ok && c.Omit != nil {
+			omits = true
+			break
+		}
+	}
+	if !omits {
+		return nil
+	}
+	ctx, err := agentsession.BuildContext(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, o := range ctx.OmittedItems {
+		out[o.Entry.ID] = LeftOutOmitted
+	}
+	sent := map[string]openresponses.Item{}
+	for i, e := range ctx.ItemEntries {
+		if i < len(ctx.Items) {
+			sent[e.Base().ID] = ctx.Items[i]
+		}
+	}
+	for _, r := range ctx.ReplacedItems {
+		why := LeftOutPlaceholder
+		if o, ok := sent[r.Entry.ID].(*openresponses.FunctionCallOutput); ok && o.Output.String() == agentturn.QuarantinedOutput {
+			why = LeftOutQuarantined
+		}
+		out[r.Entry.ID] = why
+	}
+	return out
+}
+
 // schemaOf is the parameters of the function tool named name in tools,
 // nil when there is none, copied: a Model shares nothing with the view.
 func schemaOf(tools openresponses.Tools, name string) json.RawMessage {
@@ -1292,11 +1398,26 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 			d := rec.Decisions[n-1]
 			c.Verdict, c.Reason = d.Verdict, d.Reason
 		}
+		if n := len(rec.Withdrawn); n > 0 && rec.Dispatch == nil {
+			if r := rec.Withdrawn[n-1].Reject; r != nil {
+				c.Withdrawn = r.Reason
+			}
+			if c.Withdrawn == "" {
+				c.Withdrawn = "withdrawn"
+			}
+		}
 		if rec.Output != nil {
 			if out, ok := rec.Output.Item.(*openresponses.FunctionCallOutput); ok {
-				c.State, c.Output, c.Committed = CallEnded, out.Output.String(), true
+				c.State, c.Output, c.Committed, c.Failed = CallEnded, out.Output.String(), true, rec.Failed()
 				return c
 			}
+		}
+		if rec.Returned() {
+			c.State = CallReturned
+			if out, ok := rec.Result.Item.(*openresponses.FunctionCallOutput); ok {
+				c.Output = out.Output.String()
+			}
+			return c
 		}
 	}
 	for _, o := range v.calls {
@@ -1305,7 +1426,7 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 			if o.state > c.State {
 				c.State = o.state
 			}
-			c.Partial, c.Output = o.partial, o.output
+			c.Partial, c.Output, c.Failed = o.partial, o.output, o.failed
 			if o.reason != "" {
 				c.Reason = o.reason
 			}
@@ -1320,7 +1441,7 @@ func (v *View) callView(fc *openresponses.FunctionCall, rec *agentsession.Call) 
 		}
 	}
 	for _, p := range v.cut {
-		if p.CallID == fc.CallID && c.State != CallEnded {
+		if p.CallID == fc.CallID && c.State != CallEnded && c.State != CallReturned {
 			c.State = CallCutOff
 		}
 	}

@@ -7,6 +7,49 @@ versions may break the API.
 
 ## Unreleased
 
+- Dependencies: agentturn and agentturn/session v0.0.36, agentsession
+  v0.0.37, agentkit v0.0.16, agentpolicy v0.0.19, agenttool v0.0.29,
+  openresponses v0.0.18, agentmemory v0.0.12 (now direct).
+- Changed: with agentsession v0.0.37 the binary raises every session it
+  appends to to format 0.20, and so does an embedder that takes this
+  release's floor by version selection (dax). A reader built on
+  agentsession before v0.0.37 refuses those files until it is upgraded.
+- Changed, breaking: `view.Run` holds an `openresponses.Usage`, which
+  openresponses v0.0.18 made not comparable, so a `Run` can no longer
+  be compared with `==`.
+- Changed: the inspect panes read a skill grant from what agentpolicy
+  v0.0.19 records as members (`grant`, `source`, `scope`), no longer
+  from the reason: a revocation ends only its source's set under its
+  scope, a scope's revocation only that scope's sets, and an activation
+  replaces its source's set under its scope ("replaced at"). A grant
+  shows the scope it was made under. A record written before v0.0.19 is
+  still read by its reason.
+- Added: a call the record holds a `result` for and no output (agentturn
+  v0.0.36's `PendingReturned`: its tool returned and the process
+  stopped before the batch's outputs were appended) is
+  `view.CallReturned`, "ran; its result is recorded", with the result
+  as its output. It is listed with the cut-off calls, never asked
+  about, since agentturn's Resume refuses an approval of it; before, it
+  read as cut off and may have run.
+- Added: `view.Call.Failed`, an output the record marks `failed` or a
+  tool that ended with an error live, shown as "failed"; and
+  `view.Call.Withdrawn`, the reason of a dispatch withdrawn before the
+  tool ran (a `reject` with `withdrawn`), shown as never started. A live
+  `tool_end` that agentturn marks `Cut` reads as cut off, not ended.
+- Added: `view.Row.CopiedFrom`, the session a copied item (format 0.15
+  `copied_from`) was taken from, shown as context copied from another
+  session; and `view.Row.LeftOut`, `LeftOutQuarantined`,
+  `LeftOutOmitted` or `LeftOutPlaceholder`, from the `omit` in force at
+  the viewed line, so an output a guard quarantined is shown as sent to
+  the model as the quarantine's placeholder, and a trimmed item as left
+  out.
+- Changed: answers to a running call's question name `agenttool.ByHuman`,
+  as the permission panel's answers already do.
+- Changed: the binary's model adapter leaves out other providers'
+  slug-prefixed items (`openresponses.WithProviderSlugs()`), since its
+  endpoint is a provider's own API.
+- Fixed: a head on the universal root is the empty line, never read as
+  "no head" (the view now takes the follower's leaf as given).
 - Dependencies: agentsession v0.0.28, up from v0.0.27, and agentkit
   v0.0.14, up from v0.0.13. A redacted session now hashes
   independently: a redactor gives each redacted response the
