@@ -452,7 +452,11 @@ type key struct {
 	id   string
 }
 
-// View reconciles the record with the live stream.
+// View reconciles the record with the live stream. It is not safe for
+// concurrent use, Model included: Model keeps what it computed for the
+// viewed line (what the omit leaves out), so it writes to the view too.
+// A caller feeding it from several goroutines holds one lock over
+// Record, Live and Model, as tui.Attach does.
 type View struct {
 	// leftOut is leftOutOf the viewed line, for the line leftOutKey names
 	// (session, tail, length): built once per line, not per model.
@@ -1342,7 +1346,9 @@ func (v *View) runEnded(e *agentturn.RunEnd) {
 	v.flushIfSettled(e.RunID)
 }
 
-// Model returns what to render now. It shares nothing with the view.
+// Model returns what to render now. It shares nothing with the view. It
+// updates the view's cache of the viewed line, so it is called under the
+// same lock as Record and Live, never beside them.
 func (v *View) Model() Model {
 	m := Model{
 		Session: v.session,
