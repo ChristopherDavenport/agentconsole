@@ -51,6 +51,7 @@ package view
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -432,10 +433,14 @@ type key struct {
 
 // View reconciles the record with the live stream.
 type View struct {
-	session string
-	leaf    string
-	leaves  []string
-	path    []agentsession.Entry
+	// leftOut is leftOutOf the viewed line, for the line leftOutKey names
+	// (session, tail, length): built once per line, not per model.
+	leftOut    map[string]string
+	leftOutKey string
+	session    string
+	leaf       string
+	leaves     []string
+	path       []agentsession.Entry
 	// branches, entries and origin are read from the session at each
 	// step, links from the entries that land.
 	branches []Branch
@@ -1319,7 +1324,7 @@ func (v *View) Model() Model {
 	for _, c := range agentsession.Calls(v.path) {
 		committed[c.Entry.ID] = c
 	}
-	leftOut := leftOutOf(v.path)
+	leftOut := v.leftOutNow()
 	var settings agentsession.Settings
 	for _, e := range v.path {
 		switch x := e.(type) {
@@ -1372,6 +1377,21 @@ func (v *View) Model() Model {
 	return m
 }
 
+// leftOutNow is leftOutOf the viewed line, from the cache while the line
+// is the one it was computed for. An entry's ID is its content's hash,
+// so the tail and the length name the line.
+func (v *View) leftOutNow() map[string]string {
+	key := v.session + "\x00" + v.tail() + "\x00" + strconv.Itoa(len(v.path))
+	if key != v.leftOutKey {
+		v.leftOut, v.leftOutKey = leftOutOf(v.path), key
+	}
+	return v.leftOut
+}
+
+// buildContext is agentsession.BuildContext, a variable so a test counts
+// the rebuilds.
+var buildContext = agentsession.BuildContext
+
 // leftOutOf maps the item entries the model's context at the end of
 // path leaves out or sends a placeholder for to what it does, as the
 // omit in force says. A path with no omit costs a walk and no context.
@@ -1386,7 +1406,7 @@ func leftOutOf(path []agentsession.Entry) map[string]string {
 	if !omits {
 		return nil
 	}
-	ctx, err := agentsession.BuildContext(path)
+	ctx, err := buildContext(path)
 	if err != nil {
 		return nil
 	}

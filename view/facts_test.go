@@ -153,3 +153,35 @@ func TestARestartAsksOnlyAboutTheAskedCall(t *testing.T) {
 		t.Errorf("the asked call: %+v", c)
 	}
 }
+
+// What the omit leaves out is worked out once per line, not on every
+// model: a streamed delta changes nothing on the record.
+func TestWhatIsLeftOutIsComputedOncePerLine(t *testing.T) {
+	builds := 0
+	orig := buildContext
+	buildContext = func(path []agentsession.Entry) (agentsession.Context, error) {
+		builds++
+		return orig(path)
+	}
+	t.Cleanup(func() { buildContext = orig })
+
+	l := newRecordsLog(t)
+	trimmed := l.append(itemEntry(openresponses.UserText("trimmed"), ""))
+	l.append(&agentsession.ConfigEntry{Omit: &agentsession.Omit{Items: []string{trimmed}}})
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	builds = 0
+	for _, text := range []string{"a", "ab", "abc"} {
+		l.stream("run1", "resp1", msg("m1", "assistant", text), false)
+		if m := l.v.Model(); m.Rows[0].LeftOut != LeftOutOmitted {
+			t.Fatalf("rows %+v", m.Rows)
+		}
+	}
+	if builds != 1 {
+		t.Errorf("the context was built %d times for one line, want 1", builds)
+	}
+	l.append(itemEntry(openresponses.UserText("more"), ""))
+	l.v.Model()
+	if builds != 2 {
+		t.Errorf("a new entry did not rebuild: %d builds", builds)
+	}
+}

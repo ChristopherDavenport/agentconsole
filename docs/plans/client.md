@@ -1272,7 +1272,9 @@ v0.0.36 brought facts the record now carries; the view keeps each.
 - **`view.Row.CopiedFrom` and `LeftOut`.** A copied item is context made
   in another session. What the model is not sent is computed from the
   `omit` in force at the end of the viewed line
-  (`agentsession.BuildContext`, only when the line holds an `omit`): an
+  (`agentsession.BuildContext`, only when the line holds an `omit`, and
+  once per line: the view keeps it while the session, the tail and the
+  line's length are the same, so a streamed delta builds nothing): an
   output sent as `agentturn.QuarantinedOutput` is
   `LeftOutQuarantined`, any other placeholder `LeftOutPlaceholder`, an
   item left out `LeftOutOmitted`. The live `QuarantineAdded` event is
