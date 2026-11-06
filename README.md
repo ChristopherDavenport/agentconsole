@@ -146,7 +146,8 @@ it ends. A message in the conversation is labelled by whose words
 the session records it as: "user" for what the person typed (a
 trigger of kind `human`), where it came from and "not your words" for
 a message the host composed, and "user (unclaimed)" for one the record
-makes no claim about. When a tool call needs permission, y
+makes no claim about, as every message of a session recorded before
+format 0.21 is. When a tool call needs permission, y
 approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 

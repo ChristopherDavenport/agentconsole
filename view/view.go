@@ -1192,13 +1192,13 @@ func (v *View) Live(ev agentturn.Event) {
 		if !e.Hidden {
 			// The start carries no trigger: the end does, and sets
 			// whose words the item is again.
-			v.item(e.RunID, e.ResponseID, e.Item, false, liveMarks(e.Item, e.Provenance, agentturn.Trigger{}, e.Copied))
+			v.item(e.RunID, e.ResponseID, e.Item, false, v.itemMarks(e.Item, e.Provenance, agentturn.Trigger{}, e.Copied))
 		}
 	case *agentturn.ItemUpdate:
 		v.item(e.RunID, e.ResponseID, e.Item, false, nil)
 	case *agentturn.ItemEnd:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, true, liveMarks(e.Item, e.Provenance, e.Trigger, e.Copied))
+			v.item(e.RunID, e.ResponseID, e.Item, true, v.itemMarks(e.Item, e.Provenance, e.Trigger, e.Copied))
 		}
 	case *agentturn.ResponseEnd:
 		responseID := ""
@@ -1525,6 +1525,22 @@ func queuedMarks(q *agentsession.QueuedEntry) (hidden bool, words agentsession.W
 	}
 	words = agentsession.WordsOf(&read)
 	return hidden, words, provenanceOf(words, read.Layers(), read.Trigger, read.Trust)
+}
+
+// itemMarks is whose words a live item is. A queued input's item_end
+// carries no trigger, since what brought it in is on its queued entry,
+// written before the drain: an item with no trigger that a queued entry
+// on the path holds, by its ID, takes that entry's words and
+// provenance, as its own entry will. Any other item is [liveMarks]'s.
+func (v *View) itemMarks(item openresponses.Item, lp *agentturn.Provenance, trigger agentturn.Trigger, copied bool) *marks {
+	if id := client.ItemID(item); id != "" && trigger.IsZero() {
+		for _, q := range v.queued {
+			if client.ItemID(q.Item) == id {
+				return &marks{words: q.Words, prov: q.Provenance.clone()}
+			}
+		}
+	}
+	return liveMarks(item, lp, trigger, copied)
 }
 
 // liveMarks is whose words an item event's item is and its provenance,

@@ -1348,9 +1348,14 @@ agentturn v0.0.38.
   from layers or copied, as agentturn/session's recorder writes it, so
   the row does not change hands when its entry lands. An `item_start`
   carries no trigger, and its `item_end` sets the reading again. A
-  steer's `item_end` carries none either (its trigger rode on its
-  queued entry), so a drained steer is unclaimed live until its entry
-  lands: a live row is never shown as the person's words wrongly.
+  drained input's `item_end` carries none either: its trigger rode on
+  its queued entry, which the recorder writes before the drain and
+  which stays on the path until the item's own entry lands. So an item
+  with no trigger that a queued entry holds, matched by the item's ID,
+  takes that entry's words and provenance, and the row does not change
+  hands when its entry lands. An item with no ID is not shown live at
+  all (the view keys the overlay by ID; a line the TUI sends has none),
+  so it is the queued list's until its entry lands.
 - **Queued members: format 0.21's first, the interim ones after.**
   agentturn v0.0.38 writes a queued input's `visible`, `trust` and
   `instructions_part` as 0.21's own members of the `queued` entry. The
@@ -1399,8 +1404,9 @@ agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
   (`agentturn.ContextWithTrigger`), and the answerer on a `Reply`'s
   (`ContextWithAnswerer`). `cmd/agentconsole` does (`typedAt`, with
   kind `human`, source `terminal`), since every line it takes is typed;
-  dax does it for terminal input (its `AtTerminal`) and decides for its
-  own slash commands, which may compose. A message the host composes
+  dax must do the same for terminal input (today it puts its
+  `AtTerminal` trigger only on replies) and decide for its own slash
+  commands, which may compose. A message the host composes
   from layers is recorded without the kind whatever the trigger, by
   agentturn/session. Over front/control the claim is the server's to
   grant (`WithTriggerClaims`). No library helper: one wrapper is a few

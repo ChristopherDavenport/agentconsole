@@ -20,10 +20,14 @@ versions may break the API.
   words "user", a message the host composed by where it came from ("not
   your words"), now including one sent under another trigger kind with
   no layers or trust, and a message no trigger claims "user
-  (unclaimed)". A live row reads as its entry will. A queued input's
-  `visible`, `trust` and `instructions_part` are read from format 0.21's
-  members first and agentturn v0.0.37's interim `agentturn:` members
-  after, so a hidden owed input stays hidden after the bump; a copied
+  (unclaimed)". Sessions recorded before format 0.21 claim nothing, so
+  their typed lines now read "user (unclaimed)"; lines sent over
+  agentturn's front/control without `WithTriggerClaims` read as
+  composed ("sent by control: not your words"). A live row reads as its
+  entry will, a drained queued input's from its queued entry. A queued
+  input's `visible`, `trust` and `instructions_part` are read from
+  format 0.21's members first and agentturn v0.0.37's interim
+  `agentturn:` members after, so a hidden owed input stays hidden after the bump; a copied
   input queued under the person's trigger (agentturn's `Queued.Copied`)
   is not shown as theirs.
 - Changed (#50): `client.Direct` sends a steer through the control's

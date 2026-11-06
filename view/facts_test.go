@@ -377,3 +377,39 @@ func TestQueuedMembersOf021AndTheInterimOnes(t *testing.T) {
 		}
 	}
 }
+
+// A drained queued input's item_end carries no trigger: what brought it
+// in is on its queued entry, written before the drain. The live row
+// reads its words and provenance from that entry, so it does not show
+// "unclaimed" until the item's own entry lands and then the person's.
+func TestADrainedSteerIsLabelledFromItsQueuedEntry(t *testing.T) {
+	l := newRecordsLog(t)
+	typed := agentsession.NewQueued(msg("m_typed", "user", "typed steer"), agentsession.ModeSteer)
+	typed.Trigger = &agentsession.Trigger{Kind: agentsession.TriggerHuman, Source: "terminal"}
+	l.append(typed)
+	tpl := agentsession.NewQueued(msg("m_tpl", "user", "queued template"), agentsession.ModeSteer)
+	tpl.Trigger = &agentsession.Trigger{Kind: agentsession.TriggerHuman}
+	tpl.InstructionsPart = &agentsession.LayerRef{Source: "dax.prompts", ID: "review"}
+	l.append(tpl)
+
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	for _, it := range []*openresponses.Message{msg("m_typed", "user", "typed steer"), msg("m_tpl", "user", "queued template"), msg("m_other", "user", "never queued")} {
+		l.v.Live(&agentturn.ItemStart{RunID: "run1", Item: it})
+		l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: it})
+	}
+	got := map[string]Row{}
+	for _, r := range l.v.Model().Rows {
+		if m, ok := r.Item.(*openresponses.Message); ok && r.Live {
+			got[m.Text()] = r
+		}
+	}
+	if r := got["typed steer"]; r.Words != agentsession.WordsPerson {
+		t.Errorf("a drained typed steer: words %v, provenance %+v", r.Words, r.Provenance)
+	}
+	if r := got["queued template"]; r.Words != agentsession.WordsComposed || r.Provenance == nil || len(r.Provenance.Layers) != 1 || r.Provenance.Layers[0].ID != "review" {
+		t.Errorf("a drained template: words %v, provenance %+v", r.Words, r.Provenance)
+	}
+	if r := got["never queued"]; r.Words != agentsession.WordsUnclaimed {
+		t.Errorf("an item no queued entry names: words %v", r.Words)
+	}
+}
