@@ -247,8 +247,11 @@ func WithHistory(past []string, record func(line string)) Option {
 // its recorder are the caller's, and are safe to close once Run returns:
 // the run that went has ended, as src reports, or the drain timeout
 // passed. At exit Run aborts, waits, cancels ctx and aborts again before
-// a last wait, so a run a steer's delivery started after the first
-// abort is ended too.
+// a last wait. The first abort also stops a run a steer's delivery was
+// about to start (agentturn v0.0.39 settles that delivery aborted and
+// starts none); the second ends a run started for a steer the agent
+// accepted after the first, an intent still in flight as the program
+// ended.
 //
 // A canceled ctx ends the program with an error, as bubbletea's
 // WithContext does.
@@ -358,10 +361,11 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 		cfg.warn("a run did not end; closing the session as it is")
 	}
 	stop()
-	// A run Accept started for a steer that missed the last drain is
-	// under ctx's values without its cancellation, so stop does not end
-	// it, and the abort above stops nothing when it lands between the
-	// run that ended and the one the delivery starts: abort again.
+	// A run Accept starts is under ctx's values without its
+	// cancellation, so stop does not end it. The abort above settles a
+	// delivery whose run had not started yet (agentturn#312), but a
+	// steer accepted after it, sent by a command still in flight as the
+	// program ended, starts a run of its own: abort again.
 	_ = act(context.WithoutCancel(ctx), client.Abort{})
 	m.Drain(cfg.drain)
 	wait()

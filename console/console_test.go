@@ -166,15 +166,16 @@ func TestRunEndsARunItQuitsOver(t *testing.T) {
 	}
 }
 
-// TestRunEndsARunASteerStartsAtExit: a steer that missed the run's last
-// drain is answered by a run agentturn's Accept starts once that run
-// has ended, under ctx's values without its cancellation, so canceling
-// ctx does not end it. When that run starts just after Run's abort at
-// exit (the abort landed between the two runs and stopped nothing), Run
-// aborts again before its last wait, and does not return, and let the
-// caller close the store, with the run still writing. The controller
-// here sends the steer to the idle agent right after the first abort,
-// which is where the agent's own start of that run lands.
+// TestRunEndsARunASteerStartsAtExit: a steer agentturn's Accept takes
+// while no run goes starts a run under ctx's values without its
+// cancellation, so canceling ctx does not end it. A steer accepted
+// before Run's abort at exit is agentturn's: since v0.0.39 (#312) the
+// abort settles its delivery and starts no run. One accepted after that
+// abort (an intent still in flight as the program ended) starts a run
+// the abort missed, so Run aborts again before its last wait, and does
+// not return, and let the caller close the store, with the run still
+// writing. The controller here sends the steer to the idle agent right
+// after the first abort.
 func TestRunEndsARunASteerStartsAtExit(t *testing.T) {
 	var aborts atomic.Int32
 	r := startWrapped(t, []agentkit.Option{agentkit.WithModel(scripted.New(scripted.SayThenBlock("late")), "scripted")},

@@ -22,10 +22,10 @@ github.com/ChristopherDavenport/agenttool v0.0.30 h1:MwzrKC2PD+stEmrlSbkiV+hjoyL
 github.com/ChristopherDavenport/agenttool v0.0.30/go.mod h1:cpphK2z4/YK+VIJ0hl90Sq6Ac03QG6tGLnnFGN90kwU=
 github.com/ChristopherDavenport/agenttool/mcpclient v0.0.30 h1:OHP8oeq/kHvBQDkMYmWWz6OcEn7c0NJrR9QiwoGD20Y=
 github.com/ChristopherDavenport/agenttool/mcpclient v0.0.30/go.mod h1:8YlB0rW7u3h4shzUbBFIHmCfOyJF0/Wrx1cyJk7IG64=
-github.com/ChristopherDavenport/agentturn v0.0.38 h1:a0II2jQ6qropQCnBI707mG++hGD3943wIJGkFrOUa4Q=
-github.com/ChristopherDavenport/agentturn v0.0.38/go.mod h1:5VBi+968NEaze4tq2zOZj+n9ArYwAKS6stN7ZoFL/1Q=
-github.com/ChristopherDavenport/agentturn/session v0.0.38 h1:HYHJy3Z3Paz4gxR2GNAn0eetnH+LbVWKepqBqjS8osw=
-github.com/ChristopherDavenport/agentturn/session v0.0.38/go.mod h1:ycp+TZyKpCWENeG2Uhn2WU/aJcboDBp7TbahJ+oQGvo=
+github.com/ChristopherDavenport/agentturn v0.0.39 h1:fqPo4/ZxKlq48TU2QUun6y0orZ4ZEqqn14n3WIw4GPQ=
+github.com/ChristopherDavenport/agentturn v0.0.39/go.mod h1:5VBi+968NEaze4tq2zOZj+n9ArYwAKS6stN7ZoFL/1Q=
+github.com/ChristopherDavenport/agentturn/session v0.0.39 h1:jGMNUZKNNX2ATiJtlrAvhBKRm91YXSPIobHgvFXTVwg=
+github.com/ChristopherDavenport/agentturn/session v0.0.39/go.mod h1:tqSIKVK2WeiiMnraZp5m2ReC88jXP0HBVf55R5bdclQ=
 github.com/ChristopherDavenport/openresponses v0.0.19 h1:IxoOr9QUOtKPN8GXGI7pQPvbN1qC4NZY4SVKz7UbEbw=
 github.com/ChristopherDavenport/openresponses v0.0.19/go.mod h1:oZT6GCySXw3+vL5LzrJrRI5qagBumqvwDZdp6Kr++a8=
 github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=

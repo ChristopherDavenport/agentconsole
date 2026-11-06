@@ -1391,7 +1391,11 @@ agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
   misses the run's last drain is answered by a run the agent starts once
   that run has ended, where `Queue` left it waiting for the next prompt;
   an abort before the run takes it still leaves it queued, starting
-  nothing (agentturn v0.0.38). The issue's premise, that a second steer
+  nothing (agentturn v0.0.38), and since agentturn v0.0.39 (#312) so
+  does an abort that finds no run to stop because the run in flight had
+  ended and the delivery's had not started yet: the delivery settles
+  with `ErrAborted` and the items wait for the next prompt. `Direct`
+  drops the `Delivery`, so nothing here reads that outcome. The issue's premise, that a second steer
   waited out a quiet tool, was `Deliver`'s, which `Direct` never used;
   with `Queue` and with `Accept` alike both steers are on the record
   while the tool runs, which a test over a bare agent and the TUI's
@@ -1400,12 +1404,16 @@ agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
   exit.** agentturn starts the run for a steer that missed the last
   drain on the context's values without its cancellation, so canceling
   `console.Run`'s context, its last resort at exit, does not end it.
-  The abort Run sends when the program ends stops nothing when it lands
-  between the run that ended and the one the delivery starts. Run now
-  aborts, drains, cancels and aborts again (on a context without the
-  cancel, so a host's controller takes it) before its last drain. Both
-  aborts landing in that gap is still possible, but needs the
-  delivery's start to be later than a drain and a cancel.
+  Run aborts, drains, cancels and aborts again (on a context without the
+  cancel, so a host's controller takes it) before its last drain. With
+  agentturn v0.0.38 the first abort stopped nothing when it landed
+  between the run that ended and the one the delivery starts, and the
+  second only narrowed that gap. agentturn v0.0.39 (#312) closes it: an
+  abort after a delivery is accepted and before its run starts settles
+  the delivery aborted and starts no run. The second abort stays, for a
+  steer the agent accepts after the first one (an intent the TUI sent in
+  a command still in flight as the program ended), whose run that abort
+  could not reach; with no run and no delivery it does nothing.
 - **The person's words are the embedder's claim.** The view sends
   intents and holds no identity, so `Direct` puts no trigger on a
   context: a prompt or a steer sent through it alone is recorded with no

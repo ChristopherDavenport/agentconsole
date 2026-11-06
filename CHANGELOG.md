@@ -7,7 +7,7 @@ versions may break the API.
 
 ## Unreleased
 
-- Dependencies: agentturn and agentturn/session v0.0.38, agentsession
+- Dependencies: agentturn and agentturn/session v0.0.39, agentsession
   v0.0.38, agentkit v0.0.17, agentpolicy v0.0.20, agenttool v0.0.30,
   openresponses v0.0.19.
 - Changed: with agentsession v0.0.38 the binary raises every session it
@@ -38,9 +38,11 @@ versions may break the API.
   prompt. A follow-up still goes through `Queue`. `Direct` sets no
   trigger: the embedder claims the person's words.
 - Fixed (#50): `console.Run` aborts again after canceling its context
-  at exit, so a run the agent started for a steer that missed the last
-  drain, which the cancel does not end, is not left writing to the
-  store the caller closes.
+  at exit, so a run the agent started for a steer it accepted after the
+  first abort, which the cancel does not end, is not left writing to the
+  store the caller closes. A steer accepted before that abort starts no
+  run since agentturn v0.0.39 (agentturn#312), which settles its
+  delivery aborted.
 - Changed (#50): the binary claims what is typed at its terminal as the
   person's (a trigger of kind `human`, source `terminal`, on prompts and
   steers, and the answerer of a reply), so its sessions record typed
