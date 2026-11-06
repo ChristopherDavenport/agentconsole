@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -105,5 +106,37 @@ func TestAComposedPromptIsNotShownAsTheUsers(t *testing.T) {
 	s := a.waitFor("the composed prompt", has("composed from dax.prompts review: not your words", "review the diff", "on it", "idle"))
 	if l := lineWith(s, "review the diff"); strings.Contains(s, "user\n") && strings.Contains(l, "user") {
 		t.Errorf("shown as the user's:\n%s", s)
+	}
+}
+
+// A user message is labelled by whose words its record says it is
+// (agentsession's WordsOf, #49): "user" under a trigger of kind human,
+// "user (unclaimed)" with no trigger, and where it came from, not the
+// person's words, under another kind.
+func TestAMessageIsLabelledByWhoseWordsItIs(t *testing.T) {
+	a := newApp(t, cfgWith(say(nil, nil, "one"), say(nil, nil, "two"), say(nil, nil, "three")))
+	for _, p := range []struct {
+		text    string
+		trigger agentturn.Trigger
+		answer  string
+	}{
+		{"typed at the keys", agentturn.Trigger{Kind: agentsession.TriggerHuman, Source: "terminal"}, "one"},
+		{"sent with no trigger", agentturn.Trigger{}, "two"},
+		{"a reminder fired", agentturn.Trigger{Kind: "schedule", Source: "cron"}, "three"},
+	} {
+		if _, err := a.ctl.Prompt(agentturn.ContextWithTrigger(a.ctx, p.trigger), openresponses.UserText(p.text)); err != nil {
+			t.Fatal(err)
+		}
+		a.waitFor("the answer "+p.answer, all(has(p.answer, "idle"), lacks("not committed")))
+	}
+	s := a.screen()
+	if !regexp.MustCompile(`(?m)^user +\ntyped at the keys`).MatchString(s) {
+		t.Errorf("the typed prompt is not labelled user:\n%s", s)
+	}
+	if !regexp.MustCompile(`(?m)^user \(unclaimed\) *\nsent with no trigger`).MatchString(s) {
+		t.Errorf("the prompt with no trigger is not unclaimed:\n%s", s)
+	}
+	if !regexp.MustCompile(`(?m)^sent by schedule cron: not your words *\na reminder fired`).MatchString(s) {
+		t.Errorf("the reminder is not shown as composed:\n%s", s)
 	}
 }

@@ -1311,7 +1311,60 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   the queued entry's `agentturn:*` members, and from the live item
   events; the TUI labels the message with it in place of "user". A
   message with neither layers nor trust is the person's, whatever its
-  `source`, which every input carries as the run's trigger.
+  `source`, which every input carries as the run's trigger. (Superseded
+  by format 0.21's trigger kind `human`: see "whose words, and format
+  0.21's queued members".)
+
+## Decided in implementation, whose words, and format 0.21's queued members
+
+agentconsole#49, on the bump to agentsession v0.0.38 (format 0.21) and
+agentturn v0.0.38.
+
+- **Whose words a message is, is agentsession's `WordsOf`.** Format
+  0.21 defines one trigger kind, `human`: a person sent the input. A
+  `user` message is the person's words under it, composed under any
+  other kind or when it names `instructions_part` or `from_link`, and
+  unclaimed with no trigger, which a reader must not present as the
+  person's either. `view.Row.Words` and `view.Queued.Words` (exported,
+  of agentsession's type `Words`) carry the reading, `WordsUnclaimed`
+  for a row that is not a user message. `Provenance` is now what the
+  record says of a message that is not the person's words (its layers,
+  its source, its trust), or a trust label on the person's words; nil
+  otherwise. A message whose trigger is a hook's, a schedule's or
+  `control` (agentturn's front/control without `WithTriggerClaims`) now
+  reads as composed, where before a source alone marked nothing.
+- **The TUI labels by it.** "user" for the person's words, with any
+  trust label after it; where it came from and "not your words" for a
+  composed message; "user (unclaimed)", dimmed, for a message no
+  trigger claims, as every message a host sends with no trigger is
+  (the claim is the embedder's to make: see "steer through Accept").
+  The queued list says where a composed input came from and a trust
+  label, and nothing for an unclaimed one, since its line is not
+  labelled as anyone's.
+- **A live item reads as its entry will.** The item's source is the
+  provenance's when it names one and otherwise the run's trigger
+  (`ItemEnd.Trigger`), without the kind `human` for an item composed
+  from layers or copied, as agentturn/session's recorder writes it, so
+  the row does not change hands when its entry lands. An `item_start`
+  carries no trigger, and its `item_end` sets the reading again. A
+  steer's `item_end` carries none either (its trigger rode on its
+  queued entry), so a drained steer is unclaimed live until its entry
+  lands: a live row is never shown as the person's words wrongly.
+- **Queued members: format 0.21's first, the interim ones after.**
+  agentturn v0.0.38 writes a queued input's `visible`, `trust` and
+  `instructions_part` as 0.21's own members of the `queued` entry. The
+  view reads those, and for each the entry does not carry the
+  `agentturn:` member agentturn v0.0.37 wrote, as agentturn/session's
+  recorder reads them back, then judges the words with `WordsOf` over
+  what it read, so a v0.0.37 template queued under the person's trigger
+  is composed. The interim members are named by their strings, since
+  agentturn/session deprecated its constants.
+- **`Queued.Copied` is the recorder's to read.** A copied input queued
+  under the person's trigger is reported with `Copied`, and the
+  recorder writes its queued entry without the kind `human`, so the
+  queued list, which reads the record and not the live `queued` event
+  (`client.Copy` drops it), shows it as not the person's. The view
+  reads no live `queued` event: the entry lands no later.
 
 ## Decided in implementation, forks in the tree
 

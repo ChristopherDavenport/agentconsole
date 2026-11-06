@@ -504,9 +504,10 @@ func has(subs ...string) func(string) bool {
 }
 
 // prompted is whether the screen shows the user's prompt as its row,
-// "user" over the text, as the record has it.
+// "user" over the text, as the record has it: "user (unclaimed)" for a
+// prompt sent with no trigger, as these tests send most.
 func prompted(text string) func(string) bool {
-	return regexp.MustCompile(`(?m)^user +\n` + regexp.QuoteMeta(text) + ` *$`).MatchString
+	return regexp.MustCompile(`(?m)^user(?: \(unclaimed\))? +\n` + regexp.QuoteMeta(text) + ` *$`).MatchString
 }
 
 func lacks(subs ...string) func(string) bool {

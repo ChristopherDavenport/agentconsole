@@ -203,13 +203,15 @@ func TestALiveWithdrawalIsNeverStarted(t *testing.T) {
 }
 
 // A message the host composed from text the person did not write
-// (agentturn v0.0.37's WithProvenance) is recorded with its layers,
-// trust and source, and is shown as such, not as the person's words: on
-// the record, in the queued list (agentturn:instructions_part and
-// agentturn:trust on the queued entry, a hidden one left out), and live.
+// (agentturn's WithProvenance) is recorded with its layers, trust and
+// source, and is shown as such, not as the person's words: on the
+// record, in the queued list (format 0.21's instructions_part and trust
+// on the queued entry, a hidden one left out), and live.
 func TestAComposedMessageIsNotThePersons(t *testing.T) {
 	l := newRecordsLog(t)
-	typed := l.append(itemEntry(openresponses.UserText("my own words"), ""))
+	typedEntry := itemEntry(openresponses.UserText("my own words"), "")
+	typedEntry.Source = &agentsession.Trigger{Kind: agentsession.TriggerHuman}
+	typed := l.append(typedEntry)
 	composed := itemEntry(openresponses.UserText("contents of AGENTS.md"), "")
 	composed.InstructionsPart = &agentsession.LayerRef{Source: agentsession.LayerAgentsMD, ID: "sub/AGENTS.md"}
 	composed.Trust = &agentsession.Trust{Reads: []string{"untrusted"}}
@@ -218,10 +220,10 @@ func TestAComposedMessageIsNotThePersons(t *testing.T) {
 
 	q := agentsession.NewQueued(openresponses.UserText("a template"), agentsession.ModeSteer)
 	q.Trigger = &agentsession.Trigger{Kind: "mcp", Source: "server:docs"}
-	q.Unknown = map[string]json.RawMessage{session.InstructionsPartMember: json.RawMessage(`{"source":"dax.prompts","id":"review"}`)}
+	q.InstructionsPart = &agentsession.LayerRef{Source: "dax.prompts", ID: "review"}
 	l.append(q)
 	hidden := agentsession.NewQueued(openresponses.UserText("unseen"), agentsession.ModeSteer)
-	hidden.Unknown = map[string]json.RawMessage{session.VisibleMember: json.RawMessage(`false`)}
+	hidden.Visible = new(bool)
 	l.append(hidden)
 
 	m := l.v.Model()
@@ -229,18 +231,19 @@ func TestAComposedMessageIsNotThePersons(t *testing.T) {
 	for _, r := range m.Rows {
 		byEntry[r.EntryID] = r
 	}
-	if p := byEntry[typed].Provenance; p != nil {
-		t.Errorf("the person's message has a provenance: %+v", p)
+	if r := byEntry[typed]; r.Provenance != nil || r.Words != agentsession.WordsPerson {
+		t.Errorf("the person's message: words %v, provenance %+v", r.Words, r.Provenance)
 	}
-	p := byEntry[cid].Provenance
-	if p == nil || len(p.Layers) != 1 || p.Layers[0].ID != "sub/AGENTS.md" || p.Trust == nil || p.Trust.Reads[0] != "untrusted" || p.Source == nil || p.Source.Source != "dax.agentsmd" {
-		t.Errorf("the composed message: %+v", p)
+	r := byEntry[cid]
+	p := r.Provenance
+	if r.Words != agentsession.WordsComposed || p == nil || len(p.Layers) != 1 || p.Layers[0].ID != "sub/AGENTS.md" || p.Trust == nil || p.Trust.Reads[0] != "untrusted" || p.Source == nil || p.Source.Source != "dax.agentsmd" {
+		t.Errorf("the composed message: words %v, provenance %+v", r.Words, p)
 	}
 	if len(m.Queued) != 1 {
 		t.Fatalf("queued %+v, want the template alone", m.Queued)
 	}
-	if qp := m.Queued[0].Provenance; qp == nil || len(qp.Layers) != 1 || qp.Layers[0].Source != "dax.prompts" || qp.Source == nil || qp.Source.Kind != "mcp" {
-		t.Errorf("the queued template: %+v", qp)
+	if qp := m.Queued[0].Provenance; m.Queued[0].Words != agentsession.WordsComposed || qp == nil || len(qp.Layers) != 1 || qp.Layers[0].Source != "dax.prompts" || qp.Source == nil || qp.Source.Kind != "mcp" {
+		t.Errorf("the queued template: words %v, provenance %+v", m.Queued[0].Words, qp)
 	}
 
 	// Live, before its entry lands.
@@ -254,32 +257,123 @@ func TestAComposedMessageIsNotThePersons(t *testing.T) {
 			live = &m.Rows[i]
 		}
 	}
-	if live == nil || live.Provenance == nil || live.Provenance.Layers[0].ID != "fix" {
+	if live == nil || live.Words != agentsession.WordsComposed || live.Provenance == nil || live.Provenance.Layers[0].ID != "fix" {
 		t.Errorf("the live composed row: %+v", live)
 	}
 }
 
-// The live mark matches the record's: layers or a trust (an empty one
-// included) mark a message composed; a source alone does not, since the
-// record holds every input's source and reads such a message as the
-// person's, so it would flip when its entry lands (agentturn#303).
+// The live mark matches the record's, as agentturn/session writes the
+// item's source and agentsession's WordsOf reads it: the person's words
+// only under the run's trigger of kind human, for an item neither
+// composed from layers, copied nor hidden; another kind, from the
+// provenance's source, is composed; no trigger at all makes no claim;
+// and an empty trust is kept.
 func TestALiveProvenanceMarksAsTheRecordDoes(t *testing.T) {
 	l := newRecordsLog(t)
+	human := agentturn.Trigger{Kind: agentsession.TriggerHuman, Ref: "tty"}
 	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m1", "user", "source only"),
 		Provenance: &agentturn.Provenance{Source: agentturn.Trigger{Kind: "hook", Source: "dax.x"}}})
-	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m2", "user", "judged clean"),
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m2", "user", "judged clean"), Trigger: human,
 		Provenance: &agentturn.Provenance{Trust: &agentturn.Trust{}}})
-	got := map[string]*Provenance{}
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m3", "user", "typed"), Trigger: human})
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m4", "user", "no trigger")})
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m5", "user", "copied"), Trigger: human, Copied: true})
+	l.v.Live(&agentturn.ItemEnd{RunID: "run1", Item: msg("m6", "user", "a template"), Trigger: human,
+		Provenance: &agentturn.Provenance{Layers: []agentturn.Layer{{Source: "dax.prompts", ID: "fix"}}}})
+	got := map[string]Row{}
 	for _, r := range l.v.Model().Rows {
 		if m, ok := r.Item.(*openresponses.Message); ok {
-			got[m.Text()] = r.Provenance
+			got[m.Text()] = r
 		}
 	}
-	if got["source only"] != nil {
-		t.Errorf("a source alone marked the message: %+v", got["source only"])
+	if r := got["source only"]; r.Words != agentsession.WordsComposed || r.Provenance == nil || r.Provenance.Source == nil || r.Provenance.Source.Kind != "hook" {
+		t.Errorf("a hook's message: words %v, provenance %+v", r.Words, r.Provenance)
 	}
-	if p := got["judged clean"]; p == nil || p.Trust == nil || len(p.Trust.Reads) != 0 {
-		t.Errorf("an empty trust did not mark the message: %+v", p)
+	if r := got["judged clean"]; r.Words != agentsession.WordsPerson || r.Provenance == nil || r.Provenance.Trust == nil || len(r.Provenance.Trust.Reads) != 0 {
+		t.Errorf("an empty trust on the person's words: words %v, provenance %+v", r.Words, r.Provenance)
+	}
+	if r := got["typed"]; r.Words != agentsession.WordsPerson || r.Provenance != nil {
+		t.Errorf("typed: words %v, provenance %+v", r.Words, r.Provenance)
+	}
+	if r := got["no trigger"]; r.Words != agentsession.WordsUnclaimed || r.Provenance != nil {
+		t.Errorf("no trigger: words %v, provenance %+v", r.Words, r.Provenance)
+	}
+	if r := got["copied"]; r.Words == agentsession.WordsPerson {
+		t.Errorf("a copied message under the person's trigger reads as theirs: %+v", r)
+	}
+	if r := got["a template"]; r.Words != agentsession.WordsComposed {
+		t.Errorf("a template under the person's trigger: words %v", r.Words)
+	}
+}
+
+// Format 0.21 keeps a queued input's visible, trust and
+// instructions_part as the queued entry's own members; agentturn v0.0.37
+// kept them as agentturn:visible, agentturn:trust and
+// agentturn:instructions_part, which are read where the entry carries
+// no 0.21 member, as agentturn/session reads them back (#49). Whose
+// words each is comes from agentsession's WordsOf over what is read, so
+// a v0.0.37 template queued under the person's trigger is composed.
+func TestQueuedMembersOf021AndTheInterimOnes(t *testing.T) {
+	l := newRecordsLog(t)
+	human := &agentsession.Trigger{Kind: agentsession.TriggerHuman}
+
+	typed := agentsession.NewQueued(openresponses.UserText("typed"), agentsession.ModeSteer)
+	typed.Trigger = human
+	l.append(typed)
+	unclaimed := agentsession.NewQueued(openresponses.UserText("unclaimed"), agentsession.ModeSteer)
+	l.append(unclaimed)
+
+	tpl := agentsession.NewQueued(openresponses.UserText("template 0.21"), agentsession.ModeSteer)
+	tpl.Trigger = &agentsession.Trigger{Ref: "tty"}
+	tpl.InstructionsPart = &agentsession.LayerRef{Source: "dax.prompts", ID: "review"}
+	tpl.Trust = &agentsession.Trust{Reads: []string{"untrusted"}}
+	l.append(tpl)
+	hidden := agentsession.NewQueued(openresponses.UserText("hidden 0.21"), agentsession.ModeSteer)
+	hidden.Visible = new(bool)
+	l.append(hidden)
+
+	old := agentsession.NewQueued(openresponses.UserText("template 0.20"), agentsession.ModeSteer)
+	old.Trigger = human
+	old.Unknown = map[string]json.RawMessage{
+		"agentturn:instructions_part": json.RawMessage(`{"source":"dax.prompts","id":"review"}`),
+		"agentturn:trust":             json.RawMessage(`{"reads":["untrusted"]}`),
+	}
+	l.append(old)
+	oldHidden := agentsession.NewQueued(openresponses.UserText("hidden 0.20"), agentsession.ModeSteer)
+	oldHidden.Unknown = map[string]json.RawMessage{"agentturn:visible": json.RawMessage(`false`)}
+	l.append(oldHidden)
+
+	// A 0.21 member wins over the interim one beside it.
+	both := agentsession.NewQueued(openresponses.UserText("both"), agentsession.ModeSteer)
+	both.Visible = func() *bool { b := true; return &b }()
+	both.Unknown = map[string]json.RawMessage{"agentturn:visible": json.RawMessage(`false`)}
+	l.append(both)
+
+	got := map[string]Queued{}
+	for _, q := range l.v.Model().Queued {
+		got[text(q.Item)] = q
+	}
+	if _, ok := got["hidden 0.21"]; ok {
+		t.Error("a 0.21 hidden input is listed")
+	}
+	if _, ok := got["hidden 0.20"]; ok {
+		t.Error("an interim hidden input is listed")
+	}
+	if _, ok := got["both"]; !ok {
+		t.Error("the interim visible overrode 0.21's")
+	}
+	if q := got["typed"]; q.Words != agentsession.WordsPerson || q.Provenance != nil {
+		t.Errorf("typed: %+v", q)
+	}
+	if q := got["unclaimed"]; q.Words != agentsession.WordsUnclaimed || q.Provenance != nil {
+		t.Errorf("unclaimed: %+v", q)
+	}
+	for _, name := range []string{"template 0.21", "template 0.20"} {
+		q := got[name]
+		p := q.Provenance
+		if q.Words != agentsession.WordsComposed || p == nil || len(p.Layers) != 1 || p.Layers[0].ID != "review" || p.Trust == nil || len(p.Trust.Reads) != 1 || p.Trust.Reads[0] != "untrusted" {
+			t.Errorf("%s: words %v, provenance %+v", name, q.Words, p)
+		}
 	}
 }

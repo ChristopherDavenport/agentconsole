@@ -126,7 +126,11 @@ what it is doing (waiting on the model, thinking, writing, calling or
 running a tool, retrying), in color, its dot a spinner; idle, or waiting
 on a permission, it says so. A tool call in motion carries the same
 spinner in its dot and the same color, and its dot goes back to ○ when
-it ends. When a tool call needs permission, y
+it ends. A message in the conversation is labelled by whose words
+the session records it as: "user" for what the person typed (a
+trigger of kind `human`), where it came from and "not your words" for
+a message the host composed, and "user (unclaimed)" for one the record
+makes no claim about. When a tool call needs permission, y
 approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 

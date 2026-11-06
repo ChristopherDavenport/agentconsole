@@ -14,6 +14,18 @@ versions may break the API.
   appends to to format 0.21, and so does an embedder that takes this
   release's floor by version selection (dax). A reader built on
   agentsession before v0.0.38 refuses those files until it is upgraded.
+- Changed (#49): whose words a user message is comes from agentsession's
+  `WordsOf` (format 0.21's trigger kind `human`), as the new
+  `view.Row.Words` and `view.Queued.Words`. The TUI labels the person's
+  words "user", a message the host composed by where it came from ("not
+  your words"), now including one sent under another trigger kind with
+  no layers or trust, and a message no trigger claims "user
+  (unclaimed)". A live row reads as its entry will. A queued input's
+  `visible`, `trust` and `instructions_part` are read from format 0.21's
+  members first and agentturn v0.0.37's interim `agentturn:` members
+  after, so a hidden owed input stays hidden after the bump; a copied
+  input queued under the person's trigger (agentturn's `Queued.Copied`)
+  is not shown as theirs.
 
 ## v0.0.15 - 2026-11-04
 

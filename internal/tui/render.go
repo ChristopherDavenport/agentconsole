@@ -9,6 +9,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
@@ -183,11 +184,10 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		var label string
 		body := it.Text()
 		switch {
-		case row.Provenance != nil:
-			// Text the host composed: never shown as the person's words.
-			label = dimStyle.Render(provenanceText(row.Provenance))
 		case it.Role == openresponses.RoleUser:
-			label = userStyle.Render("user")
+			label = wordsLabel(row.Words, row.Provenance)
+		case row.Provenance != nil:
+			label = dimStyle.Render(provenanceText(row.Provenance))
 		case it.Role == openresponses.RoleAssistant:
 			label = assistantStyle.Render("agent")
 			body = md.render(body, width)
@@ -801,10 +801,37 @@ func compactTokens(n int) string {
 	return fmt.Sprint(n)
 }
 
+// wordsLabel labels a user message by whose words the record says it
+// is (agentsession's WordsOf): "user" for the person's, with a trust
+// label when it carries one; where it came from for a message the host
+// composed, never shown as the person's words; and "user (unclaimed)",
+// dimmed, for one whose record makes no claim either way, which is not
+// shown as the person's words either.
+func wordsLabel(words agentsession.Words, p *view.Provenance) string {
+	switch words {
+	case agentsession.WordsPerson:
+		return userStyle.Render("user") + trustTag(p)
+	case agentsession.WordsComposed:
+		return dimStyle.Render(provenanceText(p))
+	}
+	return dimStyle.Render("user (unclaimed)") + trustTag(p)
+}
+
+// trustTag is a message's trust labels, " (untrusted)", "" for none.
+func trustTag(p *view.Provenance) string {
+	if p == nil || p.Trust == nil || len(p.Trust.Reads) == 0 {
+		return ""
+	}
+	return dimStyle.Render(" (" + strings.Join(p.Trust.Reads, ", ") + ")")
+}
+
 // provenanceText says where a message the host composed came from, and
 // that the person did not write it: "composed from agentsmd sub/AGENTS.md,
 // sent by hook dax.agentsmd, untrusted: not your words".
 func provenanceText(p *view.Provenance) string {
+	if p == nil {
+		p = &view.Provenance{}
+	}
 	var parts []string
 	if len(p.Layers) > 0 {
 		var ls []string

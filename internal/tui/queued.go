@@ -92,8 +92,11 @@ func (m *Model) queuedLines() []string {
 			text = msg.Text()
 		}
 		text = strings.Join(strings.Fields(text), " ")
-		if q.Provenance != nil {
+		switch {
+		case q.Words == agentsession.WordsComposed:
 			label += " (" + provenanceText(q.Provenance) + ")"
+		case q.Provenance != nil && q.Provenance.Trust != nil && len(q.Provenance.Trust.Reads) > 0:
+			label += " (" + strings.Join(q.Provenance.Trust.Reads, ", ") + ")"
 		}
 		lines = append(lines, dimStyle.Render(truncate("  "+label+": "+text, m.width)))
 	}
