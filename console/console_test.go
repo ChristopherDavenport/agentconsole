@@ -216,6 +216,61 @@ func TestRunEndsARunASteerStartsAtExit(t *testing.T) {
 	}
 }
 
+// TestRunLetsALateSteerLandBeforeItsAbort: a steer typed just before the
+// quit is still in flight when the program ends. Run waits for it to
+// land before its abort at exit, so that abort reaches the run the
+// steer starts (or settles its delivery, agentturn#312), and Run returns
+// without waiting out the drain timeout or warning that a run did not
+// end.
+func TestRunLetsALateSteerLandBeforeItsAbort(t *testing.T) {
+	var warned atomic.Value
+	drain := 3 * time.Second
+	r := startWrapped(t, []agentkit.Option{agentkit.WithModel(scripted.New(scripted.SayThenBlock("part"), scripted.SayThenBlock("late")), "scripted")},
+		func(r *rig, act client.Controller) client.Controller {
+			return func(ctx context.Context, in client.Intent) error {
+				if _, ok := in.(client.Queue); !ok {
+					return act(ctx, in)
+				}
+				// The steer is slow to land: the quit overtakes it, and
+				// the run aborted ends before it is accepted. Its own run
+				// has started by the time the intent returns, which
+				// makes the timing the test needs certain.
+				time.Sleep(300 * time.Millisecond)
+				err := act(ctx, in)
+				deadline := time.Now().Add(5 * time.Second)
+				for err == nil && !r.agent.State().Running {
+					if time.Now().After(deadline) {
+						t.Error("the late steer started no run")
+						break
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+				return err
+			}
+		},
+		console.WithDrainTimeout(drain),
+		console.WithWarn(func(s string) { warned.Store(s) }))
+	t.Cleanup(r.agent.Abort)
+	r.type_("go\r")
+	r.waitScreen("part")
+	began := time.Now()
+	r.type_("more\r")
+	r.type_("\x03")
+	r.type_("\x03")
+	if err := r.waitEnd(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if took := time.Since(began); took >= drain {
+		t.Errorf("Run took %v to return, the whole drain timeout", took)
+	}
+	if w := warned.Load(); w != nil {
+		t.Errorf("Run warned %q", w)
+	}
+	if r.agent.State().Running {
+		t.Error("Run returned with the steer's run still going")
+	}
+}
+
 // TestRunCopiesASelectionToTheClipboard: a drag sent as a terminal sends
 // it in SGR mouse mode draws the selection, and ctrl+c copies it to the
 // terminal's clipboard with OSC 52, written to the output the program

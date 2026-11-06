@@ -240,6 +240,42 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 	a.waitFor("idle again", all(has("idle"), lacks("aborting")))
 }
 
+// TestTheSaveConfirmGoesOnAnyOtherKey: a key that the client handles
+// before the panel (Tab cycling the pane, Esc closing it) still cancels
+// A's confirmation, so the Enter after it saves no rule (#41).
+func TestTheSaveConfirmGoesOnAnyOtherKey(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	offer := func(context.Context, view.Permission) client.GrantOffer {
+		return client.GrantOffer{Rule: "bash(go test:*)", Saved: true}
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithGrantOffer(offer))
+	askAbout(src, "run1", "c1")
+	a.waitFor("the offer", has("[A] and save it"))
+
+	// A, then Tab: the pane opens and the confirmation goes.
+	a.typeText("A")
+	a.waitFor("the confirmation", has("beyond this session?"))
+	a.key("tab")
+	a.waitFor("the confirmation gone", all(has("[A] and save it"), lacks("beyond this session?")))
+	a.key("enter")
+
+	// A, then Esc with the pane open: the pane closes and the
+	// confirmation goes.
+	a.typeText("A")
+	a.waitFor("the confirmation", has("beyond this session?"))
+	a.key("esc")
+	a.waitFor("the confirmation gone", all(has("[A] and save it"), lacks("beyond this session?")))
+	a.key("enter")
+
+	// Neither Enter answered: the first answer is the y after them.
+	a.typeText("y")
+	in, ok := ctl.next(t, 1).(client.Answer)
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove}) {
+		t.Fatalf("intent = %#v, want c1 approved once, nothing saved", in)
+	}
+}
+
 // TestThePanelOffersTheHostsGrant: with a host that offers a rule, the
 // panel shows it beside a and A, and a sends the approval with a session
 // grant of that rule; A asks to confirm before it saves the grant beyond

@@ -54,6 +54,11 @@ import (
 // end, unless [WithDrainTimeout] says otherwise.
 const DefaultDrainTimeout = 3 * time.Second
 
+// settleTimeout bounds the wait at exit for the intents still in flight
+// before the first abort: a controller answers an intent promptly, and
+// one whose command the program never ran is never answered.
+const settleTimeout = time.Second
+
 type config struct {
 	in      io.Reader
 	out     io.Writer
@@ -251,12 +256,13 @@ func WithHistory(past []string, record func(line string)) Option {
 // Run does not close anything it did not open. The agent, its store and
 // its recorder are the caller's, and are safe to close once Run returns:
 // the run that went has ended, as src reports, or the drain timeout
-// passed. At exit Run aborts, waits, cancels ctx and aborts again before
-// a last wait. The first abort also stops a run a steer's delivery was
-// about to start (agentturn v0.0.39 settles that delivery aborted and
-// starts none); the second ends a run started for a steer the agent
-// accepted after the first, an intent still in flight as the program
-// ended.
+// passed. At exit Run waits briefly for the intents still in flight
+// (a steer typed just before the quit), aborts, waits, cancels ctx and
+// aborts again before a last wait. The first abort also stops a run a
+// steer's delivery was about to start (agentturn v0.0.39 settles that
+// delivery aborted and starts none); the second ends a run started for
+// a steer the agent accepted after the first, an intent slower to land
+// than the brief wait.
 //
 // A canceled ctx ends the program with an error, as bubbletea's
 // WithContext does.
@@ -360,7 +366,11 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	// an abort to land). Let it write its end before the caller closes
 	// the store; the context's cancel is the last resort.
 	// The abort's refusal has nowhere to be shown now; the drain says
-	// whether the run ended.
+	// whether the run ended. An intent still in flight (a steer typed
+	// just before the quit) lands first, within a short bound, so the
+	// abort reaches the run it starts, or settles its delivery
+	// (agentturn#312), rather than the drain waiting that run out.
+	m.Settle(min(cfg.drain, settleTimeout))
 	_ = act(ctx, client.Abort{})
 	if !m.Drain(cfg.drain) {
 		cfg.warn("a run did not end; closing the session as it is")
@@ -368,9 +378,10 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	stop()
 	// A run Accept starts is under ctx's values without its
 	// cancellation, so stop does not end it. The abort above settles a
-	// delivery whose run had not started yet (agentturn#312), but a
-	// steer accepted after it, sent by a command still in flight as the
-	// program ended, starts a run of its own: abort again.
+	// delivery whose run had not started yet (agentturn#312), and the
+	// settle before it lets a steer still in flight land first; one
+	// that took longer than that bound starts a run of its own: abort
+	// again.
 	_ = act(context.WithoutCancel(ctx), client.Abort{})
 	m.Drain(cfg.drain)
 	wait()

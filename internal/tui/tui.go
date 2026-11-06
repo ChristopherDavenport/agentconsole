@@ -559,6 +559,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	case tea.MouseMsg:
+		if _, ok := msg.(tea.MouseClickMsg); ok && m.saving != "" {
+			// A click goes on to other things: the confirmation goes.
+			m.saving = ""
+			m.relayout()
+		}
 		return m, m.mouse(msg)
 	case InterruptMsg:
 		return m.interrupt()
@@ -677,6 +682,23 @@ func (m *Model) interrupt() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+// Settle waits until the controller has answered every intent the model
+// sent, or timeout, and reports whether it did. A host calls it after
+// the program ends and before its abort at exit, so an intent still in
+// flight (a steer typed just before the quit) lands first and the abort
+// reaches the run it starts. An intent whose command the program never
+// ran is not answered: the timeout bounds the wait for it.
+func (m *Model) Settle(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() { m.inflight.Wait(); close(done) }()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // Drain waits until the controller has answered every intent the model
 // sent and the source reports no run going, or timeout, and reports
 // whether both happened. A host calls it after the program ends and the
@@ -684,14 +706,11 @@ func (m *Model) interrupt() (tea.Model, tea.Cmd) {
 // to. Call it only once the program has stopped sending messages to the
 // model.
 func (m *Model) Drain(timeout time.Duration) bool {
-	done := make(chan struct{})
-	go func() { m.inflight.Wait(); close(done) }()
-	deadline := time.After(timeout)
-	select {
-	case <-done:
-	case <-deadline:
+	start := time.Now()
+	if !m.Settle(timeout) {
 		return false
 	}
+	deadline := time.After(timeout - time.Since(start))
 	for m.src.State().Running {
 		select {
 		case <-deadline:
@@ -703,6 +722,15 @@ func (m *Model) Drain(timeout time.Duration) bool {
 }
 
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// A's confirmation of a saved grant goes on any key but Enter, before
+	// anything else reads the key: a key the client takes first (Tab, Esc
+	// closing a pane, a screen's key) does what it does and cancels it,
+	// and one that reaches the panel only cancels it.
+	unsaved := false
+	if m.saving != "" && msg.Code != tea.KeyEnter {
+		m.saving, unsaved = "", true
+		m.relayout()
+	}
 	if isKeysKey(msg) {
 		if m.screen == screenKeys {
 			m.screen = screenConversation
@@ -805,6 +833,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.questionKey(msg, q)
 	}
 	if p, _, ok := m.pending(); ok {
+		if unsaved {
+			return m, nil
+		}
 		return m.permissionKey(msg, p)
 	}
 	if isNewlineKey(msg) {

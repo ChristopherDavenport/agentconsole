@@ -1411,9 +1411,14 @@ agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
   second only narrowed that gap. agentturn v0.0.39 (#312) closes it: an
   abort after a delivery is accepted and before its run starts settles
   the delivery aborted and starts no run. The second abort stays, for a
-  steer the agent accepts after the first one (an intent the TUI sent in
-  a command still in flight as the program ended), whose run that abort
-  could not reach; with no run and no delivery it does nothing.
+  steer the agent accepts after the first one, whose run that abort
+  could not reach; with no run and no delivery it does nothing. Before
+  the first abort Run waits, at most a second (`tui.Model.Settle`), for
+  the intents the TUI sent in commands still in flight as the program
+  ended, so a steer typed just before the quit lands first and the
+  first abort reaches its run; without the wait the drain waited that
+  run out and warned before the second abort ended it. A command the
+  program never ran is never answered, hence the bound.
 - **The person's words are the embedder's claim.** The view sends
   intents and holds no identity, so `Direct` puts no trigger on a
   context: a prompt or a steer sent through it alone is recorded with no
@@ -1670,7 +1675,10 @@ answer's `Terminate`, `StopRefused`). Implementation, no RFC rule.
 - **A saved grant is confirmed.** A alone answers nothing: the panel
   asks "Save bash(go test:*) beyond this session?", Enter makes the
   grant and approves the call, and any other key, Esc or y included,
-  goes back to the panel without answering. A rule kept beyond the
+  goes back to the panel without answering. The confirmation is
+  dropped before anything else reads the key, so a key the client takes
+  first (Tab cycling the pane, Esc closing it, Ctrl-T, a click) does
+  what it does and cancels it too; no Enter after it saves the rule. A rule kept beyond the
   session outlives the slip that made it (a stray Shift, Caps Lock),
   so it takes two deliberate keys; a session grant, which ends with
   the conversation, takes one. The confirmation is forgotten when the

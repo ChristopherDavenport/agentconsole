@@ -42,7 +42,10 @@ versions may break the API.
   first abort, which the cancel does not end, is not left writing to the
   store the caller closes. A steer accepted before that abort starts no
   run since agentturn v0.0.39 (agentturn#312), which settles its
-  delivery aborted.
+  delivery aborted. Run first waits, at most a second, for intents
+  still in flight, so a steer typed just before the quit lands before
+  the first abort, and exit does not wait out the drain timeout and
+  warn that a run did not end.
 - Changed (#50): the binary claims what is typed at its terminal as the
   person's (a trigger of kind `human`, source `terminal`, on prompts and
   steers, and the answerer of a reply), so its sessions record typed
@@ -104,7 +107,8 @@ versions may break the API.
   carries the grant for the host's controller to make. These are dax's
   REPL's keys; a keeps meaning "allow with a note" on a question. A
   asks to confirm before it answers (Enter saves the rule, any other key
-  goes back), so one slip cannot keep a rule beyond the session.
+  goes back, a key the client takes first such as Tab or Esc included),
+  so one slip cannot keep a rule beyond the session.
 - Added (#45): `console.WithCompletion` completes the input from the
   host. As the word that ends at the cursor changes, the host's
   function is asked (`console.Completing`: the input up to the cursor,
