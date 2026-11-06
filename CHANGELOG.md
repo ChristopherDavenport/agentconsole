@@ -58,6 +58,11 @@ versions may break the API.
   for the terminal drops whole segments rather than being cut at a
   column. `view.Model.LastCall` (`view.ModelCall`) is the viewed line's
   last model call with its usage, which the context segment reads.
+- Added (#7): `console.StatusLine.Model`, the model the host runs next.
+  The model segment names it from the start, with the record's model
+  beside it until a run under the host's lands ("model B (record: A
+  until the next run)"), so a resumed session shows the configured
+  model before the first prompt. The binary passes its `-model`.
 
 ## v0.0.15 - 2026-11-04
 

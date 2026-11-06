@@ -270,3 +270,30 @@ func TestTheUnconfiguredLineIsTodays(t *testing.T) {
 		t.Errorf("status\n got %q\nwant %q", got, want)
 	}
 }
+
+// TestTheModelSegmentNamesTheHostsModel: the host's model is named, with
+// the record's beside it while they differ.
+func TestTheModelSegmentNamesTheHostsModel(t *testing.T) {
+	host := ""
+	c := StatusConfig{Segments: []string{"model"}, Model: func() string { return host }}
+	text := func(v view.Model) string {
+		ps := c.pieces(statusIn{v: v})
+		if len(ps) == 0 {
+			return ""
+		}
+		return ps[0].text
+	}
+	if got := text(view.Model{Config: "a"}); got != "model a" {
+		t.Errorf("no host model: %q", got)
+	}
+	host = "b"
+	if got, want := text(view.Model{Config: "a"}), "model b (record: a until the next run)"; got != want {
+		t.Errorf("before a run: %q, want %q", got, want)
+	}
+	if got := text(view.Model{}); got != "model b" {
+		t.Errorf("an empty record: %q", got)
+	}
+	if got := text(view.Model{Config: "b"}); got != "model b" {
+		t.Errorf("after a run: %q", got)
+	}
+}

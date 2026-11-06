@@ -81,7 +81,9 @@ type StatusLine struct {
 	//   - cost: its cost, "$0.4000", or the models [WithCost] has no
 	//     price for (on the plain line, joined to tokens right before it
 	//     with ", ")
-	//   - model: the model, "model X"
+	//   - model: the model, "model X": [StatusLine.Model]'s when it
+	//     names one, with the record's beside it while they differ,
+	//     "model B (record: A until the next run)"
 	//   - context: how full the context was at the last model call, of
 	//     the window [StatusLine.Window] gives, "ctx 41% 405k/1M", "-- ctx"
 	//     before a call; green, yellow from 50% and red from 80% unless
@@ -107,8 +109,14 @@ type StatusLine struct {
 	// host does not know it, for the context segment; nil knows none,
 	// and the segment shows the tokens alone.
 	Window func(model string) int
+	// Model is the model the host runs next, "" when it does not say.
+	// The record names a run's model only once the run has started, so
+	// after a relaunch or a switch the record's is the last run's; the
+	// model segment names the host's, and the record's beside it until
+	// they agree. It is called as Host's segments are.
+	Model func() string
 	// Updates redraws the line each time a value is received: the host
-	// sends one after a host segment's value changes. Run
+	// sends one after a host segment's value (or Model's) changes. Run
 	// reads it until the program ends; a send that would block can be
 	// dropped when one is already waiting (a channel with a buffer of
 	// one, sent to without blocking), since one redraw reads every
@@ -127,7 +135,7 @@ func DefaultStatusSegments() []string { return tui.DefaultSegments() }
 
 // WithStatus makes up the status line: where it sits, how it is drawn,
 // which segments it shows and in what colours, the host's own segments,
-// and the window the context segment reads from the host. Without
+// and what the context and model segments read from the host. Without
 // it the line is the default segments, plain, on top. Run refuses a
 // make-up it cannot draw.
 func WithStatus(s StatusLine) Option {
@@ -141,6 +149,7 @@ func statusConfig(s StatusLine) (tui.StatusConfig, error) {
 		Host:     map[string]func() tui.Segment{},
 		Colours:  map[string]tui.Colours{},
 		Window:   s.Window,
+		Model:    s.Model,
 	}
 	switch s.Position {
 	case "", StatusTop:

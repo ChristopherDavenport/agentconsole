@@ -117,7 +117,10 @@ func run() error {
 		return err
 	}
 
-	err = console.Run(ctx, record, ctl, typedAt(client.Direct(ctl), atTerminal))
+	// The model this run is configured with shows from the start: a
+	// resumed session's record names the last run's until the next run.
+	status := console.StatusLine{Model: func() string { return *model }}
+	err = console.Run(ctx, record, ctl, typedAt(client.Direct(ctl), atTerminal), console.WithStatus(status))
 	if err == nil {
 		fmt.Fprintln(os.Stderr, "session", rec.SessionID())
 	}

@@ -1487,6 +1487,17 @@ bottom.
   segments as before. Bottom: the last row, under the input's lower bar
   (under the hint on the tree, keys and read-only screens); the first
   row then holds the notices alone, and only while there is one.
+- **The host's model (#7).** `StatusLine.Model func() string` (a new
+  exported name) is the model the host runs next. agentturn RFC 0001
+  leaves a configuration's switch between runs to the host, and the
+  config entry is written when the next run starts, so after a relaunch
+  or a switch the record names the last run's model. The model segment
+  names the host's, and while the record's (the turn's, then the
+  config's) differs, the record's beside it: "model B (record: A until
+  the next run)"; once a run under B lands, "model B". The view gets no
+  configuration of its own: the console compares two names, and the
+  context segment's window is looked up for the host's model. The
+  binary passes its `-model`.
 - **Refused at Run.** An unknown segment name, position or style, a
   host segment with a built-in's name or no function, and thresholds on
   a segment with no number make `Run` return an error before it starts

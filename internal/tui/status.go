@@ -34,6 +34,9 @@ type StatusConfig struct {
 	// Window is the context window of a model, in tokens, 0 when not
 	// known; nil knows none.
 	Window func(model string) int
+	// Model is the model the host will run next, "" when it does not
+	// say; nil says nothing.
+	Model func() string
 }
 
 // Segment is a host segment's value: its text, "" to hide it with its
@@ -238,12 +241,23 @@ func recorded(v view.Model) string {
 	return v.Config
 }
 
-// modelText names the model the record and the events say.
+// modelText names the model: the host's, when it names one, with the
+// record's beside it while they differ (the record names the next run's
+// model only once that run has started), else the record's.
 func (c StatusConfig) modelText(v view.Model) string {
-	if rec := recorded(v); rec != "" {
-		return "model " + rec
+	rec, host := recorded(v), ""
+	if c.Model != nil {
+		host = c.Model()
 	}
-	return ""
+	switch {
+	case host == "" && rec == "":
+		return ""
+	case host == "":
+		return "model " + rec
+	case rec != "" && rec != host:
+		return "model " + host + " (record: " + rec + " until the next run)"
+	}
+	return "model " + host
 }
 
 // contextText is how full the context was at the last model call: its
@@ -255,7 +269,13 @@ func (c StatusConfig) contextText(v view.Model) (string, float64, bool) {
 	if in <= 0 {
 		return "-- ctx", 0, false
 	}
-	model := recorded(v)
+	model := ""
+	if c.Model != nil {
+		model = c.Model()
+	}
+	if model == "" {
+		model = recorded(v)
+	}
 	if model == "" {
 		model = v.LastCall.Model
 	}
