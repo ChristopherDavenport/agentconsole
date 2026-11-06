@@ -32,6 +32,7 @@ var keyGroups = []keyGroup{
 		{"click the input", "put the cursor there, and leave the selected row"},
 		{"Ctrl-R", "show or hide reasoning: the selected row's, or every row's"},
 		{"Ctrl-O", "show tool arguments and output in full: the selected row's, or every row's"},
+		{"Tab", "with the host's completions listed over the input: put the chosen one in; Up Down choose, Esc closes the list"},
 		{"Shift-Tab", "ask the host for its next mode, shown on the status line; a host without modes refuses"},
 		{"Ctrl-/  F1", "this list"},
 	}},

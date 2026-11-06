@@ -210,6 +210,8 @@ type Model struct {
 	note string
 	// status is the status line's make-up (status.go).
 	status StatusConfig
+	// comp is the host's completion of the input (complete.go).
+	comp completer
 }
 
 var _ tea.Model = (*Model)(nil)
@@ -510,6 +512,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case submitDoneMsg:
 		return m.submitDone(msg)
+	case completedMsg:
+		m.completed(msg)
+		return m, nil
 	case StatusMsg:
 		m.relayout()
 		return m, nil
@@ -751,6 +756,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.treeKey(msg)
 	case screenKeys:
 		return m.keysKey(msg)
+	}
+	if m.frozen == nil && m.completionKey(msg) {
+		return m, nil
 	}
 	switch msg.String() {
 	case "tab":
@@ -1006,7 +1014,7 @@ func (m *Model) relayout() {
 	if m.err != "" {
 		used++
 	}
-	used += len(m.queuedLines()) + len(m.submitLines())
+	used += len(m.queuedLines()) + len(m.submitLines()) + len(m.completionLines())
 	m.vp.SetWidth(m.width)
 	m.vp.SetHeight(max(m.height-used, 1))
 	if m.screen == screenKeys {
@@ -1209,6 +1217,8 @@ func (m *Model) frame() string {
 	// What the submit function has not answered, and its last reply,
 	// sit over the input too: neither is on the record.
 	parts = append(parts, m.submitLines()...)
+	// The host's completions of the word being typed sit just over it.
+	parts = append(parts, m.completionLines()...)
 	switch {
 	case m.screen == screenTree:
 		parts = append(parts, dimStyle.Render(truncate("tree: up/down select, enter view the branch, c continue from here, esc back", m.width)))
@@ -1254,7 +1264,7 @@ func (m *Model) updateInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	m.in, cmd = m.in.Update(msg)
 	m.relayout()
-	return cmd
+	return tea.Batch(cmd, m.askCompletion())
 }
 
 // inputRowsUsed is how many screen rows the input needs for value at

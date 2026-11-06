@@ -1660,6 +1660,41 @@ answer's `Terminate`, `StopRefused`). Implementation, no RFC rule.
   permission's would be the riskier surprise; dax's REPL took a and A
   (dax#146), so the two fronts differ there.
 
+## Decided in implementation, completion from the host
+
+agentconsole#45. Implementation, no RFC rule.
+
+- **`console.WithCompletion(fn)`.** `fn(ctx, console.Completing)
+  []console.Completion`. `Completing` is `Before` (the input up to the
+  cursor), `Word` (its end back to the last space or line break: what a
+  completion replaces) and `Running`; a `Completion` is `Text`, put in
+  place of the word, and `Help`, one line shown beside it. A struct of
+  its own rather than `Line`: the host needs the word and where the
+  cursor is, which a submitted line does not have.
+- **The host decides what a word is.** The client asks about every
+  word that ends at the cursor as it changes, and gives a slash or an @
+  no meaning, as it gives a submitted line none ("submitted lines"): a
+  slash command is the host's, and so are the paths, since the files
+  may be in a workspace elsewhere. dax returns its commands with their
+  help for a slash word at the input's start, and its workspace's paths
+  for an @ word; nothing for any other.
+- **Off the program's goroutine.** `fn` runs in a tea.Cmd under a
+  context that ends after a second (a remote workspace can be slow).
+  Each request is numbered, and an answer for a word since changed is
+  dropped; the list for the old word goes as soon as the word changes,
+  so Tab never puts a completion of another word in.
+- **The list.** Over the input, under the submit lines, at most eight
+  rows around the chosen one (a count past that), the chosen one
+  marked. Tab takes it, Up and Down choose (the history walk yields
+  while a list is open), Esc closes it until the word changes. A word
+  just completed is not asked about again, so a full completion does
+  not reopen the list on itself; typing on (after a directory) asks.
+  No list while a refusal's reason or a note is typed, on a read-only
+  view or another screen. With no list open, Tab cycles the pane.
+- **`@path` is text.** The line is sent as typed. What an @path sends
+  (the path, or the file's content) is the host's, in its submit
+  function; the client reads no file.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

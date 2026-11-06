@@ -100,6 +100,15 @@ versions may break the API.
   session). With one, the panel shows the rule beside g (approve with a
   session grant) and G (approve with the grant kept), and the intent
   carries the grant for the host's controller to make.
+- Added (#45): `console.WithCompletion` completes the input from the
+  host. As the word that ends at the cursor changes, the host's
+  function is asked (`console.Completing`: the input up to the cursor,
+  the word, whether a run goes), off the program's goroutine with a
+  one-second timeout, and its `console.Completion`s (text and a line of
+  help) are listed over the input: Up and Down choose, Tab puts the
+  chosen text in place of the word, Esc closes the list. With no list
+  open Tab cycles the pane as before. The client gives a slash or an @
+  no meaning, and sends an `@path` as typed.
 
 ## v0.0.15 - 2026-11-04
 

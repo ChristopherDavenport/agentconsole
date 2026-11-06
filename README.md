@@ -152,7 +152,12 @@ approves it; n refuses it and lets the run go on, the model reading the
 refusal, and s refuses it and stops the run, each with an optional
 reason. A host that offers a rule for the call (`console.WithGrantOffer`)
 adds g, approve and allow the rule for the session, and G, the same
-kept beyond it; the grant is the host's to make. Ctrl-/ (or F1) lists every
+kept beyond it; the grant is the host's to make. A host that completes
+the input (`console.WithCompletion`: its slash commands, its workspace's
+paths for an `@path`) lists what it offers for the word being typed
+over the input; Up and Down choose, Tab puts it in, Esc closes the list,
+and with no list Tab cycles the pane. An `@path` is sent as typed, for
+the host to read; the client reads no file. Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 
 The tree and the record detail:

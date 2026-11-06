@@ -44,8 +44,10 @@ committed, and live events carry only what is not committed yet.
   - `console`: `Run(ctx, record, source, controller, ...Option)`, the program, the feeds,
     signals and the drain at exit. The input is the embedder's:
     `WithSubmit` hands it each submitted line to decide what it is,
-    `WithHistory` gives the input the host's history to walk, and
-    `WithStatus` makes up the status line, the host's segments included.
+    `WithHistory` gives the input the host's history to walk,
+    `WithStatus` makes up the status line, the host's segments included,
+    `WithCompletion` completes the input's word from the host, and
+    `WithGrantOffer` has the permission panel offer the host's rule.
   - `internal/inspect`: the record-detail panes, computed on demand from
     a snapshot of the session (`Record.Read`), never from the follower's
     session. It decodes the records other products write (policy

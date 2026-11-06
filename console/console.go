@@ -69,6 +69,7 @@ type config struct {
 	record  func(string)
 	history bool
 	offer   func(context.Context, view.Permission) client.GrantOffer
+	comp    func(context.Context, Completing) []Completion
 	// status is the status line's make-up, when statusSet.
 	status    StatusLine
 	statusSet bool
@@ -135,6 +136,40 @@ func WithToolRenderers(rs toolview.Renderers) Option {
 // answers with a rule, the panel offers only "once".
 func WithGrantOffer(fn func(ctx context.Context, p view.Permission) client.GrantOffer) Option {
 	return func(c *config) { c.offer = fn }
+}
+
+// Completing is the input as the host is asked to complete it: Before,
+// what the input holds up to the cursor, Word its end back to the last
+// space or line break, which a completion replaces, and Running, whether
+// a run goes.
+type Completing struct {
+	Before  string
+	Word    string
+	Running bool
+}
+
+// Completion is one completion the host offers: Text, which replaces the
+// word, and Help, a line shown beside it (a command's arguments and what
+// it does), which may be empty.
+type Completion struct {
+	Text string
+	Help string
+}
+
+// WithCompletion completes the input from the host: its slash commands,
+// the paths of the workspace its tools act in, wherever that is. As the
+// word that ends at the cursor changes, fn is asked for it, off the
+// program's goroutine, under a context that ends after a second; an
+// answer for a word since changed is dropped. fn decides what a word is
+// (the client gives a slash or an @ no meaning) and returns nothing for
+// one it does not complete. A list with anything in it opens over the
+// input: Up and Down choose, Tab puts the chosen Text in place of the
+// word, Esc closes it until the word changes; with no list open Tab
+// cycles the pane. What is completed is text in the input: an @path is
+// sent as typed, for the host's submit function to read as it chooses,
+// and the client reads no file.
+func WithCompletion(fn func(ctx context.Context, c Completing) []Completion) Option {
+	return func(c *config) { c.comp = fn }
 }
 
 // Line is a line the user submitted in the client's input.
@@ -238,6 +273,16 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	}
 	if cfg.offer != nil {
 		topts = append(topts, tui.WithGrantOffer(cfg.offer))
+	}
+	if fn := cfg.comp; fn != nil {
+		topts = append(topts, tui.WithCompletion(func(ctx context.Context, c tui.Completing) []tui.Completion {
+			got := fn(ctx, Completing(c))
+			out := make([]tui.Completion, len(got))
+			for i, g := range got {
+				out[i] = tui.Completion(g)
+			}
+			return out
+		}))
 	}
 	if fn := cfg.submit; fn != nil {
 		topts = append(topts, tui.WithSubmit(func(ctx context.Context, l tui.Line) (tui.Submission, error) {
