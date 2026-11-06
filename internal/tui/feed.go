@@ -36,11 +36,11 @@ type FeedErrMsg struct {
 //
 // The live stream subscribes before Attach returns, so a run started
 // right after misses no event. The returned function waits for both
-// goroutines, which stop when ctx is done.
-func Attach(ctx context.Context, rec client.Record, src client.Source, send func(tea.Msg)) (wait func()) {
+// goroutines, which stop when ctx is done. The view is made with opts.
+func Attach(ctx context.Context, rec client.Record, src client.Source, send func(tea.Msg), opts ...view.Option) (wait func()) {
 	var (
 		mu sync.Mutex
-		v  = view.New()
+		v  = view.New(opts...)
 		wg sync.WaitGroup
 	)
 	step := func(apply func()) {

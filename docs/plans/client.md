@@ -1695,6 +1695,39 @@ agentconsole#45. Implementation, no RFC rule.
   (the path, or the file's content) is the host's, in its submit
   function; the client reads no file.
 
+## Decided in implementation, view follow-ups
+
+agentconsole#47, from the fix batch review. Implementation, no RFC
+rule.
+
+- **The show-hidden switch.** `view.WithHidden()`, a `view.Option`
+  (`view.New(...Option)`), and `console.WithHidden()`, which passes it
+  through `tui.Attach(..., ...view.Option)`. With it the view lists
+  what the record marks hidden from a person's view: a queued input
+  with `visible` false (`Queued.Hidden`) and an item entry with
+  `visible` false (`Row.Hidden`), the drained input among them. Each is
+  the host's: a user message's `Words` is `WordsComposed` even under
+  the person's trigger, so no client shows it as their words. The TUI
+  says "hidden, queued ..." over the input and "(hidden)" on a row. A
+  hidden item has no overlay (`client.Copy` drops it) and is listed
+  once its entry lands. A static option, not a key: a key would have
+  to reach the view under the feed's lock, and no one has asked for
+  one.
+- **`Model()` concurrency.** Documented, not made safe: a View is not
+  safe for concurrent use, Model included, since Model keeps the viewed
+  line's left-out cache; a caller holds one lock over Record, Live and
+  Model, as `tui.Attach` does (v0.0.15, 5053355).
+- **Calls waiting on another branch.** The tree marks them.
+  `view.Branch.Open` counts, for a branch the view is not on, the calls
+  its line left owed an output: walking back from the line's end to its
+  last run entry, an end's pending calls with no output after it, or,
+  for a start with no end (the process stopped mid-run), the calls
+  dispatched since with no output. The TUI adds "1 call waiting" ("N
+  calls waiting") to the branch. 0 on the viewed branch, whose calls are
+  `Permissions` and `CutOff`. The walk stops at the first run entry, so
+  it is short for a branch with runs; a branch with none walks to the
+  root, once per branch per step.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

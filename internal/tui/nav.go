@@ -462,6 +462,12 @@ func (m *Model) treeItems() []treeItem {
 		if b.RunID != "" {
 			run = "  run " + shortID(b.RunID)
 		}
+		switch {
+		case b.Open == 1:
+			run += "  1 call waiting"
+		case b.Open > 1:
+			run += "  " + itoa(b.Open) + " calls waiting"
+		}
 		out = append(out, treeItem{
 			text:   mark + when + b.Label + run,
 			leaf:   b.Leaf,

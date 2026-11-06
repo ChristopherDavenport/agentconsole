@@ -157,6 +157,8 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 	}
 	tag := ""
 	switch {
+	case row.Hidden:
+		tag = dimStyle.Render(" (hidden)")
 	case row.KeptFromModel:
 		tag = dimStyle.Render(" (kept from the model: not sent)")
 	case row.CopiedFrom != "":

@@ -70,6 +70,7 @@ type config struct {
 	history bool
 	offer   func(context.Context, view.Permission) client.GrantOffer
 	comp    func(context.Context, Completing) []Completion
+	hidden  bool
 	// status is the status line's make-up, when statusSet.
 	status    StatusLine
 	statusSet bool
@@ -171,6 +172,12 @@ type Completion struct {
 func WithCompletion(fn func(ctx context.Context, c Completing) []Completion) Option {
 	return func(c *config) { c.comp = fn }
 }
+
+// WithHidden lists what the record marks hidden from a person's view
+// ([view.WithHidden]): an input the host queued with visible false, over
+// the input, and a hidden item in the conversation, each marked hidden
+// and never shown as the person's words.
+func WithHidden() Option { return func(c *config) { c.hidden = true } }
 
 // Line is a line the user submitted in the client's input.
 type Line struct {
@@ -335,7 +342,11 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 			}
 		}()
 	}
-	wait := tui.Attach(ctx, rec, src, p.Send)
+	var vopts []view.Option
+	if cfg.hidden {
+		vopts = append(vopts, view.WithHidden())
+	}
+	wait := tui.Attach(ctx, rec, src, p.Send, vopts...)
 	_, err := p.Run()
 	// A run may still be going (a second ctrl+c quits without waiting for
 	// an abort to land). Let it write its end before the caller closes

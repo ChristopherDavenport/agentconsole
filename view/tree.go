@@ -25,6 +25,13 @@ type Branch struct {
 	Time time.Time
 	// Current is set for the branch the view is on.
 	Current bool
+	// Open counts the calls the branch's line left owed an output, which
+	// moving the head there would show (as permissions or cut-off
+	// calls): those its last run's end lists as pending with no output
+	// after, or, for a last run with no end (the process stopped during
+	// it), those dispatched with no output. 0 on the branch the view is
+	// on, whose calls are the Model's Permissions and CutOff.
+	Open int
 }
 
 // Link is a link entry of the session: a subsession it spawned, a
@@ -94,6 +101,9 @@ func branchesOf(s *agentsession.Session, tips []string, current string) []Branch
 
 func describe(s *agentsession.Session, tip string, current bool) Branch {
 	b := Branch{Leaf: tip, Current: current, Label: "(no message)"}
+	if !current {
+		b.Open = openCalls(s, lineEnd(s, tip))
+	}
 	if e, ok := s.Entry(tip); ok {
 		b.Time = e.Base().Timestamp
 	}
@@ -158,4 +168,47 @@ func At(s *agentsession.Session, leaf string) Model {
 		v.Record(agentsession.Change{Kind: agentsession.Head, Session: s, Leaf: leaf})
 	}
 	return v.Model()
+}
+
+// openCalls counts the calls the line ending at end left owed an
+// output, walking back from end to its last run entry: an end's pending
+// calls with no output after it, or, when the last is a start (a run
+// that never ended), the calls dispatched since with no output.
+func openCalls(s *agentsession.Session, end string) int {
+	outs := map[string]bool{}
+	dispatched := map[string]bool{}
+	for id, hops := end, 0; id != "" && hops <= s.Len(); hops++ {
+		e, ok := s.Entry(id)
+		if !ok {
+			break
+		}
+		switch x := e.(type) {
+		case *agentsession.ItemEntry:
+			if o, ok := x.Item.(*openresponses.FunctionCallOutput); ok {
+				outs[o.CallID] = true
+			}
+		case *agentsession.DispatchEntry:
+			dispatched[x.CallID] = true
+		case *agentsession.RunEntry:
+			n := 0
+			if x.IsEnd() {
+				for _, c := range x.Pending {
+					if !outs[c] {
+						n++
+					}
+				}
+				return n
+			}
+			if x.IsStart() {
+				for c := range dispatched {
+					if !outs[c] {
+						n++
+					}
+				}
+				return n
+			}
+		}
+		id = e.Base().Parent
+	}
+	return 0
 }

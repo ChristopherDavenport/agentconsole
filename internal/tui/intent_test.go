@@ -115,6 +115,12 @@ func (c *intents) next(t *testing.T, n int) client.Intent {
 // a view with no agent behind it.
 func newViewApp(t *testing.T, src client.Source, act client.Controller, opts ...tui.Option) *app {
 	t.Helper()
+	return newViewAppOf(t, src, act, nil, opts...)
+}
+
+// newViewAppOf is newViewApp with a view made with vopts.
+func newViewAppOf(t *testing.T, src client.Source, act client.Controller, vopts []view.Option, opts ...tui.Option) *app {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
 	if err != nil {
@@ -130,7 +136,7 @@ func newViewApp(t *testing.T, src client.Source, act client.Controller, opts ...
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, record: record}
 	a.m = tui.New(ctx, record, src, act, append([]tui.Option{tui.WithPanelSettle(0)}, opts...)...)
-	a.wait = tui.Attach(ctx, record, src, a.send)
+	a.wait = tui.Attach(ctx, record, src, a.send, vopts...)
 	t.Cleanup(func() {
 		cancel()
 		a.wait()

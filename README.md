@@ -157,7 +157,10 @@ the input (`console.WithCompletion`: its slash commands, its workspace's
 paths for an `@path`) lists what it offers for the word being typed
 over the input; Up and Down choose, Tab puts it in, Esc closes the list,
 and with no list Tab cycles the pane. An `@path` is sent as typed, for
-the host to read; the client reads no file. Ctrl-/ (or F1) lists every
+the host to read; the client reads no file. An input the host queued
+hidden, and a hidden item, are left out unless the host lists them
+(`console.WithHidden`), marked hidden and never as the person's words.
+Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 
 The tree and the record detail:
@@ -165,7 +168,9 @@ The tree and the record detail:
 - `ctrl+t` switches between the conversation and the tree of the session's
   branches, its origin (if it is a fork), the sessions it linked and,
   when the record can list them, the sessions made from it (its forks,
-  with the entry each was made at). In the
+  with the entry each was made at). A branch whose line left calls
+  waiting for an answer, or cut off by a process that stopped, says how
+  many ("1 call waiting"); moving the head there shows them. In the
   tree, up/down select, Enter views a branch or opens the origin read-only
   (Esc returns to the live session; the agent's head does not move), and
   `c` continues from the selected branch: the agent's head moves there and

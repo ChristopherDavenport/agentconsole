@@ -109,6 +109,17 @@ versions may break the API.
   chosen text in place of the word, Esc closes the list. With no list
   open Tab cycles the pane as before. The client gives a slash or an @
   no meaning, and sends an `@path` as typed.
+- Added (#47): `view.WithHidden` (a `view.Option`; `view.New` takes
+  options) and `console.WithHidden` list what the record marks hidden:
+  an input the host queued with `visible` false (`view.Queued.Hidden`)
+  and a hidden item entry (`view.Row.Hidden`), marked "hidden" and
+  never the person's words (their `Words` is composed whatever the
+  trigger says). Without it nothing changes.
+- Added (#47): `view.Branch.Open` counts the calls a branch the view is
+  not on left owed an output (its last run's pending calls, or the
+  calls a run that never ended dispatched), and the tree shows it ("1
+  call waiting"), so a dispatch left on another branch after a restart
+  is seen before the head moves there.
 
 ## v0.0.15 - 2026-11-04
 

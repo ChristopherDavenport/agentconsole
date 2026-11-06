@@ -98,6 +98,9 @@ func (m *Model) queuedLines() []string {
 		case q.Provenance != nil && q.Provenance.Trust != nil && len(q.Provenance.Trust.Reads) > 0:
 			label += " (" + strings.Join(q.Provenance.Trust.Reads, ", ") + ")"
 		}
+		if q.Hidden {
+			label = "hidden, " + label
+		}
 		lines = append(lines, dimStyle.Render(truncate("  "+label+": "+text, m.width)))
 	}
 	return lines

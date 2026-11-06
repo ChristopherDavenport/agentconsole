@@ -251,6 +251,9 @@ type Row struct {
 	// Fold is set on the row of a compaction entry: the point where the
 	// record folds what came before into a summary, which Item carries.
 	Fold *Fold
+	// Hidden is set for an item the record marks hidden from view
+	// (visible false), listed only by a view made [WithHidden].
+	Hidden bool
 }
 
 // What a row's LeftOut says.
@@ -316,6 +319,9 @@ type Queued struct {
 	// Words and Provenance are as on a Row, read off the queued entry.
 	Words      agentsession.Words
 	Provenance *Provenance
+	// Hidden is set for an input the host queued hidden from view,
+	// listed only by a view made [WithHidden].
+	Hidden bool
 }
 
 // Provenance says where a message the host composed came from (agentturn
@@ -536,11 +542,26 @@ type View struct {
 	endSeen   map[string]bool
 	endOrder  []string
 	turn      Turn
+	// showHidden lists what the record marks hidden (WithHidden).
+	showHidden bool
 }
 
+// Option configures [New].
+type Option func(*View)
+
+// WithHidden lists what the record marks hidden from a person's view,
+// which the view otherwise leaves out: an input the host queued with
+// visible false (Model.Queued) and an item entry with visible false
+// (Model.Rows), the input's once it is drained. Each is marked Hidden,
+// and a user message among them is never the person's words: its Words
+// is agentsession.WordsComposed whatever its trigger says, since the
+// host sent it on the person's behalf. A hidden item has no overlay:
+// client.Copy drops it, so it is listed once its entry lands.
+func WithHidden() Option { return func(v *View) { v.showHidden = true } }
+
 // New returns an empty view.
-func New() *View {
-	return &View{
+func New(opts ...Option) *View {
+	v := &View{
 		landedItems: map[string][]landedItem{},
 		parent:      map[string]string{},
 		runTip:      map[string]string{},
@@ -552,6 +573,18 @@ func New() *View {
 		runSeq:      map[string]int{},
 		endSeen:     map[string]bool{},
 	}
+	for _, o := range opts {
+		o(v)
+	}
+	return v
+}
+
+// hostWords is whose words a hidden input is: never the person's.
+func hostWords(words agentsession.Words) agentsession.Words {
+	if words == agentsession.WordsPerson {
+		return agentsession.WordsComposed
+	}
+	return words
 }
 
 // Record applies a change from the record's follow.
@@ -782,10 +815,13 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	for _, q := range agentsession.Queued(s.Path(leaf)) {
 		hidden, words, prov := queuedMarks(q)
 		if hidden {
-			// Not shown when it is drained either.
-			continue
+			if !v.showHidden {
+				// Not shown when it is drained either.
+				continue
+			}
+			words = hostWords(words)
 		}
-		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: words, Provenance: prov})
+		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: words, Provenance: prov, Hidden: hidden})
 	}
 	v.leaves = tips(s)
 	v.branches = branchesOf(s, branchTips(s, v.leaf), v.leaf)
@@ -1404,11 +1440,14 @@ func (v *View) Model() Model {
 		case *agentsession.ConfigEntry:
 			settings = settings.Apply(x)
 		case *agentsession.ItemEntry:
-			if !x.IsVisible() {
+			if !x.IsVisible() && !v.showHidden {
 				continue
 			}
-			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID]}
+			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID], Hidden: !x.IsVisible()}
 			row.Words, row.Provenance = itemMarks(x)
+			if row.Hidden {
+				row.Words = hostWords(row.Words)
+			}
 			if x.CopiedFrom != nil {
 				row.CopiedFrom = x.CopiedFrom.Session
 			}
@@ -1446,7 +1485,7 @@ func (v *View) Model() Model {
 	m.CutOff = append([]Permission(nil), v.cut...)
 	m.Questions = append([]agentturn.Question(nil), v.asked...)
 	for _, q := range v.queued {
-		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: q.Words, Provenance: q.Provenance.clone()})
+		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: q.Words, Provenance: q.Provenance.clone(), Hidden: q.Hidden})
 	}
 	return m
 }
