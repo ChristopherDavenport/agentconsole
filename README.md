@@ -60,7 +60,12 @@ Any `agentturn.Control` will do: a bare `*agentturn.Agent` with its
 `Control` has) and refuses it otherwise, which the tree shows. A product
 with intents of its own to handle (answering some questions by rule,
 its own commands, recording who answered) writes its own `Controller`
-and may pass the rest to `Direct`. The public packages are `console`,
+and may pass the rest to `Direct`. `Direct` steers through the
+control's `Accept` when it has one, and claims nothing for the person:
+an embedder that knows a person typed a line puts a trigger of kind
+`human` on the context of the `Prompt` and `Queue` intents it passes
+on (`agentturn.ContextWithTrigger`), so the session records the line as
+their words, as this module's binary does. The public packages are `console`,
 `client`, `view` and `toolview`; the terminal model and the record panes
 are internal, and none of them imports agentkit.
 

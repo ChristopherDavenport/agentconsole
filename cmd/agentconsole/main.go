@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ChristopherDavenport/agentkit"
+	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agenttool"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
@@ -116,9 +117,32 @@ func run() error {
 		return err
 	}
 
-	err = console.Run(ctx, record, ctl, client.Direct(ctl))
+	err = console.Run(ctx, record, ctl, typedAt(client.Direct(ctl), atTerminal))
 	if err == nil {
 		fmt.Fprintln(os.Stderr, "session", rec.SessionID())
 	}
 	return err
+}
+
+// atTerminal is who sends what this binary's terminal sends: the person
+// at the keys, so the record holds what they type as their words
+// (agentsession format 0.21's trigger kind human).
+var atTerminal = agentturn.Trigger{Kind: agentsession.TriggerHuman, Source: "terminal"}
+
+// typedAt is c with t claimed for what the person sends: the trigger of
+// a Prompt's and a Queue's input, and the answerer of a Reply. The view
+// sends intents and holds no identity; the embedder knows who is at the
+// keys and says so. This binary takes every line as typed, having no
+// commands of its own, and a message it composed from layers would be
+// recorded without the kind human whatever its trigger.
+func typedAt(c client.Controller, t agentturn.Trigger) client.Controller {
+	return func(ctx context.Context, in client.Intent) error {
+		switch in.(type) {
+		case client.Prompt, client.Queue:
+			ctx = agentturn.ContextWithTrigger(ctx, t)
+		case client.Reply:
+			ctx = agentturn.ContextWithAnswerer(ctx, t)
+		}
+		return c(ctx, in)
+	}
 }

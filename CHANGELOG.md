@@ -26,6 +26,17 @@ versions may break the API.
   after, so a hidden owed input stays hidden after the bump; a copied
   input queued under the person's trigger (agentturn's `Queued.Copied`)
   is not shown as theirs.
+- Changed (#50): `client.Direct` sends a steer through the control's
+  `Accept` when it is an `agentturn.Accepter` (agentkit's `Control`,
+  front/control's `Client`, a bare agent): it returns once the steer is
+  queued, and a steer that misses the run's last drain is taken by a
+  run the agent starts after it, where before it waited for the next
+  prompt. A follow-up still goes through `Queue`. `Direct` sets no
+  trigger: the embedder claims the person's words.
+- Changed (#50): the binary claims what is typed at its terminal as the
+  person's (a trigger of kind `human`, source `terminal`, on prompts and
+  steers, and the answerer of a reply), so its sessions record typed
+  lines as the person's words.
 - Added (#51): the inspect panes read agentpolicy v0.0.20's `replace`
   verdict. A replacement of the policy ends the plain grants
   (`Engine.Grant`, `GrantOver`) as of its entry, "ended by the policy's

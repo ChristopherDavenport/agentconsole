@@ -77,6 +77,16 @@ type headMover interface {
 //     failed before it started, with that error ([agentturn.ErrRunning],
 //     say). An error after the start reaches the client in the run's
 //     [agentturn.RunEnd].
+//   - A steer (Queue with [agentturn.QueueSteer]) goes through c's
+//     Accept when c is an [agentturn.Accepter] (agentkit's Control,
+//     front/control's Client and *agentturn.Agent are): a delivery that
+//     returns once the items are queued, written to the record first by
+//     a recording control, and that the agent settles on its own, in the
+//     run that goes or in one it starts once that run has ended, so a
+//     steer that misses the run's last drain is still answered. Its
+//     outcome reaches the client as events and entries; nothing waits
+//     on it. A follow-up, and a steer to a control without Accept, go
+//     through c.Queue.
 //   - Queue, Abort and Reply are c's own, which return at once. Reply
 //     goes under ctx, which names who answered when it carries
 //     [agentturn.ContextWithAnswerer]: the view holds no identity, so
@@ -87,7 +97,16 @@ type headMover interface {
 //     [ErrNoHeadMove] otherwise.
 //
 // The run is under ctx: ending ctx ends the run, as it does an
-// in-process Prompt's.
+// in-process Prompt's. A run Accept starts takes ctx's values without
+// its cancellation.
+//
+// Direct claims nothing for the person: what brought an input in is on
+// ctx ([agentturn.ContextWithTrigger]), and the view, holding no
+// identity, sets none. An embedder that knows a person typed the line
+// wraps the Controller and puts a trigger of kind
+// agentsession.TriggerHuman on a Prompt's and a Queue's context, as
+// this module's binary does; without it the record holds the input
+// unclaimed, which no reader shows as the person's words.
 func Direct(c agentturn.Control) Controller {
 	return func(ctx context.Context, in Intent) error {
 		switch in := in.(type) {
@@ -102,6 +121,10 @@ func Direct(c agentturn.Control) Controller {
 				return err
 			})
 		case Queue:
+			if a, ok := c.(agentturn.Accepter); ok && in.Mode == agentturn.QueueSteer {
+				_, err := a.Accept(ctx, in.Items...)
+				return err
+			}
 			return c.Queue(ctx, in.Mode, in.Items...)
 		case Abort:
 			c.Abort()

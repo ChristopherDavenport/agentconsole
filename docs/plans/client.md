@@ -1285,7 +1285,8 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   off by a quiet tool, so a controller built on it could not answer
   promptly: the TUI's ordered send of a second steer would wait out the
   tool call. `Direct` keeps `Queue` until a delivery that returns once
-  it is accepted exists.
+  it is accepted exists. (It exists now, agentturn's `Accept`: see
+  "steer through Accept, and who claims the person's words".)
 
 ## Decided in implementation, a panel settles before it answers
 
@@ -1365,6 +1366,45 @@ agentturn v0.0.38.
   queued list, which reads the record and not the live `queued` event
   (`client.Copy` drops it), shows it as not the person's. The view
   reads no live `queued` event: the entry lands no later.
+
+## Decided in implementation, steer through Accept, and who claims the person's words
+
+agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
+#303) and agentkit v0.0.17 (`Control.Accept`).
+
+- **A steer is a delivery the agent accepts.** `Direct` sends a `Queue`
+  intent of mode steer through the control's `Accept` when the control
+  is an `agentturn.Accepter`: agentkit's `Control` (which writes the
+  queued entry, carrying `deliver`, before the agent accepts), front/
+  control's `Client` (`POST /accept`) and a bare `*agentturn.Agent`.
+  `Accept` returns once the items are queued; `Direct` drops the
+  `Delivery`, whose outcome arrives as events and entries like any
+  run's. A follow-up, and a steer to a control without `Accept` (a
+  wrapper that embeds the `agentturn.Control` interface hides it), go
+  through `Queue` as before. What changes for the person: a steer that
+  misses the run's last drain is answered by a run the agent starts once
+  that run has ended, where `Queue` left it waiting for the next prompt;
+  an abort before the run takes it still leaves it queued, starting
+  nothing (agentturn v0.0.38). The issue's premise, that a second steer
+  waited out a quiet tool, was `Deliver`'s, which `Direct` never used;
+  with `Queue` and with `Accept` alike both steers are on the record
+  while the tool runs, which a test over a bare agent and the TUI's
+  queued-steer test check.
+- **The person's words are the embedder's claim.** The view sends
+  intents and holds no identity, so `Direct` puts no trigger on a
+  context: a prompt or a steer sent through it alone is recorded with no
+  trigger, unclaimed, and shown "user (unclaimed)". The embedder, which
+  knows a person is at the keys, wraps its `Controller` and puts a
+  trigger of kind `human` on a `Prompt`'s and a `Queue`'s context
+  (`agentturn.ContextWithTrigger`), and the answerer on a `Reply`'s
+  (`ContextWithAnswerer`). `cmd/agentconsole` does (`typedAt`, with
+  kind `human`, source `terminal`), since every line it takes is typed;
+  dax does it for terminal input (its `AtTerminal`) and decides for its
+  own slash commands, which may compose. A message the host composes
+  from layers is recorded without the kind whatever the trigger, by
+  agentturn/session. Over front/control the claim is the server's to
+  grant (`WithTriggerClaims`). No library helper: one wrapper is a few
+  lines and its identity is the embedder's.
 
 ## Decided in implementation, a policy replacement in the panes
 
