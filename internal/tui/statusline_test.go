@@ -54,7 +54,7 @@ func statusRow(screen string) string { first, _, _ := strings.Cut(screen, "\n");
 
 // Shift-Tab sends the next-mode intent, which names no mode; the host
 // that cycles its modes shows the new one in its own segment, in the
-// colour it gives it (#43).
+// color it gives it (#43).
 func TestShiftTabAsksTheHostForTheNextMode(t *testing.T) {
 	var mu sync.Mutex
 	modes, at := []string{"default", "plan", "bypass"}, 0
@@ -72,7 +72,7 @@ func TestShiftTabAsksTheHostForTheNextMode(t *testing.T) {
 		defer mu.Unlock()
 		s := tui.Segment{Text: "mode " + modes[at]}
 		if modes[at] == "bypass" {
-			s.Colour = "1" // a mode that asks nothing is a warning
+			s.Color = "1" // a mode that asks nothing is a warning
 		}
 		return s
 	}

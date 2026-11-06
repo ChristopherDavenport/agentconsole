@@ -22,7 +22,7 @@ type StatusConfig struct {
 	// lower bar, and the conversation on the first; the notices then
 	// take a row of their own just over the line, when there are any.
 	Bottom bool
-	// Powerline draws each segment as a coloured block with a separator
+	// Powerline draws each segment as a colored block with a separator
 	// glyph between blocks, instead of " | " on one reversed line.
 	Powerline bool
 	// Segments are the names shown, in order: built-ins
@@ -30,8 +30,8 @@ type StatusConfig struct {
 	Segments []string
 	// Host are the host's segments by name, read as the line is drawn.
 	Host map[string]func() Segment
-	// Colours are the segments' colours, by name.
-	Colours map[string]Colours
+	// Colors are the segments' colors, by name.
+	Colors map[string]Colors
 	// Window is the context window of a model, in tokens, 0 when not
 	// known; nil knows none.
 	Window func(model string) int
@@ -41,24 +41,24 @@ type StatusConfig struct {
 }
 
 // Segment is a host segment's value: its text, "" to hide it with its
-// separator, and its colour, "" for the configured one.
+// separator, and its color, "" for the configured one.
 type Segment struct {
-	Text   string
-	Colour string
+	Text  string
+	Color string
 }
 
-// Colours is a segment's colour, and for a numeric one the colours past
+// Colors is a segment's color, and for a numeric one the colors past
 // thresholds of its value.
-type Colours struct {
-	Colour     string
+type Colors struct {
+	Color      string
 	Thresholds []Threshold
 }
 
-// Threshold colours a numeric segment whose value is At or more, unless
+// Threshold colors a numeric segment whose value is At or more, unless
 // a higher threshold it also reaches says otherwise.
 type Threshold struct {
-	At     float64
-	Colour string
+	At    float64
+	Color string
 }
 
 // StatusMsg asks for the status line to be drawn again: a host segment's
@@ -68,7 +68,7 @@ type StatusMsg struct{}
 // WithStatus sets the status line's make-up.
 func WithStatus(c StatusConfig) Option { return func(m *Model) { m.status = c } }
 
-// The built-in segments, and whether each has a number its colour's
+// The built-in segments, and whether each has a number its color's
 // thresholds read: context in percent of the window, tokens in and out
 // summed, cost in US dollars, time in seconds, turn and retry as counted.
 var builtins = map[string]bool{
@@ -88,7 +88,7 @@ func DefaultSegments() []string {
 	return []string{"time", "tokens", "cost", "model", "retry", "turn", "session", "verified", "stopped"}
 }
 
-// defaultContext colours the context as it fills: green, yellow from
+// defaultContext colors the context as it fills: green, yellow from
 // half, red from four fifths.
 var defaultContext = []Threshold{{0, "2"}, {50, "3"}, {80, "1"}}
 
@@ -108,7 +108,7 @@ func (c StatusConfig) Check() error {
 			errs = append(errs, fmt.Errorf("status: unknown segment %q", name))
 		}
 	}
-	for name, col := range c.Colours {
+	for name, col := range c.Colors {
 		if len(col.Thresholds) > 0 && !builtins[name] {
 			errs = append(errs, fmt.Errorf("status: segment %q has no number for thresholds", name))
 		}
@@ -116,9 +116,9 @@ func (c StatusConfig) Check() error {
 	return errors.Join(errs...)
 }
 
-// piece is a segment as drawn: its name, text and colour.
+// piece is a segment as drawn: its name, text and color.
 type piece struct {
-	name, text, colour string
+	name, text, color string
 }
 
 // statusIn is what the built-in segments are read from.
@@ -130,7 +130,7 @@ type statusIn struct {
 	cost     client.Cost
 }
 
-// pieces are the segments that show, in order, with their colours.
+// pieces are the segments that show, in order, with their colors.
 func (c StatusConfig) pieces(in statusIn) []piece {
 	names := c.Segments
 	if names == nil {
@@ -141,13 +141,13 @@ func (c StatusConfig) pieces(in statusIn) []piece {
 		var p piece
 		if fn, ok := c.Host[name]; ok {
 			s := fn()
-			p = piece{name: name, text: s.Text, colour: s.Colour}
-			if p.colour == "" {
-				p.colour = c.Colours[name].Colour
+			p = piece{name: name, text: s.Text, color: s.Color}
+			if p.color == "" {
+				p.color = c.Colors[name].Color
 			}
 		} else {
 			text, value, known := c.builtin(name, in)
-			p = piece{name: name, text: text, colour: c.colour(name, value, known)}
+			p = piece{name: name, text: text, color: c.color(name, value, known)}
 		}
 		if p.text != "" {
 			ps = append(ps, p)
@@ -156,18 +156,18 @@ func (c StatusConfig) pieces(in statusIn) []piece {
 	return ps
 }
 
-// colour is a built-in segment's colour: the highest threshold its value
-// reaches, when it has one, else the configured colour.
-func (c StatusConfig) colour(name string, value float64, known bool) string {
-	col, set := c.Colours[name]
+// color is a built-in segment's color: the highest threshold its value
+// reaches, when it has one, else the configured color.
+func (c StatusConfig) color(name string, value float64, known bool) string {
+	col, set := c.Colors[name]
 	ts := col.Thresholds
 	if !set && name == "context" {
 		ts = defaultContext
 	}
-	out, best, found := col.Colour, 0.0, false
+	out, best, found := col.Color, 0.0, false
 	for _, t := range ts {
 		if known && value >= t.At && (!found || t.At >= best) {
-			out, best, found = t.Colour, t.At, true
+			out, best, found = t.Color, t.At, true
 		}
 	}
 	return out
@@ -327,8 +327,8 @@ func statusText(m view.Model, worked string, verified bool, cost client.Cost) st
 	return plainText(ps)
 }
 
-// The powerline look: a block's colours when its segment has none, the
-// glyph between blocks, and the text on a coloured block.
+// The powerline look: a block's colors when its segment has none, the
+// glyph between blocks, and the text on a colored block.
 const (
 	powerBlock = "8"
 	powerText  = "15"
@@ -427,17 +427,17 @@ func statusFill(powerline bool, n int) string {
 }
 
 // drawPlain is the plain line: reversed, " | " between the pieces, a
-// piece with a colour drawn in it.
+// piece with a color drawn in it.
 func (m *Model) drawPlain(pre string, ps []piece, post string) (string, int) {
 	var b strings.Builder
 	width := 0
-	put := func(s, colour string) {
+	put := func(s, color string) {
 		if s == "" {
 			return
 		}
 		st := statusStyle
-		if colour != "" {
-			st = st.Foreground(lipgloss.Color(colour))
+		if color != "" {
+			st = st.Foreground(lipgloss.Color(color))
 		}
 		b.WriteString(st.Render(s))
 		width += lipgloss.Width(s)
@@ -447,14 +447,14 @@ func (m *Model) drawPlain(pre string, ps []piece, post string) (string, int) {
 		if i > 0 {
 			put(plainSep(ps[i-1], p), "")
 		}
-		put(p.text, p.colour)
+		put(p.text, p.color)
 	}
 	put(post, "")
 	return b.String(), width
 }
 
-// drawPowerline is the powerline line: each piece a block, its colour
-// the block's, with the glyph between blocks in the colour of the one it
+// drawPowerline is the powerline line: each piece a block, its color
+// the block's, with the glyph between blocks in the color of the one it
 // leaves on the one it enters. The notices around them are plain.
 func (m *Model) drawPowerline(pre string, ps []piece, post string) (string, int) {
 	var b strings.Builder
@@ -464,10 +464,10 @@ func (m *Model) drawPowerline(pre string, ps []piece, post string) (string, int)
 		width += lipgloss.Width(pre)
 	}
 	block := func(p piece) (bg, fg string) {
-		if p.colour == "" {
+		if p.color == "" {
 			return powerBlock, powerText
 		}
-		return p.colour, powerInk
+		return p.color, powerInk
 	}
 	for i, p := range ps {
 		bg, fg := block(p)

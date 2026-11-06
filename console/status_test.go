@@ -99,7 +99,7 @@ func TestAStatusLineItCannotDrawIsRefusedAtRun(t *testing.T) {
 		"position":        {Position: "middle"},
 		"style":           {Style: "fancy"},
 		"host built-in":   {Host: map[string]func() console.Segment{"model": func() console.Segment { return console.Segment{} }}},
-		"thresholds":      {Segments: []string{"session"}, Colours: map[string]console.SegmentColour{"session": {Thresholds: []console.Threshold{{At: 1, Colour: "1"}}}}},
+		"thresholds":      {Segments: []string{"session"}, Colors: map[string]console.SegmentColor{"session": {Thresholds: []console.Threshold{{At: 1, Color: "1"}}}}},
 	} {
 		err := console.Run(context.Background(), nil, nil, nil, console.WithStatus(s))
 		if err == nil {

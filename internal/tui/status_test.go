@@ -214,11 +214,11 @@ func TestAWideStatusLineIsCutAtASegment(t *testing.T) {
 	}
 }
 
-// TestTheContextSegmentColoursAsItFills: the context is the last call's
+// TestTheContextSegmentColorsAsItFills: the context is the last call's
 // input of the host's window for the model, green, yellow from half and
-// red from four fifths, "-- ctx" before a call; a configured colour or
+// red from four fifths, "-- ctx" before a call; a configured color or
 // thresholds replace the default.
-func TestTheContextSegmentColoursAsItFills(t *testing.T) {
+func TestTheContextSegmentColorsAsItFills(t *testing.T) {
 	window := func(model string) int {
 		if model == "big" {
 			return 1_000_000
@@ -230,9 +230,9 @@ func TestTheContextSegmentColoursAsItFills(t *testing.T) {
 		return view.Model{Config: model, LastCall: view.ModelCall{Model: model, Usage: openresponses.Usage{InputTokens: in}}}
 	}
 	for _, tc := range []struct {
-		v      view.Model
-		text   string
-		colour string
+		v     view.Model
+		text  string
+		color string
 	}{
 		{view.Model{Config: "big"}, "-- ctx", ""},
 		{at(410_000, "big"), "ctx 41% 410k/1.0M", "2"},
@@ -241,16 +241,16 @@ func TestTheContextSegmentColoursAsItFills(t *testing.T) {
 		{at(850_000, "small"), "ctx 850k", ""}, // no window known
 	} {
 		ps := c.pieces(statusIn{v: tc.v, verified: true})
-		if len(ps) != 1 || ps[0].text != tc.text || ps[0].colour != tc.colour {
-			t.Errorf("%+v: got %+v, want %q in %q", tc.v.LastCall, ps, tc.text, tc.colour)
+		if len(ps) != 1 || ps[0].text != tc.text || ps[0].color != tc.color {
+			t.Errorf("%+v: got %+v, want %q in %q", tc.v.LastCall, ps, tc.text, tc.color)
 		}
 	}
-	c.Colours = map[string]Colours{"context": {Colour: "4", Thresholds: []Threshold{{90, "5"}}}}
-	if ps := c.pieces(statusIn{v: at(850_000, "big")}); ps[0].colour != "4" {
-		t.Errorf("below the configured threshold: %+v, want colour 4", ps)
+	c.Colors = map[string]Colors{"context": {Color: "4", Thresholds: []Threshold{{90, "5"}}}}
+	if ps := c.pieces(statusIn{v: at(850_000, "big")}); ps[0].color != "4" {
+		t.Errorf("below the configured threshold: %+v, want color 4", ps)
 	}
-	if ps := c.pieces(statusIn{v: at(950_000, "big")}); ps[0].colour != "5" {
-		t.Errorf("past the configured threshold: %+v, want colour 5", ps)
+	if ps := c.pieces(statusIn{v: at(950_000, "big")}); ps[0].color != "5" {
+		t.Errorf("past the configured threshold: %+v, want color 5", ps)
 	}
 }
 

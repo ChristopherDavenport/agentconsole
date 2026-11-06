@@ -1455,15 +1455,16 @@ styles are plain and powerline, and the line sits on top or at the
 bottom.
 
 - **`console.WithStatus(console.StatusLine)`.** New exported names:
-  `StatusLine` {`Position`, `Style`, `Segments`, `Host`, `Colours`,
+  `StatusLine` {`Position`, `Style`, `Segments`, `Host`, `Colors`,
   `Window`, `Updates`}, `StatusPosition` (`StatusTop` "top",
   `StatusBottom` "bottom"), `StatusStyle` (`StatusPlain` "plain",
-  `StatusPowerline` "powerline"), `Segment` {`Text`, `Colour`},
-  `SegmentColour` {`Colour`, `Thresholds`}, `Threshold` {`At`,
-  `Colour`}, `BuiltinSegments()`, `DefaultStatusSegments()`; in `view`,
+  `StatusPowerline` "powerline"), `Segment` {`Text`, `Color`},
+  `SegmentColor` {`Color`, `Thresholds`}, `Threshold` {`At`,
+  `Color`}, `BuiltinSegments()`, `DefaultStatusSegments()`; in `view`,
   `Model.LastCall` and its type `ModelCall` {`Model`, `Usage`}. Position
   and style are strings so a host's config file maps onto them as
-  written; "" is the default.
+  written; "" is the default. The names spell "Color", as Go and
+  lipgloss do (renamed from "Colour" before the first release).
 - **Left unset, the line is today's.** Without `WithStatus` (and with a
   zero `StatusLine`) the segments are the default ones in today's order
   (time, tokens, cost, model, retry, turn, session, verified, stopped),
@@ -1488,15 +1489,15 @@ bottom.
   without a key press (Run forwards each receive as a message until the
   program ends; a closed channel stops it). A host segment may not take
   a built-in's name. The console reads no product state.
-- **Colours.** A colour is what lipgloss takes ("1".."255", "#rrggbb").
-  A host segment's own colour comes first, then `Colours[name]`. A
+- **Colors.** A color is what lipgloss takes ("1".."255", "#rrggbb").
+  A host segment's own color comes first, then `Colors[name]`. A
   numeric built-in (context in percent, tokens summed, cost in dollars,
   time in seconds, turn, retry) takes the highest threshold its value
   reaches; context is green, yellow from 50 and red from 80 unless
-  `Colours["context"]` is set. Plain: the line is reversed, and a
-  coloured segment's text is drawn in its colour, which the reversal
-  shows as its block. Powerline: each segment a block (its colour, or
-  bright black with white text), U+E0B0 between blocks in the colour of
+  `Colors["context"]` is set. Plain: the line is reversed, and a
+  colored segment's text is drawn in its color, which the reversal
+  shows as its block. Powerline: each segment a block (its color, or
+  bright black with white text), U+E0B0 between blocks in the color of
   the one it leaves on the one it enters.
 - **Position.** Top: the first row, as today, with the notices (the
   read-only banner, a stopped feed, the client's note) around the
@@ -1521,8 +1522,8 @@ bottom.
   binary passes its `-model`.
 - **The mode (#43).** The indicator is a host segment, not a field of
   its own: the host names it ("mode" in its `Segments`), returns the
-  mode's name, and colours a mode that asks nothing (bypass) as a
-  warning with `Segment.Colour`. Shift-Tab sends a new intent,
+  mode's name, and colors a mode that asks nothing (bypass) as a
+  warning with `Segment.Color`. Shift-Tab sends a new intent,
   `client.NextMode{}`, which names no mode: the console knows none.
   `client.Direct` refuses it with the new `client.ErrNoModes`, since a
   bare agentturn Control has no modes; the embedder's controller

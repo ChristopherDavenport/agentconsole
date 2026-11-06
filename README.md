@@ -129,7 +129,7 @@ has cost. A host makes the line up with `console.WithStatus`: on top or
 at the bottom (under the input, its notices on a row just over it), plain or powerline, the segments it
 names in its order (time, tokens, cost, model, context, retry, turn,
 session, verified, stopped, and segments of its own it updates), in
-colours that can change with a number, as the context does when it
+colors that can change with a number, as the context does when it
 fills against the window the host gives. A line too wide for the
 terminal drops whole segments from the right. The model segment names the
 model the host says it runs next (this binary's `-model`), and while the

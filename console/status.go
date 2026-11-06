@@ -30,42 +30,42 @@ const (
 	// StatusPlain is one reversed line with " | " between the segments,
 	// the default.
 	StatusPlain StatusStyle = "plain"
-	// StatusPowerline draws each segment as a block in its colour, with
+	// StatusPowerline draws each segment as a block in its color, with
 	// a powerline separator glyph (U+E0B0, which needs a font that has
 	// it) between the blocks.
 	StatusPowerline StatusStyle = "powerline"
 )
 
 // Segment is a host segment's value as the line is drawn: its text, ""
-// to hide it along with its separator, and its colour, "" for the one
-// [StatusLine.Colours] gives it.
+// to hide it along with its separator, and its color, "" for the one
+// [StatusLine.Colors] gives it.
 //
-// A colour is what lipgloss.Color takes: an ANSI colour by number ("1"
-// red, "2" green, "3" yellow, "0" to "15" the basic colours, up to
-// "255"), or "#rrggbb". On the plain line it colours the segment's text,
+// A color is what lipgloss.Color takes: an ANSI color by number ("1"
+// red, "2" green, "3" yellow, "0" to "15" the basic colors, up to
+// "255"), or "#rrggbb". On the plain line it colors the segment's text,
 // which the reversed line shows as its block; on the powerline line it
 // is the block's.
 type Segment struct {
-	Text   string
-	Colour string
+	Text  string
+	Color string
 }
 
-// SegmentColour is a segment's colour, and for a segment with a number
-// the colours its value takes past thresholds.
-type SegmentColour struct {
-	Colour string
-	// Thresholds colour a numeric built-in segment by its value: the
+// SegmentColor is a segment's color, and for a segment with a number
+// the colors its value takes past thresholds.
+type SegmentColor struct {
+	Color string
+	// Thresholds color a numeric built-in segment by its value: the
 	// highest threshold it reaches. Only the segments with a number take
 	// them: context (percent of the window), tokens (in and out
 	// summed), cost (US dollars), time (seconds), turn and retry.
 	Thresholds []Threshold
 }
 
-// Threshold is a colour a numeric segment takes at a value of At or
+// Threshold is a color a numeric segment takes at a value of At or
 // more.
 type Threshold struct {
-	At     float64
-	Colour string
+	At    float64
+	Color string
 }
 
 // StatusLine is the status line's make-up. Its zero value is the line
@@ -89,7 +89,7 @@ type StatusLine struct {
 	//   - context: how full the context was at the last model call, of
 	//     the window [StatusLine.Window] gives, "ctx 41% 405k/1M", "-- ctx"
 	//     before a call; green, yellow from 50% and red from 80% unless
-	//     its colour is configured
+	//     its color is configured
 	//   - retry, turn: the attempt being retried, the turn of the run
 	//   - session: the session's ID, cut to 12 characters
 	//   - verified: "unverified" for a record that is not the agent's own
@@ -104,9 +104,9 @@ type StatusLine struct {
 	// goroutine, and must return promptly and be safe to call while the
 	// host changes what it returns. A name may not be a built-in's.
 	Host map[string]func() Segment
-	// Colours are the segments' colours, by name. A host segment's own
-	// colour comes first.
-	Colours map[string]SegmentColour
+	// Colors are the segments' colors, by name. A host segment's own
+	// color comes first.
+	Colors map[string]SegmentColor
 	// Window is the context window of a model, in tokens, 0 when the
 	// host does not know it, for the context segment; nil knows none,
 	// and the segment shows the tokens alone.
@@ -136,7 +136,7 @@ func BuiltinSegments() []string { return tui.BuiltinSegments() }
 func DefaultStatusSegments() []string { return tui.DefaultSegments() }
 
 // WithStatus makes up the status line: where it sits, how it is drawn,
-// which segments it shows and in what colours, the host's own segments,
+// which segments it shows and in what colors, the host's own segments,
 // and what the context and model segments read from the host. Without
 // it the line is the default segments, plain, on top. Run refuses a
 // make-up it cannot draw.
@@ -149,7 +149,7 @@ func statusConfig(s StatusLine) (tui.StatusConfig, error) {
 	c := tui.StatusConfig{
 		Segments: s.Segments,
 		Host:     map[string]func() tui.Segment{},
-		Colours:  map[string]tui.Colours{},
+		Colors:   map[string]tui.Colors{},
 		Window:   s.Window,
 		Model:    s.Model,
 	}
@@ -173,12 +173,12 @@ func statusConfig(s StatusLine) (tui.StatusConfig, error) {
 		}
 		c.Host[name] = func() tui.Segment { return tui.Segment(fn()) }
 	}
-	for name, col := range s.Colours {
+	for name, col := range s.Colors {
 		ts := make([]tui.Threshold, len(col.Thresholds))
 		for i, t := range col.Thresholds {
 			ts[i] = tui.Threshold(t)
 		}
-		c.Colours[name] = tui.Colours{Colour: col.Colour, Thresholds: ts}
+		c.Colors[name] = tui.Colors{Color: col.Color, Thresholds: ts}
 	}
 	if err := c.Check(); err != nil {
 		return c, fmt.Errorf("console: %w", err)

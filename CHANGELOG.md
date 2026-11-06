@@ -57,8 +57,8 @@ versions may break the API.
   input's lower bar, its notices on a row just over it), a style (`StatusPlain`, `StatusPowerline`), the
   segments in order (built-ins `BuiltinSegments()`: time, tokens, cost,
   model, context, retry, turn, session, verified, stopped; and the
-  host's, `Host` by name as `func() Segment`, "" hiding one), colours
-  per segment with thresholds for the numeric ones (`SegmentColour`,
+  host's, `Host` by name as `func() Segment`, "" hiding one), colors
+  per segment with thresholds for the numeric ones (`SegmentColor`,
   `Threshold`), the window the `context` segment divides by (`Window`)
   and `Updates`, which redraws the line when a host segment changes.
   `Run` refuses a segment it does not know. Without the option the line
