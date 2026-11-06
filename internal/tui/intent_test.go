@@ -111,7 +111,7 @@ func (c *intents) next(t *testing.T, n int) client.Intent {
 
 // newViewApp is the TUI over a record of an empty session, src and act:
 // a view with no agent behind it.
-func newViewApp(t *testing.T, src client.Source, act client.Controller) *app {
+func newViewApp(t *testing.T, src client.Source, act client.Controller, opts ...tui.Option) *app {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
@@ -127,7 +127,7 @@ func newViewApp(t *testing.T, src client.Source, act client.Controller) *app {
 		t.Fatal(err)
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, record: record}
-	a.m = tui.New(ctx, record, src, act, tui.WithPanelSettle(0))
+	a.m = tui.New(ctx, record, src, act, append([]tui.Option{tui.WithPanelSettle(0)}, opts...)...)
 	a.wait = tui.Attach(ctx, record, src, a.send)
 	t.Cleanup(func() {
 		cancel()

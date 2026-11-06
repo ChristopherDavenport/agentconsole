@@ -497,6 +497,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		return m, nil
 	case intentDoneMsg:
+		if msg.kind == modeKind {
+			return m, m.modeDone(msg.err)
+		}
 		if msg.err == nil {
 			return m, nil
 		}
@@ -641,6 +644,8 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m.interrupt()
+	case "shift+tab":
+		return m, m.intend(modeKind, client.NextMode{})
 	case "ctrl+t":
 		if m.screen == screenTree {
 			m.screen = screenConversation

@@ -28,7 +28,8 @@ committed, and live events carry only what is not committed yet.
   binary and tests do.
   - `client`: what the client reads through and says. `Record` (the
     session), `Source` (the events and the state), the intents
-    (`Prompt`, `Queue`, `Abort`, `Answer`, `Reply`, `ContinueFrom`) and
+    (`Prompt`, `Queue`, `Abort`, `Answer`, `Reply`, `ContinueFrom`,
+    `NextMode`) and
     `Controller`, `Direct`, `Live` (a source's events, copied, queued),
     `Copy` (what the view keeps of an event), `RecordOf` (a `Record`
     over a `session.Recorder`'s store), `Lister` (a `Record` that lists

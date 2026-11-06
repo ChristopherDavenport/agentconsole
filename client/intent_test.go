@@ -281,3 +281,12 @@ func (m *twoStep) CreateStream(_ context.Context, req openresponses.Request, sin
 	}
 	return em.Complete()
 }
+
+// TestDirectRefusesTheNextMode: an agentturn Control has no modes, so
+// the next-mode intent is the embedder's to handle; Direct refuses it.
+func TestDirectRefusesTheNextMode(t *testing.T) {
+	a := agentturn.New(agentturn.Config{Model: blocking{called: make(chan struct{})}, ModelName: "m"})
+	if err := Direct(a)(context.Background(), NextMode{}); !errors.Is(err, ErrNoModes) {
+		t.Fatalf("next mode: %v, want ErrNoModes", err)
+	}
+}

@@ -1498,6 +1498,21 @@ bottom.
   configuration of its own: the console compares two names, and the
   context segment's window is looked up for the host's model. The
   binary passes its `-model`.
+- **The mode (#43).** The indicator is a host segment, not a field of
+  its own: the host names it ("mode" in its `Segments`), returns the
+  mode's name, and colours a mode that asks nothing (bypass) as a
+  warning with `Segment.Colour`. Shift-Tab sends a new intent,
+  `client.NextMode{}`, which names no mode: the console knows none.
+  `client.Direct` refuses it with the new `client.ErrNoModes`, since a
+  bare agentturn Control has no modes; the embedder's controller
+  handles it before Direct, moves to its next mode (agentpolicy's
+  `SetPolicy(ctx, p, reason)`, a switch during a run applying at the
+  next turn boundary, as dax#145's vetting says) and sends on
+  `Updates`; the program also draws after the intent's answer, so the
+  new mode shows either way. A refusal is shown on the status line, as
+  the client's note "mode: ..." (where the mode is), not on the error
+  line, and a mode taken later clears it. Shift-Tab works on every
+  screen, as Ctrl-C does.
 - **Refused at Run.** An unknown segment name, position or style, a
   host segment with a built-in's name or no function, and thresholds on
   a segment with no number make `Run` return an error before it starts

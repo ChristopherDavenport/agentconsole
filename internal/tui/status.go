@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -473,4 +474,22 @@ func (m *Model) drawPowerline(pre string, ps []piece, post string) (string, int)
 		width += lipgloss.Width(post)
 	}
 	return b.String(), width
+}
+
+// modeKind names the next-mode intent: Shift-Tab asks the host for its
+// next mode, which it shows in a segment of its own.
+const modeKind = "mode"
+
+// modeDone shows a refusal of the next-mode intent on the status line,
+// where the mode is, as the client's note; a mode taken clears an
+// earlier refusal.
+func (m *Model) modeDone(err error) tea.Cmd {
+	switch {
+	case err != nil:
+		m.note = modeKind + ": " + err.Error()
+	case strings.HasPrefix(m.note, modeKind+": "):
+		m.note = ""
+	}
+	m.relayout()
+	return nil
 }

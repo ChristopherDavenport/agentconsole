@@ -43,12 +43,22 @@ type Reply struct {
 // continues the conversation from there, on a branch of the session.
 type ContinueFrom struct{ EntryID string }
 
+// NextMode asks the host to move to its next mode: a set of rules for
+// what the agent may do that the host names and cycles (dax's default,
+// plan and bypass, say). It names no mode, since the modes are the
+// host's and the view knows none; the host shows the one it moved to
+// in a status line segment of its own. A switch during a run is the
+// host's to time (agentpolicy's SetPolicy, with a reason, at the next
+// turn boundary).
+type NextMode struct{}
+
 func (Prompt) intent()       {}
 func (Queue) intent()        {}
 func (Abort) intent()        {}
 func (Answer) intent()       {}
 func (Reply) intent()        {}
 func (ContinueFrom) intent() {}
+func (NextMode) intent()     {}
 
 // Controller acts on an intent. It returns promptly: nil says the intent
 // was taken, and an error is a refusal, which the client shows. What
@@ -62,6 +72,10 @@ type Controller func(ctx context.Context, in Intent) error
 // ErrNoHeadMove refuses a [ContinueFrom] to a control that cannot move
 // the agent's head.
 var ErrNoHeadMove = errors.New("client: moving the head is not offered by this agent's control")
+
+// ErrNoModes refuses a [NextMode] in [Direct]: an [agentturn.Control]
+// has no modes, which are the host's.
+var ErrNoModes = errors.New("client: this agent's control has no modes to switch")
 
 // headMover is a control that moves the agent's head, which
 // [agentturn.Control] does not: agentkit's Control does.
@@ -95,6 +109,8 @@ type headMover interface {
 //   - ContinueFrom goes to c when c has a ContinueFrom(ctx, entryID)
 //     method (agentkit's Control has), and is refused with
 //     [ErrNoHeadMove] otherwise.
+//   - NextMode is refused with [ErrNoModes]: the modes are the host's,
+//     whose controller handles it before Direct.
 //
 // The run is under ctx: ending ctx ends the run, as it does an
 // in-process Prompt's. A run Accept starts takes ctx's values without
@@ -136,6 +152,8 @@ func Direct(c agentturn.Control) Controller {
 				return h.ContinueFrom(ctx, in.EntryID)
 			}
 			return ErrNoHeadMove
+		case NextMode:
+			return ErrNoModes
 		case nil:
 			return errors.New("client: no intent")
 		}

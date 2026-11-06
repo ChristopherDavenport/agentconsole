@@ -134,7 +134,9 @@ fills against the window the host gives. A line too wide for the
 terminal drops whole segments from the right. The model segment names the
 model the host says it runs next (this binary's `-model`), and while the
 session's record still names the last run's, that one beside it, "model
-B (record: A until the next run)". The line above the input is the current turn's: how long it
+B (record: A until the next run)". Shift-Tab asks the host for its
+next mode (a host segment shows the mode); a host without modes, this
+binary among them, refuses, and the refusal shows on the status line. The line above the input is the current turn's: how long it
 has run and the tokens it took in and gave out, and while a run goes,
 what it is doing (waiting on the model, thinking, writing, calling or
 running a tool, retrying), in color, its dot a spinner; idle, or waiting

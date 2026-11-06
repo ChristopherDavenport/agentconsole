@@ -63,6 +63,10 @@ versions may break the API.
   beside it until a run under the host's lands ("model B (record: A
   until the next run)"), so a resumed session shows the configured
   model before the first prompt. The binary passes its `-model`.
+- Added (#43): Shift-Tab sends `client.NextMode`, an intent that names
+  no mode, for the host to move to its next one and show it in a status
+  line segment of its own. `client.Direct` refuses it with
+  `client.ErrNoModes`; the refusal shows on the status line.
 
 ## v0.0.15 - 2026-11-04
 
