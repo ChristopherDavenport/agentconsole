@@ -260,14 +260,14 @@ func TestALongArgumentIsClippedOnTheRowLine(t *testing.T) {
 
 // twoCallsApp is an app whose model calls lines twice, with "p" and then
 // "q", each answered with five lines named after its text.
-func twoCallsApp(t *testing.T) *app {
+func twoCallsApp(t *testing.T, opts ...tui.Option) *app {
 	t.Helper()
 	long := agenttool.New("lines", "many lines", func(_ context.Context, a textArgs) (string, error) {
 		return a.Text + "1\n" + a.Text + "2\n" + a.Text + "3\n" + a.Text + "4\n" + a.Text + "5", nil
 	})
 	cfg := cfgWith(callTool("c1", "lines", `{"text":"p"}`), callTool("c2", "lines", `{"text":"q"}`), say(nil, nil, "ok"))
 	cfg.Tools = []agenttool.Tool{long}
-	a := newApp(t, cfg)
+	a := newAppWith(t, cfg, nil, nil, opts...)
 	a.resize(110, 50)
 	a.submit("go")
 	a.waitFor("both calls ended", all(has(`text="p"`, `text="q"`, "ok", "idle"), lacks("p3", "q3", "(not committed yet)")))

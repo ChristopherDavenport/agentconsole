@@ -462,7 +462,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = "continue from here: " + msg.err.Error()
 		} else {
-			m.frozen, m.curEntry, m.note = nil, "", ""
+			m.frozen, m.curEntry = nil, ""
 			m.noteHead(msg.entry)
 			m.screen = screenConversation
 		}

@@ -19,8 +19,8 @@ import (
 // today's line: the default segments, plain, on the top row.
 type StatusConfig struct {
 	// Bottom puts the line on the screen's last row, under the input's
-	// lower bar; the top row then holds only the notices, when there
-	// are any.
+	// lower bar, and the conversation on the first; the notices then
+	// take a row of their own just over the line, when there are any.
 	Bottom bool
 	// Powerline draws each segment as a coloured block with a separator
 	// glyph between blocks, instead of " | " on one reversed line.
@@ -336,13 +336,14 @@ const (
 	powerSep   = ""
 )
 
-// statusRows are the status line's rows: top, the first row, "" for none
-// (only a line at the bottom with no notice leaves it out), and bottom,
-// the last row, "" when the line is on top. Each fills the width. The
-// notices (the frozen banner, a stopped feed, the client's note) stay on
-// the top row. A line wider than the terminal loses whole segments from
-// the right, never wraps, and is cut only when the notices alone are too
-// wide.
+// statusRows are the status line's rows: top, the first row, "" when the
+// line is at the bottom, and bottom, the last rows, "" when the line is on
+// top. Each row fills the width. On top the notices (the frozen banner, a
+// stopped feed, the client's note) share the line's row; at the bottom
+// they take a row of their own just over the line, while there are any,
+// so the conversation's first row never moves as they come and go. A
+// line wider than the terminal loses whole segments from the right, never
+// wraps, and is cut only when the notices alone are too wide.
 func (m *Model) statusRows(state runState, now time.Time) (top, bottom string) {
 	c := m.status
 	d, working := sessionWorked(m.view, state, now)
@@ -365,14 +366,25 @@ func (m *Model) statusRows(state runState, now time.Time) (top, bottom string) {
 			notes = append(notes, n)
 		}
 	}
+	line := m.drawLine("", ps, "")
 	if len(notes) > 0 {
-		top = m.drawLine(strings.Join(notes, " | "), nil, "")
+		return "", m.drawLine(strings.Join(notes, " | "), nil, "") + "\n" + line
 	}
-	return top, m.drawLine("", ps, "")
+	return "", line
+}
+
+// vpTop is the screen row the viewport starts on: under the status line
+// on top, the first row with the line at the bottom (its notices sit
+// over it, below the input).
+func (m *Model) vpTop() int {
+	if m.status.Bottom {
+		return 0
+	}
+	return 1
 }
 
 // statusRowsUsed is how many rows the status line takes: two for a line
-// at the bottom with a notice over the screen, else one.
+// at the bottom with a notice over it, else one.
 func (m *Model) statusRowsUsed() int {
 	if !m.status.Bottom {
 		return 1
@@ -486,10 +498,9 @@ const modeKind = "mode"
 func (m *Model) modeDone(err error) tea.Cmd {
 	switch {
 	case err != nil:
-		m.note = modeKind + ": " + err.Error()
+		m.setNote(modeKind + ": " + err.Error())
 	case strings.HasPrefix(m.note, modeKind+": "):
-		m.note = ""
+		m.setNote("")
 	}
-	m.relayout()
 	return nil
 }

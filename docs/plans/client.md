@@ -1501,8 +1501,13 @@ bottom.
 - **Position.** Top: the first row, as today, with the notices (the
   read-only banner, a stopped feed, the client's note) around the
   segments as before. Bottom: the last row, under the input's lower bar
-  (under the hint on the tree, keys and read-only screens); the first
-  row then holds the notices alone, and only while there is one.
+  (under the hint on the tree, keys and read-only screens); the
+  conversation then starts on the first row, and the notices take a row
+  of their own just over the line while there is one, so the
+  conversation's first row never moves as they come and go. A click, a
+  drag's selection and its copy count rows from where the conversation
+  starts (`vpTop`), and every change of the client's note lays the
+  screen out again, since at the bottom it adds or takes away a row.
 - **The host's model (#7).** `StatusLine.Model func() string` (a new
   exported name) is the model the host runs next. agentturn RFC 0001
   leaves a configuration's switch between runs to the host, and the

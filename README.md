@@ -126,7 +126,7 @@ always was.
 The status line keeps the session's time working (its
 runs' time, summed), a running total of tokens used and, when the host supplies a price source, what the session
 has cost. A host makes the line up with `console.WithStatus`: on top or
-at the bottom (under the input), plain or powerline, the segments it
+at the bottom (under the input, its notices on a row just over it), plain or powerline, the segments it
 names in its order (time, tokens, cost, model, context, retry, turn,
 session, verified, stopped, and segments of its own it updates), in
 colours that can change with a number, as the context does when it

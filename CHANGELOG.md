@@ -54,7 +54,7 @@ versions may break the API.
   when it was decided.
 - Added (#31): `console.WithStatus` makes up the status line:
   `StatusLine` with a position (`StatusTop`, `StatusBottom`, under the
-  input's lower bar), a style (`StatusPlain`, `StatusPowerline`), the
+  input's lower bar, its notices on a row just over it), a style (`StatusPlain`, `StatusPowerline`), the
   segments in order (built-ins `BuiltinSegments()`: time, tokens, cost,
   model, context, retry, turn, session, verified, stopped; and the
   host's, `Host` by name as `func() Segment`, "" hiding one), colours

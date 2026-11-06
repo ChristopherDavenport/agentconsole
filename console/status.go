@@ -14,9 +14,11 @@ const (
 	// StatusTop is the screen's first row, the default.
 	StatusTop StatusPosition = "top"
 	// StatusBottom is the screen's last row, under the input's lower
-	// bar. The first row then holds only the notices (a read-only view's
-	// banner, a stopped feed, what the last client action did), when
-	// there are any.
+	// bar, and the conversation starts on the first row. The notices (a
+	// read-only view's banner, a stopped feed, what the last client
+	// action did) take a row of their own just over the line, while
+	// there are any, so the conversation does not move as they come and
+	// go.
 	StatusBottom StatusPosition = "bottom"
 )
 
