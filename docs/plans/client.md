@@ -1480,8 +1480,12 @@ bottom.
   compaction or a branch summary after it, since the context's size is
   then unknown until the next call) over the window the host's
   `Window(model)` gives: "ctx 41% 410k/1.0M"; "-- ctx" before a call;
-  "ctx 410k" when the window is not known. The model is the record's
-  (the turn's, then the config's), falling back to the call's.
+  "ctx 410k" when the window is not known. The model asked for is the
+  one the requests carry: the host's (`StatusLine.Model`) when it names
+  one, else the record's (the turn's, then the config's), falling back
+  to the call's. Between a switch and the next run the last call was
+  made under the record's model and is measured against the host's
+  window, the one the next request goes to.
 - **Host segments are the host's state, read at each draw.** `Host`
   maps a name to `func() Segment`, called on the program's goroutine as
   the line is drawn; "" hides the segment and its separator. The host
@@ -1516,7 +1520,10 @@ bottom.
   or a switch the record names the last run's model. The model segment
   names the host's, and while the record's (the turn's, then the
   config's) differs, the record's beside it: "model B (record: A until
-  the next run)"; once a run under B lands, "model B". The view gets no
+  the next run)"; once a run under B lands, "model B". `Model` must
+  return the name the requests carry (`Request.Model`, which agentturn
+  records as the turn's model, not the provider's echo), or the two
+  never agree and the record's stays beside it. The view gets no
   configuration of its own: the console compares two names, and the
   context segment's window is looked up for the host's model. The
   binary passes its `-model`.
@@ -1536,9 +1543,11 @@ bottom.
   line, and a mode taken later clears it. Shift-Tab works on every
   screen, as Ctrl-C does.
 - **Refused at Run.** An unknown segment name, position or style, a
-  host segment with a built-in's name or no function, and thresholds on
+  host segment with a built-in's name or no function, a color for a
+  segment that is neither a built-in nor the host's, and thresholds on
   a segment with no number make `Run` return an error before it starts
-  anything, never a segment silently dropped.
+  anything, never a segment silently dropped or a mistyped name
+  ignored. A color string itself is not checked.
 
 ## Decided in implementation, forks in the tree
 

@@ -91,8 +91,8 @@ func TestAHostSegmentRedrawsWithoutAKey(t *testing.T) {
 }
 
 // TestAStatusLineItCannotDrawIsRefusedAtRun: a segment that is neither
-// built in nor the host's, an unknown position or style, refuses Run
-// before the program starts.
+// built in nor the host's, an unknown position or style, or a color for
+// a segment that is neither, refuses Run before the program starts.
 func TestAStatusLineItCannotDrawIsRefusedAtRun(t *testing.T) {
 	for name, s := range map[string]console.StatusLine{
 		"unknown segment": {Segments: []string{"model", "weather"}},
@@ -100,6 +100,7 @@ func TestAStatusLineItCannotDrawIsRefusedAtRun(t *testing.T) {
 		"style":           {Style: "fancy"},
 		"host built-in":   {Host: map[string]func() console.Segment{"model": func() console.Segment { return console.Segment{} }}},
 		"thresholds":      {Segments: []string{"session"}, Colors: map[string]console.SegmentColor{"session": {Thresholds: []console.Threshold{{At: 1, Color: "1"}}}}},
+		"color unknown":   {Colors: map[string]console.SegmentColor{"contxt": {Color: "1"}}},
 	} {
 		err := console.Run(context.Background(), nil, nil, nil, console.WithStatus(s))
 		if err == nil {

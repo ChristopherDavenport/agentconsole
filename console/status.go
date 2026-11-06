@@ -105,17 +105,26 @@ type StatusLine struct {
 	// host changes what it returns. A name may not be a built-in's.
 	Host map[string]func() Segment
 	// Colors are the segments' colors, by name. A host segment's own
-	// color comes first.
+	// color comes first. Run refuses a name that is neither a built-in
+	// nor one of Host's. A color string is not checked: lipgloss draws
+	// one it cannot read as no color.
 	Colors map[string]SegmentColor
 	// Window is the context window of a model, in tokens, 0 when the
 	// host does not know it, for the context segment; nil knows none,
-	// and the segment shows the tokens alone.
+	// and the segment shows the tokens alone. The segment asks it for
+	// the model the requests carry, Model's when it names one, else the
+	// record's. Between a switch and the next run the last call was
+	// made under the record's model and is measured against the window
+	// of the host's, the one the next request goes to.
 	Window func(model string) int
 	// Model is the model the host runs next, "" when it does not say.
 	// The record names a run's model only once the run has started, so
 	// after a relaunch or a switch the record's is the last run's; the
 	// model segment names the host's, and the record's beside it until
-	// they agree. It is called as Host's segments are.
+	// they agree. It must return the name the requests carry (the
+	// configured name agentturn records as the turn's model, not the
+	// provider's echo of it), or the two never agree and the record's
+	// stays beside it. It is called as Host's segments are.
 	Model func() string
 	// Updates redraws the line each time a value is received: the host
 	// sends one after a host segment's value (or Model's) changes. Run

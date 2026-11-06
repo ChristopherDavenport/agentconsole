@@ -61,11 +61,15 @@ versions may break the API.
   per segment with thresholds for the numeric ones (`SegmentColor`,
   `Threshold`), the window the `context` segment divides by (`Window`)
   and `Updates`, which redraws the line when a host segment changes.
-  `Run` refuses a segment it does not know. Without the option the line
+  `Run` refuses a segment it does not know, and a color for one. Without the option the line
   is today's (`DefaultStatusSegments()`), except that a line too wide
   for the terminal drops whole segments rather than being cut at a
   column. `view.Model.LastCall` (`view.ModelCall`) is the viewed line's
   last model call with its usage, which the context segment reads.
+- Changed (#31): the status line left unconfigured, too wide for the
+  terminal, now drops whole segments from the right and keeps its
+  notices (a read-only view's banner, a stopped feed, the client's note),
+  where before the whole line was cut at the last column.
 - Added (#7): `console.StatusLine.Model`, the model the host runs next.
   The model segment names it from the start, with the record's model
   beside it until a run under the host's lands ("model B (record: A

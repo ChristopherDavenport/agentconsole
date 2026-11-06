@@ -92,9 +92,9 @@ func DefaultSegments() []string {
 // half, red from four fifths.
 var defaultContext = []Threshold{{0, "2"}, {50, "3"}, {80, "1"}}
 
-// Check refuses a make-up the line cannot draw: a segment that is
-// neither built in nor the host's, a host segment named as a built-in,
-// or thresholds on a segment that has no number.
+// Check refuses a make-up the line cannot draw: a segment, or a color
+// for one, that is neither built in nor the host's, a host segment named
+// as a built-in, or thresholds on a segment that has no number.
 func (c StatusConfig) Check() error {
 	var errs []error
 	for name := range c.Host {
@@ -109,6 +109,11 @@ func (c StatusConfig) Check() error {
 		}
 	}
 	for name, col := range c.Colors {
+		_, builtin := builtins[name]
+		if _, host := c.Host[name]; !builtin && !host {
+			errs = append(errs, fmt.Errorf("status: color for unknown segment %q", name))
+			continue
+		}
 		if len(col.Thresholds) > 0 && !builtins[name] {
 			errs = append(errs, fmt.Errorf("status: segment %q has no number for thresholds", name))
 		}
@@ -291,40 +296,14 @@ func (c StatusConfig) contextText(v view.Model) (string, float64, bool) {
 	return fmt.Sprintf("ctx %.0f%% %s/%s", pct, compactTokens(in), compactTokens(window)), pct, true
 }
 
-// plainText joins pieces as the plain line does: " | " between them,
-// and a cost right after the tokens it prices joined to them with ", ".
-func plainText(ps []piece) string {
-	var b strings.Builder
-	for i, p := range ps {
-		if i > 0 {
-			b.WriteString(plainSep(ps[i-1], p))
-		}
-		b.WriteString(p.text)
-	}
-	return b.String()
-}
-
+// plainSep is what the plain line puts between two pieces: " | ", and
+// ", " between the tokens and the cost right after them that prices
+// them.
 func plainSep(prev, p piece) string {
 	if prev.name == "tokens" && p.name == "cost" {
 		return ", "
 	}
 	return " | "
-}
-
-// statusText is the session's view as the unconfigured line says it:
-// its time working (worked, from [sessionTime]; "" says none), its
-// running token use and cost, the model and attempt, the turn number,
-// the session, whether it is verified and what stopped the last run.
-// The run's state is on the run line.
-func statusText(m view.Model, worked string, verified bool, cost client.Cost) string {
-	in := statusIn{v: m, verified: verified, cost: cost, working: worked != ""}
-	ps := StatusConfig{}.pieces(in)
-	for i, p := range ps {
-		if p.name == "time" {
-			ps[i].text = "time " + worked
-		}
-	}
-	return plainText(ps)
 }
 
 // The powerline look: a block's colors when its segment has none, the

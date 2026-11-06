@@ -14,6 +14,18 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
+// drawnLine is the status line the program draws for v, left
+// unconfigured, at now in state: the top row, its styles stripped and
+// its fill trimmed.
+func drawnLine(v view.Model, state runState, now time.Time, verified bool, cost client.Cost) string {
+	m := &Model{view: v, verified: verified, cost: cost, width: 1000}
+	top, bottom := m.statusRows(state, now)
+	if bottom != "" {
+		panic("the unconfigured line is at the bottom")
+	}
+	return strings.TrimRight(ansi.Strip(top), " ")
+}
+
 func TestStatusTextShowsRunningCost(t *testing.T) {
 	m := view.Model{
 		Usage: openresponses.Usage{InputTokens: 300, OutputTokens: 50, TotalTokens: 350},
@@ -27,7 +39,7 @@ func TestStatusTextShowsRunningCost(t *testing.T) {
 		}
 		return (float64(u.InputTokens) + 2*float64(u.OutputTokens)) / 1000, true
 	})
-	s := statusText(m, "", true, cost)
+	s := drawnLine(m, stateIdle, time.Now(), true, cost)
 	for _, want := range []string{"tokens 300 in, 50 out", "$0.4000"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("status lacks %q:\n%s", want, s)
@@ -43,7 +55,7 @@ func TestStatusTextNamesUnpricedModels(t *testing.T) {
 		},
 	}
 	cost := client.Cost(func(string, openresponses.Usage) (float64, bool) { return 0, false })
-	s := statusText(m, "", true, cost)
+	s := drawnLine(m, stateIdle, time.Now(), true, cost)
 	if !strings.Contains(s, "unpriced: provider/model-name") {
 		t.Errorf("status does not name the unpriced model:\n%s", s)
 	}
@@ -180,7 +192,7 @@ func TestSessionTimeIsTheRunsThatEndedAndTheOneGoing(t *testing.T) {
 	if got := sessionTime(view.Model{}, stateIdle, t0); got != "" {
 		t.Errorf("no run yet: %q", got)
 	}
-	if got := statusText(m, "2m19s", true, nil); !strings.HasPrefix(got, "time 2m19s") {
+	if got := drawnLine(m, stateRunning, t0.Add(19*time.Second), true, nil); !strings.HasPrefix(got, "time 2m19s") {
 		t.Errorf("the status line does not lead with the session's time: %q", got)
 	}
 }
@@ -254,17 +266,20 @@ func TestTheContextSegmentColorsAsItFills(t *testing.T) {
 	}
 }
 
-// TestTheUnconfiguredLineIsTodays: the default make-up says what the
+// TestTheUnconfiguredLineIsTodays: the default make-up draws what the
 // line always said, in its order and joins.
 func TestTheUnconfiguredLineIsTodays(t *testing.T) {
+	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	m := view.Model{
 		Session: "0123456789abcdef", Config: "m",
+		Worked:       4*time.Minute + 5*time.Second,
+		Run:          view.Run{ID: "r2", Started: t0, Ended: t0.Add(time.Minute)},
 		Usage:        openresponses.Usage{InputTokens: 300, OutputTokens: 50, TotalTokens: 350},
 		UsageByModel: map[string]openresponses.Usage{"m": {InputTokens: 300, OutputTokens: 50, TotalTokens: 350}},
 		Turn:         view.Turn{Number: 2, Attempt: 1, Cause: "max_turns"},
 	}
 	cost := client.Cost(func(string, openresponses.Usage) (float64, bool) { return 0.25, true })
-	got := statusText(m, "4m05s", false, cost)
+	got := drawnLine(m, stateIdle, t0.Add(time.Hour), false, cost)
 	want := "time 4m05s | tokens 300 in, 50 out, $0.2500 | model m | retry 1 | turn 2 | session 0123456789ab | unverified | last run stopped: turn limit"
 	if got != want {
 		t.Errorf("status\n got %q\nwant %q", got, want)
