@@ -115,8 +115,10 @@ versions may break the API.
   options) and `console.WithHidden` list what the record marks hidden:
   an input the host queued with `visible` false (`view.Queued.Hidden`)
   and a hidden item entry (`view.Row.Hidden`), marked "hidden" and
-  never the person's words (their `Words` is composed whatever the
-  trigger says). Without it nothing changes.
+  never the person's words (a user message's `Words` is composed
+  whatever the trigger says, and with no trigger). The "(hidden)" tag
+  goes beside a row's other tag, so a hidden quarantined output keeps
+  its warning. Without it nothing changes.
 - Added (#47): `view.Branch.Open` counts the calls a branch the view is
   not on left owed an output (its last run's pending calls, or the
   calls a run that never ended dispatched), and the tree shows it ("1

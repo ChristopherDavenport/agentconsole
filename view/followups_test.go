@@ -28,8 +28,8 @@ func hiddenLog(t *testing.T, opts ...Option) *log {
 	return l
 }
 
-// A hidden input is listed only with WithHidden, marked hidden and
-// never as the person's words, whatever its trigger says (#47).
+// A hidden input is listed only with WithHidden, marked hidden and as
+// the host's, whatever its trigger says or if it has none (#47).
 func TestHiddenInputsAreListedOnlyWithTheSwitch(t *testing.T) {
 	m := hiddenLog(t).v.Model()
 	if len(m.Queued) != 0 || rowsWithText(m, "a reminder the host sent") != 0 {
@@ -49,8 +49,10 @@ func TestHiddenInputsAreListedOnlyWithTheSwitch(t *testing.T) {
 			row = &m.Rows[i]
 		}
 	}
-	if row == nil || !row.Hidden || row.Words == agentsession.WordsPerson {
-		t.Errorf("the hidden row = %+v, want it listed, hidden and not the person's", row)
+	// It has no trigger, so it claims nothing; hidden, it is the host's
+	// all the same, never "unclaimed" (l6-6c L1).
+	if row == nil || !row.Hidden || row.Words != agentsession.WordsComposed {
+		t.Errorf("the hidden row = %+v, want it listed, hidden and composed", row)
 	}
 	for _, r := range m.Rows {
 		if text(r.Item) == "go" && r.Hidden {

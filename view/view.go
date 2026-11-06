@@ -579,9 +579,15 @@ func New(opts ...Option) *View {
 	return v
 }
 
-// hostWords is whose words a hidden input is: never the person's.
-func hostWords(words agentsession.Words) agentsession.Words {
+// hostWords is whose words a hidden input is: the host's, never the
+// person's, and composed even when it has no trigger, since a message
+// kept out of the person's view is not one they sent. An entry that
+// holds no user message (Unclaimed by WordsOf) stays as it is.
+func hostWords(words agentsession.Words, item openresponses.Item) agentsession.Words {
 	if words == agentsession.WordsPerson {
+		return agentsession.WordsComposed
+	}
+	if m, ok := item.(*openresponses.Message); ok && m.Role == openresponses.RoleUser {
 		return agentsession.WordsComposed
 	}
 	return words
@@ -819,7 +825,7 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 				// Not shown when it is drained either.
 				continue
 			}
-			words = hostWords(words)
+			words = hostWords(words, q.Item)
 		}
 		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: words, Provenance: prov, Hidden: hidden})
 	}
@@ -1446,7 +1452,7 @@ func (v *View) Model() Model {
 			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID], Hidden: !x.IsVisible()}
 			row.Words, row.Provenance = itemMarks(x)
 			if row.Hidden {
-				row.Words = hostWords(row.Words)
+				row.Words = hostWords(row.Words, x.Item)
 			}
 			if x.CopiedFrom != nil {
 				row.CopiedFrom = x.CopiedFrom.Session

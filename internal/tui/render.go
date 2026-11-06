@@ -157,8 +157,6 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 	}
 	tag := ""
 	switch {
-	case row.Hidden:
-		tag = dimStyle.Render(" (hidden)")
 	case row.KeptFromModel:
 		tag = dimStyle.Render(" (kept from the model: not sent)")
 	case row.CopiedFrom != "":
@@ -173,6 +171,11 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		tag = dimStyle.Render(" (streaming)")
 	case row.Live:
 		tag = dimStyle.Render(" (not committed yet)")
+	}
+	if row.Hidden {
+		// Beside the other tag, not in its place: a hidden row that is
+		// also quarantined keeps its warning.
+		tag = dimStyle.Render(" (hidden)") + tag
 	}
 	tail := ""
 	if row.Live && row.Open {

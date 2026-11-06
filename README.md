@@ -159,7 +159,7 @@ over the input; Up and Down choose, Tab puts it in, Esc closes the list,
 and with no list Tab cycles the pane. An `@path` is sent as typed, for
 the host to read; the client reads no file. An input the host queued
 hidden, and a hidden item, are left out unless the host lists them
-(`console.WithHidden`), marked hidden and never as the person's words.
+(`console.WithHidden`), marked hidden and as the host's, never as the person's words.
 Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 

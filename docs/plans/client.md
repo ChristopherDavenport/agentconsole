@@ -1715,8 +1715,11 @@ rule.
   with `visible` false (`Queued.Hidden`) and an item entry with
   `visible` false (`Row.Hidden`), the drained input among them. Each is
   the host's: a user message's `Words` is `WordsComposed` even under
-  the person's trigger, so no client shows it as their words. The TUI
-  says "hidden, queued ..." over the input and "(hidden)" on a row. A
+  the person's trigger, and with no trigger at all (not "unclaimed": a
+  message kept from the person's view is not one they sent), so no
+  client shows it as their words. The TUI says "hidden, queued ..."
+  over the input and "(hidden)" on a row, beside the row's other tag
+  (copied, kept from the model, quarantined), never in its place. A
   hidden item has no overlay (`client.Copy` drops it) and is listed
   once its entry lands. A static option, not a key: a key would have
   to reach the view under the feed's lock, and no one has asked for

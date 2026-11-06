@@ -54,6 +54,32 @@ func TestAHiddenQueuedInputShowsOnlyWithTheSwitch(t *testing.T) {
 	}
 }
 
+// A hidden message with no trigger reads as the host's, not "user
+// (unclaimed)", and the hidden tag goes beside the row's other tags
+// rather than in their place (#47).
+func TestAHiddenRowIsTheHostsAndKeepsItsTags(t *testing.T) {
+	no := false
+	copied := agentsession.NewItemEntry(openresponses.UserText("a reminder from elsewhere"))
+	copied.Visible = &no
+	copied.CopiedFrom = &agentsession.CopiedFrom{Session: "other-session"}
+	a := newViewAppOf(t, &handSource{}, (&intents{}).act, []view.Option{view.WithHidden()})
+	a.write(agentsession.NewRunStart("run1", agentsession.SourceInput, ""), agentsession.NewItemEntry(openresponses.UserText("go")), copied)
+	s := a.waitFor("the hidden row", has("a reminder from elsewhere"))
+	i := strings.Index(s, "a reminder from elsewhere")
+	// The label and its tags, over as many lines as they wrap to.
+	j := strings.LastIndex(s[:i], "(hidden)")
+	if j < 0 {
+		t.Fatalf("the hidden row is not marked hidden:\n%s", s)
+	}
+	head := strings.Join(strings.Fields(s[strings.LastIndex(s[:j], "\n")+1:i]), " ")
+	if !strings.Contains(head, "composed by the host: not your words") || strings.Contains(head, "unclaimed") {
+		t.Errorf("the hidden row's label = %q, want it the host's", head)
+	}
+	if !strings.Contains(head, "context copied from") {
+		t.Errorf("the hidden row's label = %q, want the copy's tag beside hidden", head)
+	}
+}
+
 // The tree marks a branch the head is not on whose line left a call
 // waiting (#47).
 func TestTheTreeMarksABranchWithACallWaiting(t *testing.T) {
