@@ -358,6 +358,10 @@ type Model struct {
 	// UsageByModel the same split by the model each call was made under.
 	Usage        openresponses.Usage
 	UsageByModel map[string]openresponses.Usage
+	// LastCall is the viewed line's last model call that reports its
+	// usage, zero before one and after a compaction since: how full the
+	// context was when it was last sent.
+	LastCall ModelCall
 	// Run is the last run on the viewed line, by the record, and Worked
 	// how long the line's runs that ended took, summed: the session's
 	// time working.
@@ -1387,6 +1391,7 @@ func (v *View) Model() Model {
 	}
 	m.Branches = append([]Branch(nil), v.branches...)
 	m.Usage, m.UsageByModel = Usage(v.path)
+	m.LastCall = lastCall(v.path)
 	m.Run, m.Worked = lastRun(v.path), worked(v.path)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {

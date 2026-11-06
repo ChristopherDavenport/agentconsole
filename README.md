@@ -125,7 +125,13 @@ abort or the quit; with nothing selected, Ctrl-C is the interrupt it
 always was.
 The status line keeps the session's time working (its
 runs' time, summed), a running total of tokens used and, when the host supplies a price source, what the session
-has cost. The line above the input is the current turn's: how long it
+has cost. A host makes the line up with `console.WithStatus`: on top or
+at the bottom (under the input), plain or powerline, the segments it
+names in its order (time, tokens, cost, model, context, retry, turn,
+session, verified, stopped, and segments of its own it updates), in
+colours that can change with a number, as the context does when it
+fills against the window the host gives. A line too wide for the
+terminal drops whole segments from the right. The line above the input is the current turn's: how long it
 has run and the tokens it took in and gave out, and while a run goes,
 what it is doing (waiting on the model, thinking, writing, calling or
 running a tool, retrying), in color, its dot a spinner; idle, or waiting

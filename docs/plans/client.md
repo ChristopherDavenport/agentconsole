@@ -1429,6 +1429,69 @@ the sources by name and hash.
   record lists are not shown: its sources name where they are. No
   exported name: `inspect` is internal.
 
+## Decided in implementation, the status line
+
+agentconsole#31, reshaped 2026-11-04: a configurable status line, which
+also carries the host's own segments (dax's executor line, #43's mode,
+#7's model). Implementation, no RFC rule. The user's decisions: the
+make-up is declarative (no command fed JSON, as Claude Code's is), the
+styles are plain and powerline, and the line sits on top or at the
+bottom.
+
+- **`console.WithStatus(console.StatusLine)`.** New exported names:
+  `StatusLine` {`Position`, `Style`, `Segments`, `Host`, `Colours`,
+  `Window`, `Updates`}, `StatusPosition` (`StatusTop` "top",
+  `StatusBottom` "bottom"), `StatusStyle` (`StatusPlain` "plain",
+  `StatusPowerline` "powerline"), `Segment` {`Text`, `Colour`},
+  `SegmentColour` {`Colour`, `Thresholds`}, `Threshold` {`At`,
+  `Colour`}, `BuiltinSegments()`, `DefaultStatusSegments()`; in `view`,
+  `Model.LastCall` and its type `ModelCall` {`Model`, `Usage`}. Position
+  and style are strings so a host's config file maps onto them as
+  written; "" is the default.
+- **Left unset, the line is today's.** Without `WithStatus` (and with a
+  zero `StatusLine`) the segments are the default ones in today's order
+  (time, tokens, cost, model, retry, turn, session, verified, stopped),
+  plain, on top, and say what they said: on the plain line a cost right
+  after the tokens joins them with ", ", as before. One change: a line
+  wider than the terminal now loses whole segments from the right (the
+  notices around them stay) where it was cut at a column.
+- **Built-in segments come from the view model alone:** time, tokens,
+  cost (the `WithCost` price), model, context, retry, turn, session,
+  verified (shows "unverified" only), stopped. `context` is the last
+  model call's input tokens (`view.Model.LastCall`: the last response
+  on the viewed line reporting usage, with its model, zeroed by a
+  compaction or a branch summary after it, since the context's size is
+  then unknown until the next call) over the window the host's
+  `Window(model)` gives: "ctx 41% 410k/1.0M"; "-- ctx" before a call;
+  "ctx 410k" when the window is not known. The model is the record's
+  (the turn's, then the config's), falling back to the call's.
+- **Host segments are the host's state, read at each draw.** `Host`
+  maps a name to `func() Segment`, called on the program's goroutine as
+  the line is drawn; "" hides the segment and its separator. The host
+  sends on `Updates` when a value changes and the program redraws
+  without a key press (Run forwards each receive as a message until the
+  program ends; a closed channel stops it). A host segment may not take
+  a built-in's name. The console reads no product state.
+- **Colours.** A colour is what lipgloss takes ("1".."255", "#rrggbb").
+  A host segment's own colour comes first, then `Colours[name]`. A
+  numeric built-in (context in percent, tokens summed, cost in dollars,
+  time in seconds, turn, retry) takes the highest threshold its value
+  reaches; context is green, yellow from 50 and red from 80 unless
+  `Colours["context"]` is set. Plain: the line is reversed, and a
+  coloured segment's text is drawn in its colour, which the reversal
+  shows as its block. Powerline: each segment a block (its colour, or
+  bright black with white text), U+E0B0 between blocks in the colour of
+  the one it leaves on the one it enters.
+- **Position.** Top: the first row, as today, with the notices (the
+  read-only banner, a stopped feed, the client's note) around the
+  segments as before. Bottom: the last row, under the input's lower bar
+  (under the hint on the tree, keys and read-only screens); the first
+  row then holds the notices alone, and only while there is one.
+- **Refused at Run.** An unknown segment name, position or style, a
+  host segment with a built-in's name or no function, and thresholds on
+  a segment with no number make `Run` return an error before it starts
+  anything, never a segment silently dropped.
+
 ## Decided in implementation, forks in the tree
 
 - **Listing is an optional `client.Lister`.** `client.Record` follows

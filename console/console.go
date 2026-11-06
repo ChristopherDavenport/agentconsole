@@ -67,6 +67,9 @@ type config struct {
 	past    []string
 	record  func(string)
 	history bool
+	// status is the status line's make-up, when statusSet.
+	status    StatusLine
+	statusSet bool
 }
 
 // Option configures [Run].
@@ -176,6 +179,9 @@ func WithHistory(past []string, record func(line string)) Option {
 // error. ctx is the context of every intent; with [client.Direct] a run
 // is under it.
 //
+// Run refuses a status line [WithStatus] makes up that it cannot draw,
+// before it starts anything.
+//
 // rec must be one the client can follow and read. Run subscribes to src
 // before it starts the program, so no event of the first run is missed.
 // Run does not close anything it did not open. The agent, its store and
@@ -190,6 +196,13 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	for _, o := range opts {
 		o(&cfg)
 	}
+	var status tui.StatusConfig
+	if cfg.statusSet {
+		var err error
+		if status, err = statusConfig(cfg.status); err != nil {
+			return err
+		}
+	}
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
@@ -200,7 +213,7 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	if cfg.out != nil {
 		out = cfg.out
 	}
-	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out))}
+	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out)), tui.WithStatus(status)}
 	if cfg.history {
 		topts = append(topts, tui.WithHistory(cfg.past, cfg.record))
 	}
@@ -234,6 +247,21 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 				select {
 				case <-sigs:
 					p.Send(tui.InterruptMsg{})
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	if up := cfg.status.Updates; up != nil {
+		go func() {
+			for {
+				select {
+				case _, ok := <-up:
+					if !ok {
+						return
+					}
+					p.Send(tui.StatusMsg{})
 				case <-ctx.Done():
 					return
 				}

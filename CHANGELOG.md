@@ -44,6 +44,20 @@ versions may break the API.
   lists each replacement with its new default, the default's note, its
   sources and its reason, and a call's detail the replacement in force
   when it was decided.
+- Added (#31): `console.WithStatus` makes up the status line:
+  `StatusLine` with a position (`StatusTop`, `StatusBottom`, under the
+  input's lower bar), a style (`StatusPlain`, `StatusPowerline`), the
+  segments in order (built-ins `BuiltinSegments()`: time, tokens, cost,
+  model, context, retry, turn, session, verified, stopped; and the
+  host's, `Host` by name as `func() Segment`, "" hiding one), colours
+  per segment with thresholds for the numeric ones (`SegmentColour`,
+  `Threshold`), the window the `context` segment divides by (`Window`)
+  and `Updates`, which redraws the line when a host segment changes.
+  `Run` refuses a segment it does not know. Without the option the line
+  is today's (`DefaultStatusSegments()`), except that a line too wide
+  for the terminal drops whole segments rather than being cut at a
+  column. `view.Model.LastCall` (`view.ModelCall`) is the viewed line's
+  last model call with its usage, which the context segment reads.
 
 ## v0.0.15 - 2026-11-04
 

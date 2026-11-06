@@ -13,7 +13,6 @@ import (
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -691,14 +690,24 @@ func currentRun(m view.Model, s runState) (view.Run, bool) {
 // runs on the line that ended, and the current turn's time so far. It is
 // "" before the line holds a run.
 func sessionTime(m view.Model, s runState, now time.Time) string {
-	if m.Run.ID == "" {
+	d, ok := sessionWorked(m, s, now)
+	if !ok {
 		return ""
+	}
+	return elapsed(d)
+}
+
+// sessionWorked is the session's time working, as [sessionTime] says it,
+// and whether the line holds a run.
+func sessionWorked(m view.Model, s runState, now time.Time) (time.Duration, bool) {
+	if m.Run.ID == "" {
+		return 0, false
 	}
 	d := m.Worked
 	if r, ok := currentRun(m, s); ok && r.Ended.IsZero() && !r.Started.IsZero() {
 		d += max(now.Sub(r.Started), 0)
 	}
-	return elapsed(d)
+	return d, true
 }
 
 // elapsed is a turn's running time to the second: 19s, 4m05s, 1h02m.
@@ -711,60 +720,6 @@ func elapsed(d time.Duration) string {
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// statusText is the session's view: its time working (worked, from
-// [sessionTime]; "" says none), its running token use and cost, the
-// model and attempt and the turn number. The run's state is on the run
-// line.
-func statusText(m view.Model, worked string, verified bool, cost client.Cost) string {
-	var parts []string
-	if worked != "" {
-		parts = append(parts, "time "+worked)
-	}
-	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
-		usage := fmt.Sprintf("tokens %s in, %s out", compactTokens(m.Usage.InputTokens), compactTokens(m.Usage.OutputTokens))
-		if cost != nil {
-			p := view.Price(m.UsageByModel, cost)
-			switch {
-			case p.Priced:
-				usage += fmt.Sprintf(", $%.4f", p.Total)
-			case len(p.Unpriced) > 0:
-				usage += fmt.Sprintf(", unpriced: %s", strings.Join(p.Unpriced, ", "))
-			}
-		}
-		parts = append(parts, usage)
-	}
-	model := m.Turn.Model
-	if model == "" {
-		model = m.Config
-	}
-	if model != "" {
-		parts = append(parts, "model "+model)
-	}
-	if m.Turn.Attempt > 0 {
-		parts = append(parts, fmt.Sprintf("retry %d", m.Turn.Attempt))
-	}
-	if m.Turn.Number > 0 {
-		parts = append(parts, fmt.Sprintf("turn %d", m.Turn.Number))
-	}
-	if m.Session != "" {
-		s := m.Session
-		if len(s) > 12 {
-			s = s[:12]
-		}
-		parts = append(parts, "session "+s)
-	}
-	if !verified {
-		parts = append(parts, "unverified")
-	}
-	switch {
-	case m.Turn.Withheld:
-		parts = append(parts, "last reply withheld")
-	case m.Turn.Cause != "":
-		parts = append(parts, "last run stopped: "+causeText(m.Turn.Cause))
-	}
-	return strings.Join(parts, " | ")
 }
 
 // causeText says in words what stopped a run.

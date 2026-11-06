@@ -204,6 +204,8 @@ type Model struct {
 	// note is the last thing a client action did, shown on the status line
 	// until the next one.
 	note string
+	// status is the status line's make-up (status.go).
+	status StatusConfig
 }
 
 var _ tea.Model = (*Model)(nil)
@@ -487,6 +489,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case submitDoneMsg:
 		return m.submitDone(msg)
+	case StatusMsg:
+		m.relayout()
+		return m, nil
 	case FeedErrMsg:
 		m.feedErr = msg.Stream + " stream: " + msg.Err.Error()
 		m.relayout()
@@ -916,10 +921,11 @@ func (m *Model) relayout() {
 	rows := inputRowsUsed(m.in.Value(), m.in.Width())
 	visible := min(rows, inputMaxRows)
 	m.in.SetHeight(visible)
-	used := 4 // the status line, the run line and the blank over it, the hint the input's place takes
+	used := 3 // the run line and the blank over it, the hint the input's place takes
 	if m.typing() {
-		used = 1 + 2 + 1 + visible + 2 // status, the run line and the blank over it, the buffer, the input's rows, its bars
+		used = 2 + 1 + visible + 2 // the run line and the blank over it, the buffer, the input's rows, its bars
 	}
+	used += m.statusRowsUsed()
 	if panel != "" {
 		used += lipgloss.Height(panel)
 	}
@@ -1094,14 +1100,12 @@ func (m *Model) frame() string {
 		return "starting..."
 	}
 	state, now := turnState(m.view, m.sent || m.moving, m.aborting), time.Now()
-	status := feedNote(m.feedErr) + statusText(m.view, sessionTime(m.view, state, now), m.verified, m.cost)
-	if m.note != "" {
-		status += " | " + m.note
+	top, bottom := m.statusRows(state, now)
+	var parts []string
+	if top != "" {
+		parts = append(parts, top)
 	}
-	if b := m.frozenBanner(); b != "" {
-		status = b + " | " + status
-	}
-	parts := []string{statusStyle.Render(padTo(status, m.width)), m.vp.View()}
+	parts = append(parts, m.vp.View())
 	inputY := -1
 	if m.screen == screenConversation {
 		parts = append(parts, m.paneLines()...)
@@ -1134,6 +1138,9 @@ func (m *Model) frame() string {
 		parts = append(parts, "")
 		inputY = strings.Count(strings.Join(parts, "\n"), "\n") + 2
 		parts = append(parts, bar, m.in.View(), bar)
+	}
+	if bottom != "" {
+		parts = append(parts, bottom)
 	}
 	m.inputY = inputY
 	s := strings.Join(parts, "\n")
@@ -1244,13 +1251,6 @@ func wrapLine(runes []rune, width int) [][]rune {
 }
 
 func repeatSpaces(n int) []rune { return []rune(strings.Repeat(" ", n)) }
-
-func padTo(s string, w int) string {
-	if n := lipgloss.Width(s); n < w {
-		return s + strings.Repeat(" ", w-n)
-	}
-	return truncate(s, w)
-}
 
 func truncate(s string, w int) string {
 	if w <= 0 || lipgloss.Width(s) <= w {

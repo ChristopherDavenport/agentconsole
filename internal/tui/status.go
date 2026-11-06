@@ -1,0 +1,456 @@
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/view"
+)
+
+// StatusConfig is the status line's make-up: where it sits, how it is
+// drawn and which segments it shows, in order. The zero value is
+// today's line: the default segments, plain, on the top row.
+type StatusConfig struct {
+	// Bottom puts the line on the screen's last row, under the input's
+	// lower bar; the top row then holds only the notices, when there
+	// are any.
+	Bottom bool
+	// Powerline draws each segment as a coloured block with a separator
+	// glyph between blocks, instead of " | " on one reversed line.
+	Powerline bool
+	// Segments are the names shown, in order: built-ins
+	// ([BuiltinSegments]) and Host's. Nil is [DefaultSegments].
+	Segments []string
+	// Host are the host's segments by name, read as the line is drawn.
+	Host map[string]func() Segment
+	// Colours are the segments' colours, by name.
+	Colours map[string]Colours
+	// Window is the context window of a model, in tokens, 0 when not
+	// known; nil knows none.
+	Window func(model string) int
+}
+
+// Segment is a host segment's value: its text, "" to hide it with its
+// separator, and its colour, "" for the configured one.
+type Segment struct {
+	Text   string
+	Colour string
+}
+
+// Colours is a segment's colour, and for a numeric one the colours past
+// thresholds of its value.
+type Colours struct {
+	Colour     string
+	Thresholds []Threshold
+}
+
+// Threshold colours a numeric segment whose value is At or more, unless
+// a higher threshold it also reaches says otherwise.
+type Threshold struct {
+	At     float64
+	Colour string
+}
+
+// StatusMsg asks for the status line to be drawn again: a host segment's
+// value changed.
+type StatusMsg struct{}
+
+// WithStatus sets the status line's make-up.
+func WithStatus(c StatusConfig) Option { return func(m *Model) { m.status = c } }
+
+// The built-in segments, and whether each has a number its colour's
+// thresholds read: context in percent of the window, tokens in and out
+// summed, cost in US dollars, time in seconds, turn and retry as counted.
+var builtins = map[string]bool{
+	"time": true, "tokens": true, "cost": true, "model": false, "context": true,
+	"retry": true, "turn": true, "session": false, "verified": false, "stopped": false,
+}
+
+// BuiltinSegments are the names of the segments the client derives from
+// the record and the events.
+func BuiltinSegments() []string {
+	return []string{"time", "tokens", "cost", "model", "context", "retry", "turn", "session", "verified", "stopped"}
+}
+
+// DefaultSegments are the segments of the line left unconfigured, in its
+// order.
+func DefaultSegments() []string {
+	return []string{"time", "tokens", "cost", "model", "retry", "turn", "session", "verified", "stopped"}
+}
+
+// defaultContext colours the context as it fills: green, yellow from
+// half, red from four fifths.
+var defaultContext = []Threshold{{0, "2"}, {50, "3"}, {80, "1"}}
+
+// Check refuses a make-up the line cannot draw: a segment that is
+// neither built in nor the host's, a host segment named as a built-in,
+// or thresholds on a segment that has no number.
+func (c StatusConfig) Check() error {
+	var errs []error
+	for name := range c.Host {
+		if _, ok := builtins[name]; ok {
+			errs = append(errs, fmt.Errorf("status: host segment %q has a built-in's name", name))
+		}
+	}
+	for _, name := range c.Segments {
+		_, builtin := builtins[name]
+		if _, host := c.Host[name]; !builtin && !host {
+			errs = append(errs, fmt.Errorf("status: unknown segment %q", name))
+		}
+	}
+	for name, col := range c.Colours {
+		if len(col.Thresholds) > 0 && !builtins[name] {
+			errs = append(errs, fmt.Errorf("status: segment %q has no number for thresholds", name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// piece is a segment as drawn: its name, text and colour.
+type piece struct {
+	name, text, colour string
+}
+
+// statusIn is what the built-in segments are read from.
+type statusIn struct {
+	v        view.Model
+	worked   time.Duration
+	working  bool // whether the line holds a run, so worked is shown
+	verified bool
+	cost     client.Cost
+}
+
+// pieces are the segments that show, in order, with their colours.
+func (c StatusConfig) pieces(in statusIn) []piece {
+	names := c.Segments
+	if names == nil {
+		names = DefaultSegments()
+	}
+	var ps []piece
+	for _, name := range names {
+		var p piece
+		if fn, ok := c.Host[name]; ok {
+			s := fn()
+			p = piece{name: name, text: s.Text, colour: s.Colour}
+			if p.colour == "" {
+				p.colour = c.Colours[name].Colour
+			}
+		} else {
+			text, value, known := c.builtin(name, in)
+			p = piece{name: name, text: text, colour: c.colour(name, value, known)}
+		}
+		if p.text != "" {
+			ps = append(ps, p)
+		}
+	}
+	return ps
+}
+
+// colour is a built-in segment's colour: the highest threshold its value
+// reaches, when it has one, else the configured colour.
+func (c StatusConfig) colour(name string, value float64, known bool) string {
+	col, set := c.Colours[name]
+	ts := col.Thresholds
+	if !set && name == "context" {
+		ts = defaultContext
+	}
+	out, best, found := col.Colour, 0.0, false
+	for _, t := range ts {
+		if known && value >= t.At && (!found || t.At >= best) {
+			out, best, found = t.Colour, t.At, true
+		}
+	}
+	return out
+}
+
+// builtin is a built-in segment's text, "" when it has nothing to say,
+// and its number, when it has one.
+func (c StatusConfig) builtin(name string, in statusIn) (string, float64, bool) {
+	v := in.v
+	u := v.Usage
+	switch name {
+	case "time":
+		if !in.working {
+			return "", 0, false
+		}
+		return "time " + elapsed(in.worked), in.worked.Seconds(), true
+	case "tokens":
+		if u.TotalTokens > 0 || u.InputTokens > 0 || u.OutputTokens > 0 {
+			return fmt.Sprintf("tokens %s in, %s out", compactTokens(u.InputTokens), compactTokens(u.OutputTokens)), float64(u.InputTokens + u.OutputTokens), true
+		}
+	case "cost":
+		if in.cost == nil || (u.TotalTokens == 0 && u.InputTokens == 0 && u.OutputTokens == 0) {
+			return "", 0, false
+		}
+		p := view.Price(v.UsageByModel, in.cost)
+		switch {
+		case p.Priced:
+			return fmt.Sprintf("$%.4f", p.Total), p.Total, true
+		case len(p.Unpriced) > 0:
+			return "unpriced: " + strings.Join(p.Unpriced, ", "), 0, false
+		}
+	case "model":
+		return c.modelText(v), 0, false
+	case "context":
+		return c.contextText(v)
+	case "retry":
+		if v.Turn.Attempt > 0 {
+			return fmt.Sprintf("retry %d", v.Turn.Attempt), float64(v.Turn.Attempt), true
+		}
+	case "turn":
+		if v.Turn.Number > 0 {
+			return fmt.Sprintf("turn %d", v.Turn.Number), float64(v.Turn.Number), true
+		}
+	case "session":
+		if s := v.Session; s != "" {
+			if len(s) > 12 {
+				s = s[:12]
+			}
+			return "session " + s, 0, false
+		}
+	case "verified":
+		if !in.verified {
+			return "unverified", 0, false
+		}
+	case "stopped":
+		switch {
+		case v.Turn.Withheld:
+			return "last reply withheld", 0, false
+		case v.Turn.Cause != "":
+			return "last run stopped: " + causeText(v.Turn.Cause), 0, false
+		}
+	}
+	return "", 0, false
+}
+
+// recorded is the model the record and the events say: the turn's, or
+// the config's in force.
+func recorded(v view.Model) string {
+	if v.Turn.Model != "" {
+		return v.Turn.Model
+	}
+	return v.Config
+}
+
+// modelText names the model the record and the events say.
+func (c StatusConfig) modelText(v view.Model) string {
+	if rec := recorded(v); rec != "" {
+		return "model " + rec
+	}
+	return ""
+}
+
+// contextText is how full the context was at the last model call: its
+// input tokens, of the window the host gives for the model, as
+// "ctx 41% 405k/1M"; "ctx 405k" when the window is not known, and
+// "-- ctx" before a call.
+func (c StatusConfig) contextText(v view.Model) (string, float64, bool) {
+	in := v.LastCall.Usage.InputTokens
+	if in <= 0 {
+		return "-- ctx", 0, false
+	}
+	model := recorded(v)
+	if model == "" {
+		model = v.LastCall.Model
+	}
+	window := 0
+	if c.Window != nil {
+		window = c.Window(model)
+	}
+	if window <= 0 {
+		return "ctx " + compactTokens(in), 0, false
+	}
+	pct := float64(in) * 100 / float64(window)
+	return fmt.Sprintf("ctx %.0f%% %s/%s", pct, compactTokens(in), compactTokens(window)), pct, true
+}
+
+// plainText joins pieces as the plain line does: " | " between them,
+// and a cost right after the tokens it prices joined to them with ", ".
+func plainText(ps []piece) string {
+	var b strings.Builder
+	for i, p := range ps {
+		if i > 0 {
+			b.WriteString(plainSep(ps[i-1], p))
+		}
+		b.WriteString(p.text)
+	}
+	return b.String()
+}
+
+func plainSep(prev, p piece) string {
+	if prev.name == "tokens" && p.name == "cost" {
+		return ", "
+	}
+	return " | "
+}
+
+// statusText is the session's view as the unconfigured line says it:
+// its time working (worked, from [sessionTime]; "" says none), its
+// running token use and cost, the model and attempt, the turn number,
+// the session, whether it is verified and what stopped the last run.
+// The run's state is on the run line.
+func statusText(m view.Model, worked string, verified bool, cost client.Cost) string {
+	in := statusIn{v: m, verified: verified, cost: cost, working: worked != ""}
+	ps := StatusConfig{}.pieces(in)
+	for i, p := range ps {
+		if p.name == "time" {
+			ps[i].text = "time " + worked
+		}
+	}
+	return plainText(ps)
+}
+
+// The powerline look: a block's colours when its segment has none, the
+// glyph between blocks, and the text on a coloured block.
+const (
+	powerBlock = "8"
+	powerText  = "15"
+	powerInk   = "0"
+	powerSep   = ""
+)
+
+// statusRows are the status line's rows: top, the first row, "" for none
+// (only a line at the bottom with no notice leaves it out), and bottom,
+// the last row, "" when the line is on top. Each fills the width. The
+// notices (the frozen banner, a stopped feed, the client's note) stay on
+// the top row. A line wider than the terminal loses whole segments from
+// the right, never wraps, and is cut only when the notices alone are too
+// wide.
+func (m *Model) statusRows(state runState, now time.Time) (top, bottom string) {
+	c := m.status
+	d, working := sessionWorked(m.view, state, now)
+	ps := c.pieces(statusIn{v: m.view, worked: d, working: working, verified: m.verified, cost: m.cost})
+	banner := m.frozenBanner()
+	if !c.Bottom {
+		var pre, post string
+		if banner != "" {
+			pre = banner + " | "
+		}
+		pre += feedNote(m.feedErr)
+		if m.note != "" {
+			post = " | " + m.note
+		}
+		return m.drawLine(pre, ps, post), ""
+	}
+	var notes []string
+	for _, n := range []string{banner, strings.TrimSuffix(feedNote(m.feedErr), " | "), m.note} {
+		if n != "" {
+			notes = append(notes, n)
+		}
+	}
+	if len(notes) > 0 {
+		top = m.drawLine(strings.Join(notes, " | "), nil, "")
+	}
+	return top, m.drawLine("", ps, "")
+}
+
+// statusRowsUsed is how many rows the status line takes: two for a line
+// at the bottom with a notice over the screen, else one.
+func (m *Model) statusRowsUsed() int {
+	if !m.status.Bottom {
+		return 1
+	}
+	if m.frozenBanner() != "" || m.feedErr != "" || m.note != "" {
+		return 2
+	}
+	return 1
+}
+
+// drawLine draws one status row: pre, the pieces and post, cut to the
+// width at a piece and filled to it.
+func (m *Model) drawLine(pre string, ps []piece, post string) string {
+	w := max(m.width, 1)
+	draw := m.drawPlain
+	if m.status.Powerline {
+		draw = m.drawPowerline
+	}
+	for n := len(ps); ; n-- {
+		s, width := draw(pre, ps[:n], post)
+		if width <= w || n == 0 {
+			if width > w {
+				s, width = ansi.Truncate(s, w, ""), w
+			}
+			return s + statusFill(m.status.Powerline, w-width)
+		}
+	}
+}
+
+// statusFill fills the row past the line: reversed spaces on the plain
+// line, the terminal's own past the last block.
+func statusFill(powerline bool, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if powerline {
+		return strings.Repeat(" ", n)
+	}
+	return statusStyle.Render(strings.Repeat(" ", n))
+}
+
+// drawPlain is the plain line: reversed, " | " between the pieces, a
+// piece with a colour drawn in it.
+func (m *Model) drawPlain(pre string, ps []piece, post string) (string, int) {
+	var b strings.Builder
+	width := 0
+	put := func(s, colour string) {
+		if s == "" {
+			return
+		}
+		st := statusStyle
+		if colour != "" {
+			st = st.Foreground(lipgloss.Color(colour))
+		}
+		b.WriteString(st.Render(s))
+		width += lipgloss.Width(s)
+	}
+	put(pre, "")
+	for i, p := range ps {
+		if i > 0 {
+			put(plainSep(ps[i-1], p), "")
+		}
+		put(p.text, p.colour)
+	}
+	put(post, "")
+	return b.String(), width
+}
+
+// drawPowerline is the powerline line: each piece a block, its colour
+// the block's, with the glyph between blocks in the colour of the one it
+// leaves on the one it enters. The notices around them are plain.
+func (m *Model) drawPowerline(pre string, ps []piece, post string) (string, int) {
+	var b strings.Builder
+	width := 0
+	if pre != "" {
+		b.WriteString(statusStyle.Render(pre))
+		width += lipgloss.Width(pre)
+	}
+	block := func(p piece) (bg, fg string) {
+		if p.colour == "" {
+			return powerBlock, powerText
+		}
+		return p.colour, powerInk
+	}
+	for i, p := range ps {
+		bg, fg := block(p)
+		text := " " + p.text + " "
+		b.WriteString(lipgloss.NewStyle().Background(lipgloss.Color(bg)).Foreground(lipgloss.Color(fg)).Render(text))
+		sep := lipgloss.NewStyle().Foreground(lipgloss.Color(bg))
+		if i+1 < len(ps) {
+			next, _ := block(ps[i+1])
+			sep = sep.Background(lipgloss.Color(next))
+		}
+		b.WriteString(sep.Render(powerSep))
+		width += lipgloss.Width(text) + lipgloss.Width(powerSep)
+	}
+	if post != "" {
+		b.WriteString(statusStyle.Render(post))
+		width += lipgloss.Width(post)
+	}
+	return b.String(), width
+}

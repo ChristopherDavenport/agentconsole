@@ -171,3 +171,45 @@ func labelModel(m string) string {
 	}
 	return m
 }
+
+// ModelCall is a model call on a line, by the record: the model it was
+// made under and its token usage. A client reads the context's size off
+// the last one, whose input tokens are how much the model was sent.
+type ModelCall struct {
+	Model string
+	Usage openresponses.Usage
+}
+
+// lastCall is the last response on path that reports its usage, with
+// the model it was made under: the response's own, or the config's in
+// force there. A compaction or a branch summary after it replaces the
+// context, whose size is then unknown until the next call: zero.
+func lastCall(path []agentsession.Entry) ModelCall {
+	var last ModelCall
+	model := ""
+	for _, e := range path {
+		switch v := e.(type) {
+		case *agentsession.ConfigEntry:
+			if v.Replace {
+				model = ""
+			}
+			if v.Model != "" {
+				model = v.Model
+			}
+		case *agentsession.CompactionEntry:
+			model = v.Config.Model
+			last = ModelCall{}
+		case *agentsession.BranchSummaryEntry:
+			last = ModelCall{}
+		case *agentsession.ResponseEntry:
+			if v.Usage == nil {
+				continue
+			}
+			last = ModelCall{Model: model, Usage: *v.Usage}
+			if v.Model != "" {
+				last.Model = v.Model
+			}
+		}
+	}
+	return last
+}

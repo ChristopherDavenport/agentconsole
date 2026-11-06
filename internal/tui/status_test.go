@@ -184,3 +184,89 @@ func TestSessionTimeIsTheRunsThatEndedAndTheOneGoing(t *testing.T) {
 		t.Errorf("the status line does not lead with the session's time: %q", got)
 	}
 }
+
+// TestAWideStatusLineIsCutAtASegment: a line wider than the terminal
+// loses whole segments from the right, plain or powerline, and is never
+// wider than the row.
+func TestAWideStatusLineIsCutAtASegment(t *testing.T) {
+	ps := []piece{{name: "a", text: strings.Repeat("a", 20)}, {name: "b", text: strings.Repeat("b", 15)}, {name: "c", text: "ccc"}}
+	for _, power := range []bool{false, true} {
+		m := &Model{width: 40, status: StatusConfig{Powerline: power}}
+		got := ansi.Strip(m.drawLine("", ps, ""))
+		if lipgloss.Width(got) != 40 {
+			t.Errorf("powerline %v: the row is %d wide, want 40: %q", power, lipgloss.Width(got), got)
+		}
+		if strings.Contains(got, "c") || !strings.Contains(got, strings.Repeat("a", 20)) {
+			t.Errorf("powerline %v: not cut at a segment: %q", power, got)
+		}
+		wantB := !power // " a | b" fits 38 columns; the blocks' padding and glyphs do not
+		if strings.Contains(got, strings.Repeat("b", 15)) != wantB {
+			t.Errorf("powerline %v: b shown %v, want %v: %q", power, !wantB, wantB, got)
+		}
+		if strings.Contains(got, "b") && !strings.Contains(got, strings.Repeat("b", 15)) {
+			t.Errorf("powerline %v: a segment cut in its middle: %q", power, got)
+		}
+	}
+	// Notices alone too wide are cut to the row.
+	m := &Model{width: 10}
+	if got := ansi.Strip(m.drawLine(strings.Repeat("n", 30), ps, "")); lipgloss.Width(got) != 10 {
+		t.Errorf("notices cut to %d columns: %q", lipgloss.Width(got), got)
+	}
+}
+
+// TestTheContextSegmentColoursAsItFills: the context is the last call's
+// input of the host's window for the model, green, yellow from half and
+// red from four fifths, "-- ctx" before a call; a configured colour or
+// thresholds replace the default.
+func TestTheContextSegmentColoursAsItFills(t *testing.T) {
+	window := func(model string) int {
+		if model == "big" {
+			return 1_000_000
+		}
+		return 0
+	}
+	c := StatusConfig{Segments: []string{"context"}, Window: window}
+	at := func(in int, model string) view.Model {
+		return view.Model{Config: model, LastCall: view.ModelCall{Model: model, Usage: openresponses.Usage{InputTokens: in}}}
+	}
+	for _, tc := range []struct {
+		v      view.Model
+		text   string
+		colour string
+	}{
+		{view.Model{Config: "big"}, "-- ctx", ""},
+		{at(410_000, "big"), "ctx 41% 410k/1.0M", "2"},
+		{at(500_000, "big"), "ctx 50% 500k/1.0M", "3"},
+		{at(850_000, "big"), "ctx 85% 850k/1.0M", "1"},
+		{at(850_000, "small"), "ctx 850k", ""}, // no window known
+	} {
+		ps := c.pieces(statusIn{v: tc.v, verified: true})
+		if len(ps) != 1 || ps[0].text != tc.text || ps[0].colour != tc.colour {
+			t.Errorf("%+v: got %+v, want %q in %q", tc.v.LastCall, ps, tc.text, tc.colour)
+		}
+	}
+	c.Colours = map[string]Colours{"context": {Colour: "4", Thresholds: []Threshold{{90, "5"}}}}
+	if ps := c.pieces(statusIn{v: at(850_000, "big")}); ps[0].colour != "4" {
+		t.Errorf("below the configured threshold: %+v, want colour 4", ps)
+	}
+	if ps := c.pieces(statusIn{v: at(950_000, "big")}); ps[0].colour != "5" {
+		t.Errorf("past the configured threshold: %+v, want colour 5", ps)
+	}
+}
+
+// TestTheUnconfiguredLineIsTodays: the default make-up says what the
+// line always said, in its order and joins.
+func TestTheUnconfiguredLineIsTodays(t *testing.T) {
+	m := view.Model{
+		Session: "0123456789abcdef", Config: "m",
+		Usage:        openresponses.Usage{InputTokens: 300, OutputTokens: 50, TotalTokens: 350},
+		UsageByModel: map[string]openresponses.Usage{"m": {InputTokens: 300, OutputTokens: 50, TotalTokens: 350}},
+		Turn:         view.Turn{Number: 2, Attempt: 1, Cause: "max_turns"},
+	}
+	cost := client.Cost(func(string, openresponses.Usage) (float64, bool) { return 0.25, true })
+	got := statusText(m, "4m05s", false, cost)
+	want := "time 4m05s | tokens 300 in, 50 out, $0.2500 | model m | retry 1 | turn 2 | session 0123456789ab | unverified | last run stopped: turn limit"
+	if got != want {
+		t.Errorf("status\n got %q\nwant %q", got, want)
+	}
+}
