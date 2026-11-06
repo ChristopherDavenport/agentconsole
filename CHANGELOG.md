@@ -5,6 +5,16 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentturn and agentturn/session v0.0.38, agentsession
+  v0.0.38, agentkit v0.0.17, agentpolicy v0.0.20, agenttool v0.0.30,
+  openresponses v0.0.19.
+- Changed: with agentsession v0.0.38 the binary raises every session it
+  appends to to format 0.21, and so does an embedder that takes this
+  release's floor by version selection (dax). A reader built on
+  agentsession before v0.0.38 refuses those files until it is upgraded.
+
 ## v0.0.15 - 2026-11-04
 
 - Dependencies: agentturn and agentturn/session v0.0.37, agentsession
