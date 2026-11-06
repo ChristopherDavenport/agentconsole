@@ -44,9 +44,6 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
-// who is what the record says answered a permission.
-const who = "human"
-
 // inputMaxRows is how tall the prompt grows before it scrolls: a wrap
 // with room to read what is typed, instead of one line that scrolls
 // sideways.
@@ -134,9 +131,16 @@ type Model struct {
 	answer   []string
 
 	// decided are the answers given so far to the permissions out, by call.
-	decided map[string]agentturn.Answer
-	// refusing is set while the reason for a refusal is typed.
-	refusing bool
+	decided map[string]client.CallAnswer
+	// refusing is the kind of refusal whose reason is being typed, empty
+	// when none is.
+	refusing client.Verdict
+	// offer asks the host for the grant it offers for a permission
+	// (WithGrantOffer); offers are its answers so far, by call, and
+	// offering the calls it has been asked about.
+	offer    func(context.Context, view.Permission) client.GrantOffer
+	offers   map[string]client.GrantOffer
+	offering map[string]bool
 	// replied are the questions answered whose close the view has not
 	// shown yet, by ID; refusingQ is set while a question's refusal
 	// reason is typed, and notingQ while the note an allow carries is.
@@ -229,6 +233,15 @@ func WithExec(fn func(*exec.Cmd, tea.ExecCallback) tea.Cmd) Option {
 // no answer after it opens (defaultPanelSettle).
 func WithPanelSettle(d time.Duration) Option { return func(m *Model) { m.panelSettle = d } }
 
+// WithGrantOffer asks fn, for each permission out, what grant the host
+// offers with an approval: the rule it would grant and whether it can
+// keep it beyond the session. fn runs off the program's goroutine, once
+// per call, under a context that ends after offerTimeout; until it
+// answers with a rule the panel offers only "once".
+func WithGrantOffer(fn func(context.Context, view.Permission) client.GrantOffer) Option {
+	return func(m *Model) { m.offer = fn }
+}
+
 // WithClock sets the clock the panel's settle is measured on.
 func WithClock(now func() time.Time) Option { return func(m *Model) { m.now = now } }
 
@@ -276,7 +289,9 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		md:       newMarkdown(),
 		flips:    map[string]opts{},
-		decided:  map[string]agentturn.Answer{},
+		decided:  map[string]client.CallAnswer{},
+		offers:   map[string]client.GrantOffer{},
+		offering: map[string]bool{},
 		replied:  map[string]bool{},
 		steers:   &steerQueue{},
 		inputY:   -1,
@@ -411,7 +426,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncQuestions()
 		m.keepCursor()
 		m.relayout()
-		return m, tea.Batch(m.wantPane(), m.spin())
+		return m, tea.Batch(m.wantPane(), m.spin(), m.askOffers())
+	case offerMsg:
+		if m.offering[msg.callID] {
+			m.offers[msg.callID] = msg.offer
+			m.relayout()
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if !m.running() {
 			m.spinning = false
@@ -514,12 +535,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.kind == "abort" {
 			m.aborting = false
 		}
-		if m.refusing {
+		if m.refusing != "" {
 			// The reason being typed goes, as Esc would drop it, and the
 			// draft the input held comes back.
 			m.endAnswerText()
 		}
-		m.refusing = false
+		m.refusing = ""
 		m.err = msg.kind + ": " + msg.err.Error()
 		m.in.Focus()
 		m.relayout()
@@ -569,10 +590,10 @@ func (m *Model) syncQuestions() {
 	}
 }
 
-// syncPermissions forgets answers for calls no longer out: the permission
-// came back, or the run moved on.
+// syncPermissions forgets answers and offers for calls no longer out:
+// the permission came back, or the run moved on.
 func (m *Model) syncPermissions() {
-	if len(m.decided) == 0 {
+	if len(m.decided) == 0 && len(m.offering) == 0 {
 		return
 	}
 	out := map[string]bool{}
@@ -584,6 +605,45 @@ func (m *Model) syncPermissions() {
 			delete(m.decided, id)
 		}
 	}
+	for id := range m.offering {
+		if !out[id] {
+			delete(m.offering, id)
+			delete(m.offers, id)
+		}
+	}
+}
+
+// offerTimeout bounds the host's answer to what grant it offers for a
+// permission: past it, the panel offers only "once".
+const offerTimeout = 2 * time.Second
+
+// offerMsg is the grant the host offers for the permission of callID.
+type offerMsg struct {
+	callID string
+	offer  client.GrantOffer
+}
+
+// askOffers asks the host, off the program's goroutine, for the grant it
+// offers for each permission out that it has not been asked about. The
+// panel shows g and G once an answer with a rule is in.
+func (m *Model) askOffers() tea.Cmd {
+	if m.offer == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, p := range m.view.Permissions {
+		if m.offering[p.CallID] {
+			continue
+		}
+		m.offering[p.CallID] = true
+		fn, ctx := m.offer, m.ctx
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(ctx, offerTimeout)
+			defer cancel()
+			return offerMsg{callID: p.CallID, offer: fn(ctx, p)}
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 // InterruptMsg is an interrupt from outside the terminal, SIGINT or
@@ -761,33 +821,51 @@ func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
 	return m.updateInput(msg)
 }
 
-// permissionKey handles a key while a permission is asked: y approves, n
-// starts a refusal whose optional reason is typed in the input, and Enter
-// then refuses with it.
+// permissionKey handles a key while a permission is asked: y approves
+// this call; g approves it with a grant of the rule the host offers for
+// the session, and G with the grant saved, when the host offers one; n
+// starts a refusal that lets the run go on and s one that stops it, whose
+// optional reason is typed in the input, and Enter then refuses with it.
+// The keys are dax's REPL's (n continues, s stops), so the fronts agree;
+// a, which a question's panel takes for a note, is not used here.
 func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model, tea.Cmd) {
-	if m.refusing {
+	if m.refusing != "" {
 		if isNewlineKey(msg) {
 			return m, m.newline()
 		}
 		switch msg.Code {
 		case tea.KeyEnter:
 			reason := strings.TrimSpace(m.in.Value())
+			verdict := m.refusing
 			m.endAnswerText()
-			m.refusing = false
-			return m.decide(refusal(p, reason))
+			m.refusing = ""
+			return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: verdict, Reason: reason})
 		case tea.KeyEscape:
 			m.endAnswerText()
-			m.refusing = false
+			m.refusing = ""
 			m.relayout()
 			return m, nil
 		}
 		return m, m.updateInput(msg)
 	}
+	offer := m.offers[p.CallID]
 	switch msg.String() {
 	case "y", "Y":
-		return m.decide(agentturn.Approve(p.CallID).WithBy(who))
+		return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove})
+	case "g":
+		if offer.Rule != "" {
+			return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove, Grant: client.GrantSession, Rule: offer.Rule})
+		}
+	case "G":
+		if offer.Rule != "" && offer.Saved {
+			return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove, Grant: client.GrantSaved, Rule: offer.Rule})
+		}
 	case "n", "N":
-		m.refusing = true
+		m.refusing = client.VerdictRefuse
+		m.beginAnswerText()
+		m.relayout()
+	case "s", "S":
+		m.refusing = client.VerdictStop
 		m.beginAnswerText()
 		m.relayout()
 	}
@@ -861,32 +939,20 @@ func (m *Model) reply(q agentturn.Question, r agenttool.Answer) (tea.Model, tea.
 	}
 }
 
-func refusal(p view.Permission, reason string) agentturn.Answer {
-	text := "The user refused this call."
-	if reason != "" {
-		text += " Reason: " + reason
-	}
-	a := agentturn.Refuse(openresponses.NewFunctionCallOutput(p.CallID, text)).WithBy(who)
-	if reason != "" {
-		a = a.WithReason(reason)
-	}
-	return a
-}
-
 // decide records the answer to the permission asked, and once every
 // permission out has one, sends them all.
-func (m *Model) decide(a agentturn.Answer) (tea.Model, tea.Cmd) {
+func (m *Model) decide(a client.CallAnswer) (tea.Model, tea.Cmd) {
 	m.decided[a.CallID] = a
 	if _, _, more := m.pending(); more {
 		m.relayout()
 		return m, nil
 	}
-	var answers []agentturn.Answer
+	var answers []client.CallAnswer
 	for _, p := range m.view.Permissions {
 		answers = append(answers, m.decided[p.CallID])
 	}
 	m.err = ""
-	cmd := m.intend("answer", client.Answer{Answers: answers})
+	cmd := m.intend("answer", client.Answer{Calls: answers})
 	m.relayout()
 	return m, tea.Batch(cmd, m.spin())
 }
@@ -987,7 +1053,7 @@ func (m *Model) relayout() {
 	if on != m.panelOn {
 		m.panelOn, m.panelAt = on, m.now()
 	}
-	if (asking && !m.refusingQ && !m.notingQ) || (!asking && permitting && !m.refusing) {
+	if (asking && !m.refusingQ && !m.notingQ) || (!asking && permitting && m.refusing == "") {
 		m.in.Blur()
 	} else {
 		m.in.Focus()
@@ -1037,10 +1103,24 @@ func (m *Model) panel() string {
 	if p.MayHaveRun {
 		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
 	}
-	if m.refusing {
+	switch m.refusing {
+	case client.VerdictRefuse:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
-	} else {
-		b.WriteString("\n  [y] approve   [n] refuse")
+	case client.VerdictStop:
+		b.WriteString("\n  Reason for refusing and stopping the run (optional), Enter to refuse, Esc to go back")
+	default:
+		b.WriteString("\n  [y] approve")
+		sep := "   "
+		if o := m.offers[p.CallID]; o.Rule != "" {
+			// The grant's rule may be long: the refusals go on a line
+			// of their own.
+			b.WriteString("   [g] always " + o.Rule + " this session")
+			if o.Saved {
+				b.WriteString("   [G] and save it")
+			}
+			sep = "\n  "
+		}
+		b.WriteString(sep + "[n] refuse   [s] refuse and stop")
 	}
 	return wrap(b.String(), max(m.width, 10))
 }
@@ -1296,7 +1376,7 @@ const defaultPanelSettle = 500 * time.Millisecond
 // waiting for y or n, and opened less than the settle ago. A reason or a
 // note being typed into the input is not a panel's key.
 func (m *Model) settling() bool {
-	if m.panelOn == "" || m.panelSettle <= 0 || m.refusing || m.refusingQ || m.notingQ {
+	if m.panelOn == "" || m.panelSettle <= 0 || m.refusing != "" || m.refusingQ || m.notingQ {
 		return false
 	}
 	return m.now().Sub(m.panelAt) < m.panelSettle

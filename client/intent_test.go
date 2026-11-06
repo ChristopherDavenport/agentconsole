@@ -64,7 +64,7 @@ func TestDirectReturnsOnceTheRunStarted(t *testing.T) {
 // pending never starts a run, and its error is the refusal.
 func TestDirectRefusesWhatFailsBeforeAStart(t *testing.T) {
 	a := agentturn.New(agentturn.Config{Model: &echo.Adapter{}, ModelName: "echo"})
-	if err := Direct(a)(context.Background(), Answer{Answers: []agentturn.Answer{agentturn.Approve("nope")}}); err == nil {
+	if err := Direct(a)(context.Background(), Answer{Calls: []CallAnswer{{CallID: "nope", Verdict: VerdictApprove}}}); err == nil {
 		t.Fatal("an answer with nothing pending was taken")
 	}
 }

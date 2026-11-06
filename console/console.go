@@ -47,6 +47,7 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // DefaultDrainTimeout bounds the wait for an aborted run to write its
@@ -67,6 +68,7 @@ type config struct {
 	past    []string
 	record  func(string)
 	history bool
+	offer   func(context.Context, view.Permission) client.GrantOffer
 	// status is the status line's make-up, when statusSet.
 	status    StatusLine
 	statusSet bool
@@ -120,6 +122,19 @@ func WithCost(fn client.Cost) Option { return func(c *config) { c.cost = fn } }
 // replaces the set.
 func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(c *config) { c.tools = rs }
+}
+
+// WithGrantOffer lets the permission panel offer "always": fn says, for
+// a permission, the rule an approval would grant and whether the host
+// can keep it beyond the session (dax predicts it with agentpolicy's
+// Engine.Would). With a rule, g approves with a grant of it for the
+// session and G, when Saved, with the grant kept; the [client.Answer]
+// carries the grant and the rule, and the controller makes the grant
+// ([client.Direct] makes none). fn runs off the program's goroutine,
+// once per call, under a context that ends after two seconds; until it
+// answers with a rule, the panel offers only "once".
+func WithGrantOffer(fn func(ctx context.Context, p view.Permission) client.GrantOffer) Option {
+	return func(c *config) { c.offer = fn }
 }
 
 // Line is a line the user submitted in the client's input.
@@ -220,6 +235,9 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out)), tui.WithStatus(status)}
 	if cfg.history {
 		topts = append(topts, tui.WithHistory(cfg.past, cfg.record))
+	}
+	if cfg.offer != nil {
+		topts = append(topts, tui.WithGrantOffer(cfg.offer))
 	}
 	if fn := cfg.submit; fn != nil {
 		topts = append(topts, tui.WithSubmit(func(ctx context.Context, l tui.Line) (tui.Submission, error) {

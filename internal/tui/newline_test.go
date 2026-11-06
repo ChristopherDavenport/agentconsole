@@ -67,7 +67,7 @@ func TestANewlineInARefusalsReason(t *testing.T) {
 	a := newApp(t, cfg)
 	a.submit("go")
 	a.waitFor("the permission", has("Permission requested"))
-	a.typeText("n")
+	a.typeText("s")
 	a.waitFor("the reason prompt", has("Reason for refusing"))
 	a.typeText("too")
 	a.key("shift+enter")

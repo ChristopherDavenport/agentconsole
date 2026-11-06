@@ -44,7 +44,9 @@ var keyGroups = []keyGroup{
 	}},
 	{"Permissions and questions", [][2]string{
 		{"y  a", "approve, or answer yes; a, on a question: with a note typed, Enter sends"},
-		{"n", "refuse it; type an optional reason, Enter refuses, Esc goes back"},
+		{"g  G", "on a permission the host offers a rule for: approve and allow the rule for the session; G: and save it"},
+		{"n", "refuse it, and let the run go on; type an optional reason, Enter refuses, Esc goes back"},
+		{"s", "on a permission: refuse it and stop the run; type an optional reason as for n"},
 	}},
 	{"Tree (Ctrl-T)", [][2]string{
 		{"Up Down  k j", "select"},

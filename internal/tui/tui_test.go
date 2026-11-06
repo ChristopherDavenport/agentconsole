@@ -379,8 +379,10 @@ func TestApprovingAPermissionResumesTheRun(t *testing.T) {
 	_ = s
 }
 
+// n refuses and the run goes on: the model is called again and answers
+// the refusal (#42).
 func TestRefusingAPermissionRecordsTheReason(t *testing.T) {
-	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`))
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "trying npm ci"))
 	cfg.Tools = []agenttool.Tool{upperTool(nil)}
 	cfg.BeforeToolCall = deferAll("")
 	a := newApp(t, cfg)
@@ -388,15 +390,33 @@ func TestRefusingAPermissionRecordsTheReason(t *testing.T) {
 	a.submit("go")
 	a.waitFor("the permission", has("Permission requested"))
 	a.typeText("n")
-	a.waitFor("the reason prompt", has("Reason for refusing"))
-	a.typeText("too risky")
+	a.waitFor("the reason prompt", has("Reason for refusing (optional)"))
+	a.typeText("use npm ci")
 	a.key("enter")
-	s := a.waitFor("the refusal recorded", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "idle"), lacks("Permission requested")))
+	s := a.waitFor("the refusal recorded and the run gone on", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "trying npm ci", "idle"), lacks("Permission requested", "last run stopped")))
 	if strings.Contains(s, "ABC") {
 		t.Errorf("the refused call ran:\n%s", s)
 	}
 	// The refusal's text is the call's output: hidden collapsed, and
 	// expanded by ctrl+o.
+	a.key("ctrl+o")
+	a.waitFor("the refusal's text", has("The user refused this call. Reason: use npm ci"))
+}
+
+// s refuses and stops the run: the model is not called again (#42).
+func TestRefusingAndStoppingEndsTheRun(t *testing.T) {
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = deferAll("")
+	a := newApp(t, cfg)
+
+	a.submit("go")
+	a.waitFor("the permission", has("Permission requested"))
+	a.typeText("s")
+	a.waitFor("the reason prompt", has("Reason for refusing and stopping the run"))
+	a.typeText("too risky")
+	a.key("enter")
+	a.waitFor("the run stopped", all(has(`upper text="abc"`, "last run stopped", "idle"), lacks("Permission requested", "script:")))
 	a.key("ctrl+o")
 	a.waitFor("the refusal's text", has("The user refused this call. Reason: too risky"))
 }
@@ -408,11 +428,11 @@ func TestRefusingWithNoReasonAndGoingBack(t *testing.T) {
 	a := newApp(t, cfg)
 	a.submit("go")
 	a.waitFor("the permission", has("Permission requested"))
-	a.typeText("n")
+	a.typeText("s")
 	a.waitFor("the reason prompt", has("Reason for refusing"))
 	a.key("esc")
 	a.waitFor("back at the question", has("[y] approve"))
-	a.typeText("n")
+	a.typeText("s")
 	a.key("enter")
 	a.waitFor("the plain refusal", all(has(`upper text="abc"`, `1 line (ctrl+o)`, "idle"), lacks("Permission requested")))
 }
@@ -427,7 +447,7 @@ func TestAPasteDoesNotAnswerAPermission(t *testing.T) {
 	a.submit("go")
 	a.waitFor("the permission", has("Permission requested"))
 	a.paste("y")
-	a.paste("n")
+	a.paste("s")
 	s := a.screen()
 	if !strings.Contains(s, "[y] approve") || strings.Contains(s, "Reason for refusing") {
 		t.Fatalf("a paste answered the permission:\n%s", s)
@@ -435,7 +455,7 @@ func TestAPasteDoesNotAnswerAPermission(t *testing.T) {
 	if !strings.Contains(lineWith(s, "> "), "say something") {
 		t.Fatalf("a paste reached the input while the permission waits:\n%s", s)
 	}
-	a.typeText("n")
+	a.typeText("s")
 	a.waitFor("the reason prompt", has("Reason for refusing"))
 	a.paste("too risky")
 	a.key("enter")

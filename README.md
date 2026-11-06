@@ -148,7 +148,11 @@ trigger of kind `human`), where it came from and "not your words" for
 a message the host composed, and "user (unclaimed)" for one the record
 makes no claim about, as every message of a session recorded before
 format 0.21 is. When a tool call needs permission, y
-approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
+approves it; n refuses it and lets the run go on, the model reading the
+refusal, and s refuses it and stops the run, each with an optional
+reason. A host that offers a rule for the call (`console.WithGrantOffer`)
+adds g, approve and allow the rule for the session, and G, the same
+kept beyond it; the grant is the host's to make. Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 
 The tree and the record detail:

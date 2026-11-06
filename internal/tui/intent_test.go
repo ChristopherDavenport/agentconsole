@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // handSource is an event source the test feeds by hand: no agent.
@@ -180,18 +182,18 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 	a.waitFor("the permission", has("Permission requested (1/1): rm", "approval required by rm"))
 	a.typeText("y")
 	in, ok := next().(client.Answer)
-	if !ok || len(in.Answers) != 1 || in.Answers[0].CallID != "c1" || in.Answers[0].Output != nil || in.Answers[0].By != "human" {
-		t.Fatalf("intent = %#v, want c1 approved by the human", in)
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove}) {
+		t.Fatalf("intent = %#v, want c1 approved once", in)
 	}
 
-	// Refused with a reason: a rejection carrying it.
+	// Refused with a reason: a refusal carrying it, the run to go on.
 	askAbout(src, "run2", "c2")
 	a.waitFor("the second permission", has("Permission requested (1/1): rm"))
 	a.typeText("n")
 	a.typeText("too risky")
 	a.key("enter")
 	in, ok = next().(client.Answer)
-	if !ok || len(in.Answers) != 1 || in.Answers[0].CallID != "c2" || in.Answers[0].Output == nil || in.Answers[0].Reason != "too risky" {
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c2", Verdict: client.VerdictRefuse, Reason: "too risky"}) {
 		t.Fatalf("intent = %#v, want c2 refused with the reason", in)
 	}
 
@@ -223,4 +225,60 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 	a.waitFor("aborting", has("aborting"))
 	src.emit(&agentturn.RunEnd{RunID: "run3", Reason: agentturn.ReasonAborted, Err: context.Canceled})
 	a.waitFor("idle again", all(has("idle"), lacks("aborting")))
+}
+
+// TestThePanelOffersTheHostsGrant: with a host that offers a rule, the
+// panel shows it beside g and G, and g sends the approval with a session
+// grant of that rule; with none it offers only once (#41). n refuses and
+// lets the run go on, s refuses and stops it, each with a reason (#42).
+func TestThePanelOffersTheHostsGrant(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	offer := func(_ context.Context, p view.Permission) client.GrantOffer {
+		if p.CallID == "c1" {
+			return client.GrantOffer{Rule: "bash(go test:*)", Saved: true}
+		}
+		return client.GrantOffer{}
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithGrantOffer(offer))
+	n := 0
+	next := func() client.Intent { n++; return ctl.next(t, n) }
+
+	askAbout(src, "run1", "c1")
+	a.waitFor("the offer", has("Permission requested (1/1): rm", "[g] always bash(go test:*) this session", "[G] and save it", "[n] refuse", "[s] refuse and stop"))
+	a.typeText("g")
+	in, ok := next().(client.Answer)
+	want := client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove, Grant: client.GrantSession, Rule: "bash(go test:*)"}
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != want {
+		t.Fatalf("intent = %#v, want c1 approved with a session grant", in)
+	}
+
+	// No rule offered: no g, and g does nothing.
+	askAbout(src, "run2", "c2")
+	s := a.waitFor("the plain panel", all(has("Permission requested (1/1): rm", "[y] approve"), lacks("[g]", "[G]")))
+	a.typeText("g")
+	a.typeText("G")
+	if s2 := a.screen(); !strings.Contains(s2, "[y] approve") {
+		t.Fatalf("g answered with no rule offered:\n%s\nwas\n%s", s2, s)
+	}
+
+	// s refuses and stops, with a reason.
+	a.typeText("s")
+	a.waitFor("the stop's reason", has("Reason for refusing and stopping the run"))
+	a.typeText("I will do it")
+	a.key("enter")
+	in, ok = next().(client.Answer)
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c2", Verdict: client.VerdictStop, Reason: "I will do it"}) {
+		t.Fatalf("intent = %#v, want c2 refused and stopped", in)
+	}
+
+	// G saves the grant.
+	askAbout(src, "run3", "c1")
+	a.waitFor("the offer again", has("[G] and save it"))
+	a.typeText("G")
+	in, ok = next().(client.Answer)
+	want.Grant = client.GrantSaved
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != want {
+		t.Fatalf("intent = %#v, want c1 approved with a saved grant", in)
+	}
 }

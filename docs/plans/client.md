@@ -1085,7 +1085,8 @@ agentturn's and agentkit's now.
   record.
 - **Intents are plain values.** `client.Prompt{Items}`,
   `Queue{Mode, Items}` (a steer or a follow-up), `Abort{}`,
-  `Answer{Answers}` (the permission panel's answers, the run's resume),
+  `Answer{Answers}` (the permission panel's answers, the run's resume;
+  `Answer{Calls}` since #41/#42, see "the permission panel's answers"),
   `Reply{ID, Answer}` (a question's answer, its Note the user's words)
   and `ContinueFrom{EntryID}`. A `client.Controller` is
   `func(ctx, Intent) error` and returns promptly: nil says the intent
@@ -1609,6 +1610,55 @@ bottom.
   question or a permission is answered are said on the status line and
   leave the input as it was. The exec is an internal option of the
   model, so a test without a program runs the editor at once.
+
+## Decided in implementation, the permission panel's answers
+
+agentconsole#41 and #42, vetted against agentpolicy RFC 0001 (Grants,
+Grant sets) and agentturn RFC 0001 (Pending calls and resume: an
+answer's `Terminate`, `StopRefused`). Implementation, no RFC rule.
+
+- **The panel sends what the person meant.** `client.Answer` is
+  `{Calls []CallAnswer}`: per call its ID, a `Verdict`
+  (`VerdictApprove`; `VerdictRefuse`, which lets the run go on;
+  `VerdictStop`, which ends it), the person's typed `Reason`, and for
+  an approval a `Grant` (`GrantOnce`, the zero value; `GrantSession`;
+  `GrantSaved`) with the `Rule` the host offered. Before, the TUI built
+  `agentturn.Answer`s itself, with its own refusal text: the control
+  value, which left a product's controller no say in the words the
+  model reads and no way to see an "always". The view sends intents,
+  not controls.
+- **`client.Direct` builds the control's answers.** `client.AnswerOf`
+  is its default: an approval, or an output "The user refused this
+  call." with " Reason: ..." after it, as `agentturn.Output` for a
+  refusal and `agentturn.Refuse` (Terminate, so `StopRefused`) for a
+  stop, each `By` "human" (the panel's keys are a person's, as before)
+  and the reason on `Reason`. `client.WithAnswers(fn)`, a
+  `DirectOption` (`Direct(c, ...DirectOption)`), puts a product's own
+  answers in its place, so dax's `Refusal(callID, note, stop)` gives
+  every front the same words (dax#150). A verdict of none of the three
+  is refused. Direct makes no grant: a control has none to make.
+- **The grant is the controller's.** dax makes it (dax#146): a
+  `GrantSet` under `Kit.GrantScope` for the session, and for saved a
+  rule in its own per-project source, then hands the Answer on.
+- **The host offers the rule.** `console.WithGrantOffer(fn)` (and
+  `tui.WithGrantOffer`): `fn(ctx, view.Permission)` returns a
+  `client.GrantOffer{Rule, Saved}`; dax predicts it with agentpolicy's
+  `Engine.Would`, which may run hooks, and over `dax attach` the
+  prediction is remote, so `fn` runs in a tea.Cmd, once per call out,
+  under a context that ends after two seconds. The answers are kept by
+  call and forgotten with the permission. Until one with a Rule is in,
+  the panel offers only "once". Not a field on `view.Permission`: the
+  view is the record's and the events', and the offer is neither.
+- **The keys.** y approves once; g approves with a session grant and G
+  with a saved one, shown with the rule ("[g] always bash(go test:*)
+  this session   [G] and save it", G only when `Saved`), the refusals
+  then on a line of their own; n refuses and lets the run go on, s
+  refuses and stops it, each taking an optional reason typed in the
+  input. n and s are dax's REPL's (dax#150), so the fronts agree, and n
+  changed meaning: it used to stop. "Always" is not a: on a question's
+  panel a is "allow with a note", and the same key granting a rule on a
+  permission's would be the riskier surprise; dax's REPL took a and A
+  (dax#146), so the two fronts differ there.
 
 ## Open questions
 

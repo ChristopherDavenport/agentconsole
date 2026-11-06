@@ -79,6 +79,27 @@ versions may break the API.
   no mode, for the host to move to its next one and show it in a status
   line segment of its own. `client.Direct` refuses it with
   `client.ErrNoModes`; the refusal shows on the status line.
+- Changed, breaking (#41, #42): the permission panel's `client.Answer`
+  carries what the person meant per call, not the control's answer:
+  `Answer.Calls` is a list of `client.CallAnswer` (the call, a `Verdict`
+  of `VerdictApprove`, `VerdictRefuse` or `VerdictStop`, the typed
+  reason, and for an approval a `Grant`, `GrantOnce`, `GrantSession` or
+  `GrantSaved`, with the host's `Rule`), where `Answer.Answers` held
+  `agentturn.Answer`s. `client.Direct` builds the answers with
+  `client.AnswerOf` (an approval, or "The user refused this call." with
+  the reason, as an output for a refusal and `agentturn.Refuse` for a
+  stop, each by "human") and makes no grant; `client.WithAnswers`, a
+  new `DirectOption`, gives it a product's own words.
+- Changed (#42): in the panel, n refuses and lets the run go on (the
+  model reads the refusal), where it ended the run; s refuses and
+  stops it. Both take an optional typed reason. These are dax's REPL's
+  keys.
+- Added (#41): `console.WithGrantOffer` asks the host, per permission
+  and off the program's goroutine, for a `client.GrantOffer` (the rule
+  an approval would grant, and whether it can be kept beyond the
+  session). With one, the panel shows the rule beside g (approve with a
+  session grant) and G (approve with the grant kept), and the intent
+  carries the grant for the host's controller to make.
 
 ## v0.0.15 - 2026-11-04
 
