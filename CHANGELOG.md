@@ -110,7 +110,9 @@ versions may break the API.
   help) are listed over the input: Up and Down choose, Tab puts the
   chosen text in place of the word, Esc closes the list. With no list
   open Tab cycles the pane as before. The client gives a slash or an @
-  no meaning, and sends an `@path` as typed.
+  no meaning, and sends an `@path` as typed. The function is asked on
+  every keystroke that changes the word, with no debounce, so calls may
+  overlap: it must be safe for concurrent use.
 - Added (#47): `view.WithHidden` (a `view.Option`; `view.New` takes
   options) and `console.WithHidden` list what the record marks hidden:
   an input the host queued with `visible` false (`view.Queued.Hidden`)

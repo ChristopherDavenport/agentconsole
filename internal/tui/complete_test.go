@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 )
@@ -125,5 +127,29 @@ func TestTheInputCompletesFromTheHost(t *testing.T) {
 		if c.Word == "" {
 			t.Errorf("the host was asked about no word: %+v", c)
 		}
+	}
+}
+
+// TestCompletionHelpLinesUpByWidth: the help column starts at the same
+// column for every completion, measured in terminal cells, so one with
+// wide characters does not push its help out of line.
+func TestCompletionHelpLinesUpByWidth(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	wide := func(_ context.Context, c tui.Completing) []tui.Completion {
+		if c.Word != "/" {
+			return nil
+		}
+		return []tui.Completion{{Text: "/日本", Help: "wide help"}, {Text: "/abc", Help: "narrow help"}}
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithCompletion(wide))
+	a.typeText("/")
+	s := a.waitFor("the list", has("wide help", "narrow help"))
+	col := func(sub string) int {
+		l := lineWith(s, sub)
+		return lipgloss.Width(l[:strings.Index(l, sub)])
+	}
+	if w, n := col("wide help"), col("narrow help"); w != n {
+		t.Errorf("the help starts at column %d beside /日本 and %d beside /abc:\n%s", w, n, s)
 	}
 }

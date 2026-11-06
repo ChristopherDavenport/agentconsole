@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Completing is the input as the host is asked to complete it.
@@ -64,7 +65,10 @@ type completedMsg struct {
 // WithCompletion sets the host's completion of the input's word at the
 // cursor. fn runs off the program's goroutine, under a context that ends
 // after completeTimeout, and returns nothing for a word it does not
-// complete.
+// complete. It is called each time the word changes, on every keystroke
+// that changes it, prose included, with no debounce, so calls may be in
+// flight at once: fn must be safe for concurrent use, and should return
+// promptly for a word it does not complete.
 func WithCompletion(fn func(context.Context, Completing) []Completion) Option {
 	return func(m *Model) { m.comp.fn = fn }
 }
@@ -192,14 +196,14 @@ func (m *Model) completionLines() []string {
 	}
 	width := 0
 	for _, c := range items[from:min(from+completeRows, len(items))] {
-		width = max(width, len([]rune(c.Text)))
+		width = max(width, lipgloss.Width(c.Text))
 	}
 	var lines []string
 	for i := from; i < len(items) && i < from+completeRows; i++ {
 		c := items[i]
 		line := "  " + c.Text
 		if c.Help != "" {
-			line += strings.Repeat(" ", width-len([]rune(c.Text))+3) + c.Help
+			line += strings.Repeat(" ", width-lipgloss.Width(c.Text)+3) + c.Help
 		}
 		if i == m.comp.at {
 			lines = append(lines, toolStyle.Render(truncate("▸"+line[1:], m.width)))

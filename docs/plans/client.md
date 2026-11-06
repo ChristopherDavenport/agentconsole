@@ -1690,10 +1690,17 @@ agentconsole#45. Implementation, no RFC rule.
   context that ends after a second (a remote workspace can be slow).
   Each request is numbered, and an answer for a word since changed is
   dropped; the list for the old word goes as soon as the word changes,
-  so Tab never puts a completion of another word in.
+  so Tab never puts a completion of another word in. There is no
+  debounce: `fn` is asked on every keystroke that changes the word,
+  prose included, and an answer slower than the typing leaves several
+  calls in flight at once, so the docs require `fn` to be safe for
+  concurrent use and quick to return nothing for a word it does not
+  complete. A debounce would be the client's to add if a host needs it.
 - **The list.** Over the input, under the submit lines, at most eight
   rows around the chosen one (a count past that), the chosen one
-  marked. Tab takes it, Up and Down choose (the history walk yields
+  marked, the help lined up in a column measured in terminal cells
+  (`lipgloss.Width`), so a wide character does not shift it. Tab takes
+  it, Up and Down choose (the history walk yields
   while a list is open), Esc closes it until the word changes. A word
   just completed is not asked about again, so a full completion does
   not reopen the list on itself; typing on (after a directory) asks.

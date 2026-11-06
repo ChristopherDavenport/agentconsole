@@ -161,7 +161,11 @@ type Completion struct {
 // the paths of the workspace its tools act in, wherever that is. As the
 // word that ends at the cursor changes, fn is asked for it, off the
 // program's goroutine, under a context that ends after a second; an
-// answer for a word since changed is dropped. fn decides what a word is
+// answer for a word since changed is dropped. fn is called on every
+// keystroke that changes the word, prose included, with no debounce, so
+// several calls may be in flight at once: it must be safe for
+// concurrent use, and should return at once for a word it does not
+// complete. fn decides what a word is
 // (the client gives a slash or an @ no meaning) and returns nothing for
 // one it does not complete. A list with anything in it opens over the
 // input: Up and Down choose, Tab puts the chosen Text in place of the
