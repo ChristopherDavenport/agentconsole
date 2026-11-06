@@ -47,11 +47,17 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // DefaultDrainTimeout bounds the wait for an aborted run to write its
 // end, unless [WithDrainTimeout] says otherwise.
 const DefaultDrainTimeout = 3 * time.Second
+
+// settleTimeout bounds the wait at exit for the intents still in flight
+// before the first abort: a controller answers an intent promptly, and
+// one whose command the program never ran is never answered.
+const settleTimeout = time.Second
 
 type config struct {
 	in      io.Reader
@@ -67,6 +73,12 @@ type config struct {
 	past    []string
 	record  func(string)
 	history bool
+	offer   func(context.Context, view.Permission) client.GrantOffer
+	comp    func(context.Context, Completing) []Completion
+	hidden  bool
+	// status is the status line's make-up, when statusSet.
+	status    StatusLine
+	statusSet bool
 }
 
 // Option configures [Run].
@@ -118,6 +130,64 @@ func WithCost(fn client.Cost) Option { return func(c *config) { c.cost = fn } }
 func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(c *config) { c.tools = rs }
 }
+
+// WithGrantOffer lets the permission panel offer "always": fn says, for
+// a permission, the rule an approval would grant and whether the host
+// can keep it beyond the session (dax predicts it with agentpolicy's
+// Engine.Would). With a rule, a approves with a grant of it for the
+// session and A, when Saved, with the grant kept, once Enter confirms
+// it (any other key goes back, so one slip saves no rule); the [client.Answer]
+// carries the grant and the rule, and the controller makes the grant
+// ([client.Direct] makes none). fn runs off the program's goroutine,
+// once per call, under a context that ends after two seconds; until it
+// answers with a rule, the panel offers only "once".
+func WithGrantOffer(fn func(ctx context.Context, p view.Permission) client.GrantOffer) Option {
+	return func(c *config) { c.offer = fn }
+}
+
+// Completing is the input as the host is asked to complete it: Before,
+// what the input holds up to the cursor, Word its end back to the last
+// space or line break, which a completion replaces, and Running, whether
+// a run goes.
+type Completing struct {
+	Before  string
+	Word    string
+	Running bool
+}
+
+// Completion is one completion the host offers: Text, which replaces the
+// word, and Help, a line shown beside it (a command's arguments and what
+// it does), which may be empty.
+type Completion struct {
+	Text string
+	Help string
+}
+
+// WithCompletion completes the input from the host: its slash commands,
+// the paths of the workspace its tools act in, wherever that is. As the
+// word that ends at the cursor changes, fn is asked for it, off the
+// program's goroutine, under a context that ends after a second; an
+// answer for a word since changed is dropped. fn is called on every
+// keystroke that changes the word, prose included, with no debounce, so
+// several calls may be in flight at once: it must be safe for
+// concurrent use, and should return at once for a word it does not
+// complete. fn decides what a word is
+// (the client gives a slash or an @ no meaning) and returns nothing for
+// one it does not complete. A list with anything in it opens over the
+// input: Up and Down choose, Tab puts the chosen Text in place of the
+// word, Esc closes it until the word changes; with no list open Tab
+// cycles the pane. What is completed is text in the input: an @path is
+// sent as typed, for the host's submit function to read as it chooses,
+// and the client reads no file.
+func WithCompletion(fn func(ctx context.Context, c Completing) []Completion) Option {
+	return func(c *config) { c.comp = fn }
+}
+
+// WithHidden lists what the record marks hidden from a person's view
+// ([view.WithHidden]): an input the host queued with visible false, over
+// the input, and a hidden item in the conversation, each marked hidden
+// and never shown as the person's words.
+func WithHidden() Option { return func(c *config) { c.hidden = true } }
 
 // Line is a line the user submitted in the client's input.
 type Line struct {
@@ -173,15 +243,26 @@ func WithHistory(past []string, record func(line string)) Option {
 // Run runs the terminal client over the session rec follows and the
 // events src gives, sending what the user asks to act, until the user
 // quits, ctx is done, or the program fails, and returns the program's
-// error. ctx is the context of every intent; with [client.Direct] a run
-// is under it.
+// error. ctx is the context of every intent; with [client.Direct] a
+// prompt's run is under it, while a run the agent starts for a steer
+// (Accept's, for a steer that missed the last drain) takes ctx's values
+// without its cancellation and ends only on an abort.
+//
+// Run refuses a status line [WithStatus] makes up that it cannot draw,
+// before it starts anything.
 //
 // rec must be one the client can follow and read. Run subscribes to src
 // before it starts the program, so no event of the first run is missed.
 // Run does not close anything it did not open. The agent, its store and
 // its recorder are the caller's, and are safe to close once Run returns:
 // the run that went has ended, as src reports, or the drain timeout
-// passed.
+// passed. At exit Run waits briefly for the intents still in flight
+// (a steer typed just before the quit), aborts, waits, cancels ctx and
+// aborts again before a last wait. The first abort also stops a run a
+// steer's delivery was about to start (agentturn v0.0.39 settles that
+// delivery aborted and starts none); the second ends a run started for
+// a steer the agent accepted after the first, an intent slower to land
+// than the brief wait.
 //
 // A canceled ctx ends the program with an error, as bubbletea's
 // WithContext does.
@@ -189,6 +270,13 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	cfg := config{drain: DefaultDrainTimeout, signals: true, warn: func(s string) { fmt.Fprintln(os.Stderr, "agentconsole:", s) }}
 	for _, o := range opts {
 		o(&cfg)
+	}
+	var status tui.StatusConfig
+	if cfg.statusSet {
+		var err error
+		if status, err = statusConfig(cfg.status); err != nil {
+			return err
+		}
 	}
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -200,9 +288,22 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	if cfg.out != nil {
 		out = cfg.out
 	}
-	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out))}
+	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out)), tui.WithStatus(status)}
 	if cfg.history {
 		topts = append(topts, tui.WithHistory(cfg.past, cfg.record))
+	}
+	if cfg.offer != nil {
+		topts = append(topts, tui.WithGrantOffer(cfg.offer))
+	}
+	if fn := cfg.comp; fn != nil {
+		topts = append(topts, tui.WithCompletion(func(ctx context.Context, c tui.Completing) []tui.Completion {
+			got := fn(ctx, Completing(c))
+			out := make([]tui.Completion, len(got))
+			for i, g := range got {
+				out[i] = tui.Completion(g)
+			}
+			return out
+		}))
 	}
 	if fn := cfg.submit; fn != nil {
 		topts = append(topts, tui.WithSubmit(func(ctx context.Context, l tui.Line) (tui.Submission, error) {
@@ -240,18 +341,48 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 			}
 		}()
 	}
-	wait := tui.Attach(ctx, rec, src, p.Send)
+	if up := cfg.status.Updates; up != nil {
+		go func() {
+			for {
+				select {
+				case _, ok := <-up:
+					if !ok {
+						return
+					}
+					p.Send(tui.StatusMsg{})
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	var vopts []view.Option
+	if cfg.hidden {
+		vopts = append(vopts, view.WithHidden())
+	}
+	wait := tui.Attach(ctx, rec, src, p.Send, vopts...)
 	_, err := p.Run()
 	// A run may still be going (a second ctrl+c quits without waiting for
 	// an abort to land). Let it write its end before the caller closes
 	// the store; the context's cancel is the last resort.
 	// The abort's refusal has nowhere to be shown now; the drain says
-	// whether the run ended.
+	// whether the run ended. An intent still in flight (a steer typed
+	// just before the quit) lands first, within a short bound, so the
+	// abort reaches the run it starts, or settles its delivery
+	// (agentturn#312), rather than the drain waiting that run out.
+	m.Settle(min(cfg.drain, settleTimeout))
 	_ = act(ctx, client.Abort{})
 	if !m.Drain(cfg.drain) {
 		cfg.warn("a run did not end; closing the session as it is")
 	}
 	stop()
+	// A run Accept starts is under ctx's values without its
+	// cancellation, so stop does not end it. The abort above settles a
+	// delivery whose run had not started yet (agentturn#312), and the
+	// settle before it lets a steer still in flight land first; one
+	// that took longer than that bound starts a run of its own: abort
+	// again.
+	_ = act(context.WithoutCancel(ctx), client.Abort{})
 	m.Drain(cfg.drain)
 	wait()
 	return err

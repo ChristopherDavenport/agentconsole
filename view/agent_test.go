@@ -538,3 +538,27 @@ func TestAHeadOnTheRootShowsAnEmptyLine(t *testing.T) {
 		t.Errorf("on the root: tail %q, rows %s", m.Tail, describe(m))
 	}
 }
+
+// A copied input queued under the person's trigger (agentturn's Copied,
+// which its queued report carries as Queued.Copied) is recorded without
+// the kind human, so the queued list does not show it as the person's
+// words; what they typed beside it is (#49).
+func TestACopiedQueuedInputIsNotThePersons(t *testing.T) {
+	r := newRig(t, agentturn.Config{Model: &echo.Adapter{}, ModelName: "echo"})
+	ctx := agentturn.ContextWithTrigger(r.ctx, agentturn.Trigger{Kind: agentsession.TriggerHuman, Ref: "tty"})
+	if err := r.rec.Queue(ctx, r.agent, agentturn.QueueSteer,
+		openresponses.UserText("typed"), agentturn.Copied(openresponses.UserText("copied"))); err != nil {
+		t.Fatal(err)
+	}
+	m := r.waitFor("both queued", func(m view.Model) bool { return len(m.Queued) == 2 })
+	words := map[string]agentsession.Words{}
+	for _, q := range m.Queued {
+		words[text(q.Item)] = q.Words
+	}
+	if words["typed"] != agentsession.WordsPerson {
+		t.Errorf("the typed input reads %v, want the person's words", words["typed"])
+	}
+	if words["copied"] == agentsession.WordsPerson {
+		t.Error("the copied input reads as the person's words")
+	}
+}

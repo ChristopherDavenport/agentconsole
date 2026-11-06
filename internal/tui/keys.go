@@ -32,6 +32,8 @@ var keyGroups = []keyGroup{
 		{"click the input", "put the cursor there, and leave the selected row"},
 		{"Ctrl-R", "show or hide reasoning: the selected row's, or every row's"},
 		{"Ctrl-O", "show tool arguments and output in full: the selected row's, or every row's"},
+		{"Tab", "with the host's completions listed over the input: put the chosen one in; Up Down choose, Esc closes the list"},
+		{"Shift-Tab", "ask the host for its next mode, shown on the status line; a host without modes refuses"},
 		{"Ctrl-/  F1", "this list"},
 	}},
 	{"Rows", [][2]string{
@@ -42,8 +44,11 @@ var keyGroups = []keyGroup{
 		{"Esc", "clear the cursor and close the pane"},
 	}},
 	{"Permissions and questions", [][2]string{
-		{"y  a", "approve, or answer yes; a, on a question: with a note typed, Enter sends"},
-		{"n", "refuse it; type an optional reason, Enter refuses, Esc goes back"},
+		{"y", "approve, or answer yes"},
+		{"a", "always: allow the host's rule this session; on a question, yes with a note"},
+		{"A", "always, the rule saved beyond the session: Enter confirms, other keys go back"},
+		{"n", "refuse it, and let the run go on; type an optional reason, Enter refuses, Esc goes back"},
+		{"s", "on a permission: refuse it and stop the run; type an optional reason as for n"},
 	}},
 	{"Tree (Ctrl-T)", [][2]string{
 		{"Up Down  k j", "select"},

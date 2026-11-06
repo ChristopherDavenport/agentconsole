@@ -59,11 +59,12 @@ type end struct {
 	onContent bool
 }
 
-// endAt is the end at screen cell (x, y). The status line is line 0; the
-// viewport starts under it.
+// endAt is the end at screen cell (x, y). The viewport starts on row
+// vpTop: under the status line on top, the first row with the line at
+// the bottom.
 func (m *Model) endAt(x, y int) end {
-	if y >= 1 && y <= m.vp.Height() {
-		return end{x: x, line: m.vp.YOffset() + y - 1, onContent: true}
+	if top := m.vpTop(); y >= top && y < top+m.vp.Height() {
+		return end{x: x, line: m.vp.YOffset() + y - top, onContent: true}
 	}
 	return end{x: x, line: y}
 }
@@ -72,7 +73,7 @@ func (m *Model) endAt(x, y int) end {
 // below it, when its text is scrolled out of sight.
 func (m *Model) screenY(e end) int {
 	if e.onContent {
-		return e.line - m.vp.YOffset() + 1
+		return e.line - m.vp.YOffset() + m.vpTop()
 	}
 	return e.line
 }
@@ -150,7 +151,7 @@ func (m *Model) copySelection() {
 		return
 	}
 	m.copier(m.selectedText())
-	m.note = "copied"
+	m.setNote("copied")
 }
 
 // selectedText is the plain text of the selected region: whole lines
@@ -185,7 +186,8 @@ func (m *Model) markSelection(lines []string) []string {
 	x0, y0, x1, y1 := m.selScreen()
 	lo, hi := 0, len(lines)-1
 	if m.sel.onContent() {
-		lo, hi = 1, min(m.vp.Height(), hi)
+		top := m.vpTop()
+		lo, hi = top, min(top+m.vp.Height()-1, hi)
 	}
 	out := append([]string(nil), lines...)
 	for _, r := range region(x0, y0, x1, y1, lo, hi) {

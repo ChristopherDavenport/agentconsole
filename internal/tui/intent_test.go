@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // handSource is an event source the test feeds by hand: no agent.
@@ -90,6 +92,13 @@ func (c *intents) setRefuse(err error) {
 	c.refuse = err
 }
 
+// count is the number of intents sent so far.
+func (c *intents) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.got)
+}
+
 // next waits for the n-th intent (from 1) and returns it.
 func (c *intents) next(t *testing.T, n int) client.Intent {
 	t.Helper()
@@ -111,7 +120,13 @@ func (c *intents) next(t *testing.T, n int) client.Intent {
 
 // newViewApp is the TUI over a record of an empty session, src and act:
 // a view with no agent behind it.
-func newViewApp(t *testing.T, src client.Source, act client.Controller) *app {
+func newViewApp(t *testing.T, src client.Source, act client.Controller, opts ...tui.Option) *app {
+	t.Helper()
+	return newViewAppOf(t, src, act, nil, opts...)
+}
+
+// newViewAppOf is newViewApp with a view made with vopts.
+func newViewAppOf(t *testing.T, src client.Source, act client.Controller, vopts []view.Option, opts ...tui.Option) *app {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store, err := jsonl.Open(t.TempDir())
@@ -127,8 +142,8 @@ func newViewApp(t *testing.T, src client.Source, act client.Controller) *app {
 		t.Fatal(err)
 	}
 	a := &app{t: t, ctx: ctx, cancel: cancel, store: store, rec: rec, record: record}
-	a.m = tui.New(ctx, record, src, act, tui.WithPanelSettle(0))
-	a.wait = tui.Attach(ctx, record, src, a.send)
+	a.m = tui.New(ctx, record, src, act, append([]tui.Option{tui.WithPanelSettle(0)}, opts...)...)
+	a.wait = tui.Attach(ctx, record, src, a.send, vopts...)
 	t.Cleanup(func() {
 		cancel()
 		a.wait()
@@ -180,18 +195,18 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 	a.waitFor("the permission", has("Permission requested (1/1): rm", "approval required by rm"))
 	a.typeText("y")
 	in, ok := next().(client.Answer)
-	if !ok || len(in.Answers) != 1 || in.Answers[0].CallID != "c1" || in.Answers[0].Output != nil || in.Answers[0].By != "human" {
-		t.Fatalf("intent = %#v, want c1 approved by the human", in)
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove}) {
+		t.Fatalf("intent = %#v, want c1 approved once", in)
 	}
 
-	// Refused with a reason: a rejection carrying it.
+	// Refused with a reason: a refusal carrying it, the run to go on.
 	askAbout(src, "run2", "c2")
 	a.waitFor("the second permission", has("Permission requested (1/1): rm"))
 	a.typeText("n")
 	a.typeText("too risky")
 	a.key("enter")
 	in, ok = next().(client.Answer)
-	if !ok || len(in.Answers) != 1 || in.Answers[0].CallID != "c2" || in.Answers[0].Output == nil || in.Answers[0].Reason != "too risky" {
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c2", Verdict: client.VerdictRefuse, Reason: "too risky"}) {
 		t.Fatalf("intent = %#v, want c2 refused with the reason", in)
 	}
 
@@ -223,4 +238,110 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 	a.waitFor("aborting", has("aborting"))
 	src.emit(&agentturn.RunEnd{RunID: "run3", Reason: agentturn.ReasonAborted, Err: context.Canceled})
 	a.waitFor("idle again", all(has("idle"), lacks("aborting")))
+}
+
+// TestTheSaveConfirmGoesOnAnyOtherKey: a key that the client handles
+// before the panel (Tab cycling the pane, Esc closing it) still cancels
+// A's confirmation, so the Enter after it saves no rule (#41).
+func TestTheSaveConfirmGoesOnAnyOtherKey(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	offer := func(context.Context, view.Permission) client.GrantOffer {
+		return client.GrantOffer{Rule: "bash(go test:*)", Saved: true}
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithGrantOffer(offer))
+	askAbout(src, "run1", "c1")
+	a.waitFor("the offer", has("[A] and save it"))
+
+	// A, then Tab: the pane opens and the confirmation goes.
+	a.typeText("A")
+	a.waitFor("the confirmation", has("beyond this session?"))
+	a.key("tab")
+	a.waitFor("the confirmation gone", all(has("[A] and save it"), lacks("beyond this session?")))
+	a.key("enter")
+
+	// A, then Esc with the pane open: the pane closes and the
+	// confirmation goes.
+	a.typeText("A")
+	a.waitFor("the confirmation", has("beyond this session?"))
+	a.key("esc")
+	a.waitFor("the confirmation gone", all(has("[A] and save it"), lacks("beyond this session?")))
+	a.key("enter")
+
+	// Neither Enter answered: the first answer is the y after them.
+	a.typeText("y")
+	in, ok := ctl.next(t, 1).(client.Answer)
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove}) {
+		t.Fatalf("intent = %#v, want c1 approved once, nothing saved", in)
+	}
+}
+
+// TestThePanelOffersTheHostsGrant: with a host that offers a rule, the
+// panel shows it beside a and A, and a sends the approval with a session
+// grant of that rule; A asks to confirm before it saves the grant beyond
+// the session, so one slip saves nothing; with no rule offered the panel
+// offers only once (#41). n refuses and lets the run go on, s refuses and
+// stops it, each with a reason (#42).
+func TestThePanelOffersTheHostsGrant(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	offer := func(_ context.Context, p view.Permission) client.GrantOffer {
+		if p.CallID == "c1" {
+			return client.GrantOffer{Rule: "bash(go test:*)", Saved: true}
+		}
+		return client.GrantOffer{}
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithGrantOffer(offer))
+	n := 0
+	next := func() client.Intent { n++; return ctl.next(t, n) }
+
+	askAbout(src, "run1", "c1")
+	a.waitFor("the offer", has("Permission requested (1/1): rm", "[a] always bash(go test:*) this session", "[A] and save it", "[n] refuse", "[s] refuse and stop"))
+	a.typeText("a")
+	in, ok := next().(client.Answer)
+	want := client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove, Grant: client.GrantSession, Rule: "bash(go test:*)"}
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != want {
+		t.Fatalf("intent = %#v, want c1 approved with a session grant", in)
+	}
+
+	// No rule offered: no a or A, and neither does anything.
+	askAbout(src, "run2", "c2")
+	s := a.waitFor("the plain panel", all(has("Permission requested (1/1): rm", "[y] approve"), lacks("[a]", "[A]")))
+	a.typeText("a")
+	a.typeText("A")
+	if s2 := a.screen(); !strings.Contains(s2, "[y] approve") || strings.Contains(s2, "beyond this session") {
+		t.Fatalf("a or A answered with no rule offered:\n%s\nwas\n%s", s2, s)
+	}
+
+	// s refuses and stops, with a reason.
+	a.typeText("s")
+	a.waitFor("the stop's reason", has("Reason for refusing and stopping the run"))
+	a.typeText("I will do it")
+	a.key("enter")
+	in, ok = next().(client.Answer)
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != (client.CallAnswer{CallID: "c2", Verdict: client.VerdictStop, Reason: "I will do it"}) {
+		t.Fatalf("intent = %#v, want c2 refused and stopped", in)
+	}
+
+	// A alone saves nothing: it asks to confirm, and any key but Enter
+	// goes back to the panel, answering nothing.
+	askAbout(src, "run3", "c1")
+	a.waitFor("the offer again", has("[A] and save it"))
+	a.typeText("A")
+	a.waitFor("the confirmation", all(has("Save bash(go test:*) beyond this session?", "Enter saves it"), lacks("[y] approve")))
+	a.typeText("y")
+	a.waitFor("the panel again", all(has("[A] and save it", "[y] approve"), lacks("beyond this session?")))
+	if got := ctl.count(); got != n {
+		t.Fatalf("%d intents after A and a key that is not Enter, want %d: nothing answered", got, n)
+	}
+
+	// A, then Enter, saves the grant.
+	a.typeText("A")
+	a.waitFor("the confirmation", has("Save bash(go test:*) beyond this session?"))
+	a.key("enter")
+	in, ok = next().(client.Answer)
+	want.Grant = client.GrantSaved
+	if !ok || len(in.Calls) != 1 || in.Calls[0] != want {
+		t.Fatalf("intent = %#v, want c1 approved with a saved grant", in)
+	}
 }

@@ -14,6 +14,18 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
+// drawnLine is the status line the program draws for v, left
+// unconfigured, at now in state: the top row, its styles stripped and
+// its fill trimmed.
+func drawnLine(v view.Model, state runState, now time.Time, verified bool, cost client.Cost) string {
+	m := &Model{view: v, verified: verified, cost: cost, width: 1000}
+	top, bottom := m.statusRows(state, now)
+	if bottom != "" {
+		panic("the unconfigured line is at the bottom")
+	}
+	return strings.TrimRight(ansi.Strip(top), " ")
+}
+
 func TestStatusTextShowsRunningCost(t *testing.T) {
 	m := view.Model{
 		Usage: openresponses.Usage{InputTokens: 300, OutputTokens: 50, TotalTokens: 350},
@@ -27,7 +39,7 @@ func TestStatusTextShowsRunningCost(t *testing.T) {
 		}
 		return (float64(u.InputTokens) + 2*float64(u.OutputTokens)) / 1000, true
 	})
-	s := statusText(m, "", true, cost)
+	s := drawnLine(m, stateIdle, time.Now(), true, cost)
 	for _, want := range []string{"tokens 300 in, 50 out", "$0.4000"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("status lacks %q:\n%s", want, s)
@@ -43,7 +55,7 @@ func TestStatusTextNamesUnpricedModels(t *testing.T) {
 		},
 	}
 	cost := client.Cost(func(string, openresponses.Usage) (float64, bool) { return 0, false })
-	s := statusText(m, "", true, cost)
+	s := drawnLine(m, stateIdle, time.Now(), true, cost)
 	if !strings.Contains(s, "unpriced: provider/model-name") {
 		t.Errorf("status does not name the unpriced model:\n%s", s)
 	}
@@ -180,7 +192,123 @@ func TestSessionTimeIsTheRunsThatEndedAndTheOneGoing(t *testing.T) {
 	if got := sessionTime(view.Model{}, stateIdle, t0); got != "" {
 		t.Errorf("no run yet: %q", got)
 	}
-	if got := statusText(m, "2m19s", true, nil); !strings.HasPrefix(got, "time 2m19s") {
+	if got := drawnLine(m, stateRunning, t0.Add(19*time.Second), true, nil); !strings.HasPrefix(got, "time 2m19s") {
 		t.Errorf("the status line does not lead with the session's time: %q", got)
+	}
+}
+
+// TestAWideStatusLineIsCutAtASegment: a line wider than the terminal
+// loses whole segments from the right, plain or powerline, and is never
+// wider than the row.
+func TestAWideStatusLineIsCutAtASegment(t *testing.T) {
+	ps := []piece{{name: "a", text: strings.Repeat("a", 20)}, {name: "b", text: strings.Repeat("b", 15)}, {name: "c", text: "ccc"}}
+	for _, power := range []bool{false, true} {
+		m := &Model{width: 40, status: StatusConfig{Powerline: power}}
+		got := ansi.Strip(m.drawLine("", ps, ""))
+		if lipgloss.Width(got) != 40 {
+			t.Errorf("powerline %v: the row is %d wide, want 40: %q", power, lipgloss.Width(got), got)
+		}
+		if strings.Contains(got, "c") || !strings.Contains(got, strings.Repeat("a", 20)) {
+			t.Errorf("powerline %v: not cut at a segment: %q", power, got)
+		}
+		wantB := !power // " a | b" fits 38 columns; the blocks' padding and glyphs do not
+		if strings.Contains(got, strings.Repeat("b", 15)) != wantB {
+			t.Errorf("powerline %v: b shown %v, want %v: %q", power, !wantB, wantB, got)
+		}
+		if strings.Contains(got, "b") && !strings.Contains(got, strings.Repeat("b", 15)) {
+			t.Errorf("powerline %v: a segment cut in its middle: %q", power, got)
+		}
+	}
+	// Notices alone too wide are cut to the row.
+	m := &Model{width: 10}
+	if got := ansi.Strip(m.drawLine(strings.Repeat("n", 30), ps, "")); lipgloss.Width(got) != 10 {
+		t.Errorf("notices cut to %d columns: %q", lipgloss.Width(got), got)
+	}
+}
+
+// TestTheContextSegmentColorsAsItFills: the context is the last call's
+// input of the host's window for the model, green, yellow from half and
+// red from four fifths, "-- ctx" before a call; a configured color or
+// thresholds replace the default.
+func TestTheContextSegmentColorsAsItFills(t *testing.T) {
+	window := func(model string) int {
+		if model == "big" {
+			return 1_000_000
+		}
+		return 0
+	}
+	c := StatusConfig{Segments: []string{"context"}, Window: window}
+	at := func(in int, model string) view.Model {
+		return view.Model{Config: model, LastCall: view.ModelCall{Model: model, Usage: openresponses.Usage{InputTokens: in}}}
+	}
+	for _, tc := range []struct {
+		v     view.Model
+		text  string
+		color string
+	}{
+		{view.Model{Config: "big"}, "-- ctx", ""},
+		{at(410_000, "big"), "ctx 41% 410k/1.0M", "2"},
+		{at(500_000, "big"), "ctx 50% 500k/1.0M", "3"},
+		{at(850_000, "big"), "ctx 85% 850k/1.0M", "1"},
+		{at(850_000, "small"), "ctx 850k", ""}, // no window known
+	} {
+		ps := c.pieces(statusIn{v: tc.v, verified: true})
+		if len(ps) != 1 || ps[0].text != tc.text || ps[0].color != tc.color {
+			t.Errorf("%+v: got %+v, want %q in %q", tc.v.LastCall, ps, tc.text, tc.color)
+		}
+	}
+	c.Colors = map[string]Colors{"context": {Color: "4", Thresholds: []Threshold{{90, "5"}}}}
+	if ps := c.pieces(statusIn{v: at(850_000, "big")}); ps[0].color != "4" {
+		t.Errorf("below the configured threshold: %+v, want color 4", ps)
+	}
+	if ps := c.pieces(statusIn{v: at(950_000, "big")}); ps[0].color != "5" {
+		t.Errorf("past the configured threshold: %+v, want color 5", ps)
+	}
+}
+
+// TestTheUnconfiguredLineIsTodays: the default make-up draws what the
+// line always said, in its order and joins.
+func TestTheUnconfiguredLineIsTodays(t *testing.T) {
+	t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	m := view.Model{
+		Session: "0123456789abcdef", Config: "m",
+		Worked:       4*time.Minute + 5*time.Second,
+		Run:          view.Run{ID: "r2", Started: t0, Ended: t0.Add(time.Minute)},
+		Usage:        openresponses.Usage{InputTokens: 300, OutputTokens: 50, TotalTokens: 350},
+		UsageByModel: map[string]openresponses.Usage{"m": {InputTokens: 300, OutputTokens: 50, TotalTokens: 350}},
+		Turn:         view.Turn{Number: 2, Attempt: 1, Cause: "max_turns"},
+	}
+	cost := client.Cost(func(string, openresponses.Usage) (float64, bool) { return 0.25, true })
+	got := drawnLine(m, stateIdle, t0.Add(time.Hour), false, cost)
+	want := "time 4m05s | tokens 300 in, 50 out, $0.2500 | model m | retry 1 | turn 2 | session 0123456789ab | unverified | last run stopped: turn limit"
+	if got != want {
+		t.Errorf("status\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestTheModelSegmentNamesTheHostsModel: the host's model is named, with
+// the record's beside it while they differ.
+func TestTheModelSegmentNamesTheHostsModel(t *testing.T) {
+	host := ""
+	c := StatusConfig{Segments: []string{"model"}, Model: func() string { return host }}
+	text := func(v view.Model) string {
+		ps := c.pieces(statusIn{v: v})
+		if len(ps) == 0 {
+			return ""
+		}
+		return ps[0].text
+	}
+	if got := text(view.Model{Config: "a"}); got != "model a" {
+		t.Errorf("no host model: %q", got)
+	}
+	host = "b"
+	if got, want := text(view.Model{Config: "a"}), "model b (record: a until the next run)"; got != want {
+		t.Errorf("before a run: %q, want %q", got, want)
+	}
+	if got := text(view.Model{}); got != "model b" {
+		t.Errorf("an empty record: %q", got)
+	}
+	if got := text(view.Model{Config: "b"}); got != "model b" {
+		t.Errorf("after a run: %q", got)
 	}
 }

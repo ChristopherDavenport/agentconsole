@@ -231,15 +231,29 @@ type Row struct {
 	// it: LeftOutQuarantined, LeftOutOmitted or LeftOutPlaceholder. ""
 	// when the item is sent whole.
 	LeftOut string
-	// Provenance is set on a message the host composed from text the
-	// person did not write (agentturn's WithProvenance): it is not the
-	// person's words. nil for one the person typed.
+	// Words says whose words a user message is, as agentsession's
+	// WordsOf reads its entry (format 0.21's trigger kind human):
+	// agentsession.WordsPerson for what the person typed,
+	// WordsComposed for a message the host composed (instruction
+	// layers, another trigger kind), WordsUnclaimed for one whose record
+	// says neither, which is never shown as the person's words. A live
+	// row reads as the recorder will write it. WordsUnclaimed for any
+	// row that is not a user message.
+	Words agentsession.Words
+	// Provenance is what the record says of where a message came from
+	// when that is not the person's words: its instruction layers, its
+	// source and its trust (agentturn's WithProvenance). It is set too
+	// for the person's words with a trust label. nil for the person's
+	// words, and for an unclaimed message the record says nothing of.
 	Provenance *Provenance
 	// Call is set on the row of a function call.
 	Call *Call
 	// Fold is set on the row of a compaction entry: the point where the
 	// record folds what came before into a summary, which Item carries.
 	Fold *Fold
+	// Hidden is set for an item the record marks hidden from view
+	// (visible false), listed only by a view made [WithHidden].
+	Hidden bool
 }
 
 // What a row's LeftOut says.
@@ -302,8 +316,12 @@ type Queued struct {
 	// Mode is agentsession.ModeSteer or agentsession.ModeFollowUp.
 	Mode string
 	Item openresponses.Item
-	// Provenance is set on an input the host composed, as on a Row.
+	// Words and Provenance are as on a Row, read off the queued entry.
+	Words      agentsession.Words
 	Provenance *Provenance
+	// Hidden is set for an input the host queued hidden from view,
+	// listed only by a view made [WithHidden].
+	Hidden bool
 }
 
 // Provenance says where a message the host composed came from (agentturn
@@ -346,6 +364,10 @@ type Model struct {
 	// UsageByModel the same split by the model each call was made under.
 	Usage        openresponses.Usage
 	UsageByModel map[string]openresponses.Usage
+	// LastCall is the viewed line's last model call that reports its
+	// usage, zero before one and after a compaction since: how full the
+	// context was when it was last sent.
+	LastCall ModelCall
 	// Run is the last run on the viewed line, by the record, and Worked
 	// how long the line's runs that ended took, summed: the session's
 	// time working.
@@ -377,7 +399,14 @@ type ovItem struct {
 	responseID string
 	item       openresponses.Item
 	done       bool
-	prov       *Provenance
+	marks      marks
+}
+
+// marks is whose words a live item is and where it came from, as the
+// recorder will write its entry.
+type marks struct {
+	words agentsession.Words
+	prov  *Provenance
 }
 
 type ovCall struct {
@@ -513,11 +542,26 @@ type View struct {
 	endSeen   map[string]bool
 	endOrder  []string
 	turn      Turn
+	// showHidden lists what the record marks hidden (WithHidden).
+	showHidden bool
 }
 
+// Option configures [New].
+type Option func(*View)
+
+// WithHidden lists what the record marks hidden from a person's view,
+// which the view otherwise leaves out: an input the host queued with
+// visible false (Model.Queued) and an item entry with visible false
+// (Model.Rows), the input's once it is drained. Each is marked Hidden,
+// and a user message among them is never the person's words: its Words
+// is agentsession.WordsComposed whatever its trigger says, since the
+// host sent it on the person's behalf. A hidden item has no overlay:
+// client.Copy drops it, so it is listed once its entry lands.
+func WithHidden() Option { return func(v *View) { v.showHidden = true } }
+
 // New returns an empty view.
-func New() *View {
-	return &View{
+func New(opts ...Option) *View {
+	v := &View{
 		landedItems: map[string][]landedItem{},
 		parent:      map[string]string{},
 		runTip:      map[string]string{},
@@ -529,6 +573,24 @@ func New() *View {
 		runSeq:      map[string]int{},
 		endSeen:     map[string]bool{},
 	}
+	for _, o := range opts {
+		o(v)
+	}
+	return v
+}
+
+// hostWords is whose words a hidden input is: the host's, never the
+// person's, and composed even when it has no trigger, since a message
+// kept out of the person's view is not one they sent. An entry that
+// holds no user message (Unclaimed by WordsOf) stays as it is.
+func hostWords(words agentsession.Words, item openresponses.Item) agentsession.Words {
+	if words == agentsession.WordsPerson {
+		return agentsession.WordsComposed
+	}
+	if m, ok := item.(*openresponses.Message); ok && m.Role == openresponses.RoleUser {
+		return agentsession.WordsComposed
+	}
+	return words
 }
 
 // Record applies a change from the record's follow.
@@ -757,12 +819,15 @@ func (v *View) setSession(s *agentsession.Session, leaf string) {
 	// and a queued entry there may belong to an item further on.
 	v.queued = nil
 	for _, q := range agentsession.Queued(s.Path(leaf)) {
-		hidden, prov := queuedProvenance(q)
+		hidden, words, prov := queuedMarks(q)
 		if hidden {
-			// Not shown when it is drained either.
-			continue
+			if !v.showHidden {
+				// Not shown when it is drained either.
+				continue
+			}
+			words = hostWords(words, q.Item)
 		}
-		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Provenance: prov})
+		v.queued = append(v.queued, Queued{EntryID: q.ID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: words, Provenance: prov, Hidden: hidden})
 	}
 	v.leaves = tips(s)
 	v.branches = branchesOf(s, branchTips(s, v.leaf), v.leaf)
@@ -1167,13 +1232,15 @@ func (v *View) Live(ev agentturn.Event) {
 		v.dropItems(func(o *ovItem) bool { return o.run == e.RunID && o.turn == e.Turn })
 	case *agentturn.ItemStart:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, false, liveProvenance(e.Provenance))
+			// The start carries no trigger: the end does, and sets
+			// whose words the item is again.
+			v.item(e.RunID, e.ResponseID, e.Item, false, v.itemMarks(e.Item, e.Provenance, agentturn.Trigger{}, e.Copied))
 		}
 	case *agentturn.ItemUpdate:
 		v.item(e.RunID, e.ResponseID, e.Item, false, nil)
 	case *agentturn.ItemEnd:
 		if !e.Hidden {
-			v.item(e.RunID, e.ResponseID, e.Item, true, liveProvenance(e.Provenance))
+			v.item(e.RunID, e.ResponseID, e.Item, true, v.itemMarks(e.Item, e.Provenance, e.Trigger, e.Copied))
 		}
 	case *agentturn.ResponseEnd:
 		responseID := ""
@@ -1232,7 +1299,7 @@ func (v *View) Live(ev agentturn.Event) {
 	}
 }
 
-func (v *View) item(runID, responseID string, item openresponses.Item, done bool, prov *Provenance) {
+func (v *View) item(runID, responseID string, item openresponses.Item, done bool, mk *marks) {
 	if item == nil {
 		return
 	}
@@ -1255,13 +1322,17 @@ func (v *View) item(runID, responseID string, item openresponses.Item, done bool
 				o.responseID = responseID
 			}
 			o.done = o.done || done
-			if prov != nil {
-				o.prov = prov
+			if mk != nil {
+				o.marks = *mk
 			}
 			return
 		}
 	}
-	v.items = append(v.items, &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done, prov: prov})
+	o := &ovItem{run: runID, turn: v.turn.Number, key: k, responseID: responseID, item: item, done: done}
+	if mk != nil {
+		o.marks = *mk
+	}
+	v.items = append(v.items, o)
 }
 
 func (v *View) call(runID, callID string) *ovCall {
@@ -1362,6 +1433,7 @@ func (v *View) Model() Model {
 	}
 	m.Branches = append([]Branch(nil), v.branches...)
 	m.Usage, m.UsageByModel = Usage(v.path)
+	m.LastCall = lastCall(v.path)
 	m.Run, m.Worked = lastRun(v.path), worked(v.path)
 	committed := map[string]*agentsession.Call{}
 	for _, c := range agentsession.Calls(v.path) {
@@ -1374,10 +1446,14 @@ func (v *View) Model() Model {
 		case *agentsession.ConfigEntry:
 			settings = settings.Apply(x)
 		case *agentsession.ItemEntry:
-			if !x.IsVisible() {
+			if !x.IsVisible() && !v.showHidden {
 				continue
 			}
-			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID], Provenance: itemProvenance(x)}
+			row := Row{EntryID: x.ID, ResponseID: x.ResponseID, Item: x.Item, LeftOut: leftOut[x.ID], Hidden: !x.IsVisible()}
+			row.Words, row.Provenance = itemMarks(x)
+			if row.Hidden {
+				row.Words = hostWords(row.Words, x.Item)
+			}
 			if x.CopiedFrom != nil {
 				row.CopiedFrom = x.CopiedFrom.Session
 			}
@@ -1404,7 +1480,7 @@ func (v *View) Model() Model {
 		if !v.onLine(o.run) {
 			continue
 		}
-		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item), Provenance: o.prov.clone()}
+		row := Row{Live: true, Open: !o.done, ResponseID: o.responseID, Item: client.CloneItem(o.item), Words: o.marks.words, Provenance: o.marks.prov.clone()}
 		if fc, ok := o.item.(*openresponses.FunctionCall); ok {
 			row.Call = v.callView(fc, nil)
 			row.Call.Schema = schemaOf(settings.Tools, fc.Name)
@@ -1415,90 +1491,150 @@ func (v *View) Model() Model {
 	m.CutOff = append([]Permission(nil), v.cut...)
 	m.Questions = append([]agentturn.Question(nil), v.asked...)
 	for _, q := range v.queued {
-		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item), Provenance: q.Provenance.clone()})
+		m.Queued = append(m.Queued, Queued{EntryID: q.EntryID, Mode: q.Mode, Item: client.CloneItem(q.Item), Words: q.Words, Provenance: q.Provenance.clone(), Hidden: q.Hidden})
 	}
 	return m
 }
 
-// itemProvenance is the provenance an item entry records for a message
-// the host composed: its instruction layers or its trust, with its
-// source. A copied item's trust is the copy's, and a message without
-// either is the person's, whatever its source (the run's trigger).
-func itemProvenance(e *agentsession.ItemEntry) *Provenance {
-	layers := e.Layers()
+// itemMarks reads whose words an item entry's message is, with
+// agentsession's WordsOf, and the provenance the entry records for it:
+// its instruction layers, its source and its trust, for a message that
+// is not the person's words or that carries a trust. A copied item's
+// trust is the copy's, not a mark.
+func itemMarks(e *agentsession.ItemEntry) (agentsession.Words, *Provenance) {
+	words := agentsession.WordsOf(e)
 	trust := e.Trust
 	if e.CopiedFrom != nil {
 		trust = nil
 	}
-	if len(layers) == 0 && trust == nil {
+	return words, provenanceOf(words, e.Layers(), e.Source, trust)
+}
+
+// provenanceOf is what a client is told of where a message came from:
+// nil for the person's words without a trust, and for a message the
+// record says nothing of.
+func provenanceOf(words agentsession.Words, layers []agentsession.LayerRef, source *agentsession.Trigger, trust *agentsession.Trust) *Provenance {
+	if len(layers) == 0 && trust == nil && (words != agentsession.WordsComposed || source == nil) {
 		return nil
 	}
 	p := &Provenance{Layers: slices.Clone(layers), Trust: cloneTrust(trust)}
-	if e.Source != nil {
-		src := *e.Source
+	if source != nil {
+		src := *source
 		src.Unknown = nil
 		p.Source = &src
 	}
 	return p
 }
 
-// queuedProvenance reads the marks agentturn/session keeps on a queued
-// entry for an input the host marked (VisibleMember, TrustMember,
-// InstructionsPartMember), as its recorder reads them back.
-func queuedProvenance(q *agentsession.QueuedEntry) (hidden bool, prov *Provenance) {
-	if raw, ok := q.Unknown[session.VisibleMember]; ok {
+// The members in which agentturn v0.0.37 kept a queued input's marks
+// before format 0.21 gave the queued entry its own (agentturn/session's
+// VisibleMember, TrustMember and InstructionsPartMember, deprecated and
+// kept for a reader of such a session).
+const (
+	interimVisible          = "agentturn:visible"
+	interimTrust            = "agentturn:trust"
+	interimInstructionsPart = "agentturn:instructions_part"
+)
+
+// queuedMarks reads a queued entry's marks as agentturn/session reads
+// them back: format 0.21's visible, trust and instructions_part, and,
+// for each the entry does not carry, the interim member agentturn
+// v0.0.37 wrote for it. Whose words the input is is agentsession's
+// WordsOf over what was read, so an interim template queued under the
+// person's trigger is composed.
+func queuedMarks(q *agentsession.QueuedEntry) (hidden bool, words agentsession.Words, prov *Provenance) {
+	read := *q
+	if read.Visible == nil {
 		var visible bool
-		hidden = json.Unmarshal(raw, &visible) == nil && !visible
+		if raw, ok := q.Unknown[interimVisible]; ok && json.Unmarshal(raw, &visible) == nil {
+			read.Visible = &visible
+		}
 	}
-	var p Provenance
-	if raw, ok := q.Unknown[session.TrustMember]; ok {
+	hidden = read.Visible != nil && !*read.Visible
+	if read.Trust == nil {
 		var t agentsession.Trust
-		if json.Unmarshal(raw, &t) == nil {
-			p.Trust = &t
+		if raw, ok := q.Unknown[interimTrust]; ok && json.Unmarshal(raw, &t) == nil {
+			read.Trust = &t
 		}
 	}
-	if raw, ok := q.Unknown[session.InstructionsPartMember]; ok {
-		var one agentsession.LayerRef
-		if json.Unmarshal(raw, &one) == nil && one.Source != "" {
-			p.Layers = []agentsession.LayerRef{one}
-		} else if json.Unmarshal(raw, &p.Layers) != nil {
-			p.Layers = nil
+	if read.Layers() == nil {
+		if raw, ok := q.Unknown[interimInstructionsPart]; ok {
+			var one agentsession.LayerRef
+			var many []agentsession.LayerRef
+			if json.Unmarshal(raw, &one) == nil && one.Source != "" {
+				read.InstructionsLayers = []agentsession.LayerRef{one}
+			} else if json.Unmarshal(raw, &many) == nil {
+				read.InstructionsLayers = many
+			}
 		}
 	}
-	if p.Trust == nil && len(p.Layers) == 0 {
-		return hidden, nil
-	}
-	if q.Trigger != nil {
-		src := *q.Trigger
-		src.Unknown = nil
-		p.Source = &src
-	}
-	return hidden, &p
+	words = agentsession.WordsOf(&read)
+	return hidden, words, provenanceOf(words, read.Layers(), read.Trigger, read.Trust)
 }
 
-// liveProvenance is an item event's provenance, copied, marking the
-// message as the record will: by its layers or its trust, an empty
-// trust included. A source alone marks nothing, since the record holds
-// every input's source and reads such a message as the person's; the
-// row would flip when its entry lands (agentturn#303).
-func liveProvenance(lp *agentturn.Provenance) *Provenance {
-	if lp == nil || (len(lp.Layers) == 0 && lp.Trust == nil) {
-		return nil
-	}
-	p := &Provenance{}
-	for _, l := range lp.Layers {
-		p.Layers = append(p.Layers, agentsession.LayerRef{ID: l.ID, Source: l.Source})
-	}
-	if lp.Trust != nil {
-		p.Trust = &agentsession.Trust{Reads: make([]string, len(lp.Trust.Reads))}
-		for i, l := range lp.Trust.Reads {
-			p.Trust.Reads[i] = string(l)
+// itemMarks is whose words a live item is. A queued input's item_end
+// carries no trigger, since what brought it in is on its queued entry,
+// written before the drain: an item with no trigger that a queued entry
+// on the path holds, by its ID, takes that entry's words and
+// provenance, as its own entry will. Any other item is [liveMarks]'s.
+func (v *View) itemMarks(item openresponses.Item, lp *agentturn.Provenance, trigger agentturn.Trigger, copied bool) *marks {
+	if id := client.ItemID(item); id != "" && trigger.IsZero() {
+		for _, q := range v.queued {
+			if client.ItemID(q.Item) == id {
+				return &marks{words: q.Words, prov: q.Provenance.clone()}
+			}
 		}
 	}
-	if s := lp.Source; s.Kind != "" || s.Ref != "" || s.Source != "" {
-		p.Source = &agentsession.Trigger{Kind: s.Kind, Ref: s.Ref, Source: s.Source}
+	return liveMarks(item, lp, trigger, copied)
+}
+
+// liveMarks is whose words an item event's item is and its provenance,
+// as agentturn/session will write its entry and WordsOf read it: the
+// source is the provenance's when it names one and the run's trigger
+// otherwise, without the kind human for an item composed from layers or
+// copied (a hidden one is not shown), and nothing left is no source.
+func liveMarks(item openresponses.Item, lp *agentturn.Provenance, trigger agentturn.Trigger, copied bool) *marks {
+	t := trigger
+	if lp != nil && !lp.Source.IsZero() {
+		t = lp.Source
 	}
-	return p
+	var layers []agentsession.LayerRef
+	var trust *agentsession.Trust
+	if lp != nil {
+		for _, l := range lp.Layers {
+			layers = append(layers, agentsession.LayerRef{ID: l.ID, Source: l.Source})
+		}
+		if lp.Trust != nil {
+			trust = &agentsession.Trust{Reads: make([]string, len(lp.Trust.Reads))}
+			for i, l := range lp.Trust.Reads {
+				trust.Reads[i] = string(l)
+			}
+		}
+	}
+	if t.Kind == agentsession.TriggerHuman && (copied || len(layers) > 0) {
+		t.Kind = ""
+	}
+	var source *agentsession.Trigger
+	if t.Kind != "" || t.Ref != "" || t.Source != "" || len(t.Extra) > 0 {
+		source = &agentsession.Trigger{Kind: t.Kind, Ref: t.Ref, Source: t.Source}
+	}
+	words := agentsession.WordsUnclaimed
+	if m, ok := item.(*openresponses.Message); ok && m.Role == openresponses.RoleUser {
+		switch {
+		case len(layers) > 0:
+			words = agentsession.WordsComposed
+		case source == nil:
+		case source.Kind == agentsession.TriggerHuman:
+			words = agentsession.WordsPerson
+		default:
+			words = agentsession.WordsComposed
+		}
+	}
+	if copied {
+		// A copy's trust is the copy's, as on the record.
+		trust = nil
+	}
+	return &marks{words: words, prov: provenanceOf(words, layers, source, trust)}
 }
 
 func cloneTrust(t *agentsession.Trust) *agentsession.Trust {

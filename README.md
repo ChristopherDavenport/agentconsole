@@ -60,7 +60,12 @@ Any `agentturn.Control` will do: a bare `*agentturn.Agent` with its
 `Control` has) and refuses it otherwise, which the tree shows. A product
 with intents of its own to handle (answering some questions by rule,
 its own commands, recording who answered) writes its own `Controller`
-and may pass the rest to `Direct`. The public packages are `console`,
+and may pass the rest to `Direct`. `Direct` steers through the
+control's `Accept` when it has one, and claims nothing for the person:
+an embedder that knows a person typed a line puts a trigger of kind
+`human` on the context of the `Prompt` and `Queue` intents it passes
+on (`agentturn.ContextWithTrigger`), so the session records the line as
+their words, as this module's binary does. The public packages are `console`,
 `client`, `view` and `toolview`; the terminal model and the record panes
 are internal, and none of them imports agentkit.
 
@@ -120,14 +125,43 @@ abort or the quit; with nothing selected, Ctrl-C is the interrupt it
 always was.
 The status line keeps the session's time working (its
 runs' time, summed), a running total of tokens used and, when the host supplies a price source, what the session
-has cost. The line above the input is the current turn's: how long it
+has cost. A host makes the line up with `console.WithStatus`: on top or
+at the bottom (under the input, its notices on a row just over it), plain or powerline, the segments it
+names in its order (time, tokens, cost, model, context, retry, turn,
+session, verified, stopped, and segments of its own it updates), in
+colors that can change with a number, as the context does when it
+fills against the window the host gives. A line too wide for the
+terminal drops whole segments from the right. The model segment names the
+model the host says it runs next (this binary's `-model`), and while the
+session's record still names the last run's, that one beside it, "model
+B (record: A until the next run)". Shift-Tab asks the host for its
+next mode (a host segment shows the mode); a host without modes, this
+binary among them, refuses, and the refusal shows on the status line. The line above the input is the current turn's: how long it
 has run and the tokens it took in and gave out, and while a run goes,
 what it is doing (waiting on the model, thinking, writing, calling or
 running a tool, retrying), in color, its dot a spinner; idle, or waiting
 on a permission, it says so. A tool call in motion carries the same
 spinner in its dot and the same color, and its dot goes back to ○ when
-it ends. When a tool call needs permission, y
-approves and n refuses, with an optional reason. Ctrl-/ (or F1) lists every
+it ends. A message in the conversation is labelled by whose words
+the session records it as: "user" for what the person typed (a
+trigger of kind `human`), where it came from and "not your words" for
+a message the host composed, and "user (unclaimed)" for one the record
+makes no claim about, as every message of a session recorded before
+format 0.21 is. When a tool call needs permission, y
+approves it; n refuses it and lets the run go on, the model reading the
+refusal, and s refuses it and stops the run, each with an optional
+reason. A host that offers a rule for the call (`console.WithGrantOffer`)
+adds a, approve and allow the rule for the session, and A, the same
+kept beyond it, which asks to confirm (Enter saves it, any other key
+goes back); the grant is the host's to make. A host that completes
+the input (`console.WithCompletion`: its slash commands, its workspace's
+paths for an `@path`) lists what it offers for the word being typed
+over the input; Up and Down choose, Tab puts it in, Esc closes the list,
+and with no list Tab cycles the pane. An `@path` is sent as typed, for
+the host to read; the client reads no file. An input the host queued
+hidden, and a hidden item, are left out unless the host lists them
+(`console.WithHidden`), marked hidden and as the host's, never as the person's words.
+Ctrl-/ (or F1) lists every
 key; Esc, q or Ctrl-/ again goes back.
 
 The tree and the record detail:
@@ -135,7 +169,9 @@ The tree and the record detail:
 - `ctrl+t` switches between the conversation and the tree of the session's
   branches, its origin (if it is a fork), the sessions it linked and,
   when the record can list them, the sessions made from it (its forks,
-  with the entry each was made at). In the
+  with the entry each was made at). A branch whose line left calls
+  waiting for an answer, or cut off by a process that stopped, says how
+  many ("1 call waiting"); moving the head there shows them. In the
   tree, up/down select, Enter views a branch or opens the origin read-only
   (Esc returns to the live session; the agent's head does not move), and
   `c` continues from the selected branch: the agent's head moves there and
@@ -149,10 +185,13 @@ The tree and the record detail:
   hide that row's reasoning or tool output alone; with none, every row's.
 - `tab` opens the detail of the selected row (its entry, whether its
   request verifies and why not, the response's model and usage, a call's
-  policy decision, who decided, dispatch, output and skill grants, what a
-  compaction folded), then the session summary (header, verification over
-  the line, token usage by model, config, refs, memory manifest, and the
-  cost when a host supplies a price source), then closes the pane.
+  policy decision, who decided, dispatch, output, skill grants and the
+  policy in force when the host had replaced it, what a compaction
+  folded), then the session summary (header, verification over the line,
+  token usage by model, config, refs, memory manifest, skill grants and
+  what ended them, each replacement of the policy with its new default
+  and reason, and the cost when a host supplies a price source), then
+  closes the pane.
 
 ## License
 

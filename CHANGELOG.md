@@ -5,6 +5,135 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentturn and agentturn/session v0.0.39, agentsession
+  v0.0.38, agentkit v0.0.17, agentpolicy v0.0.20, agenttool v0.0.30,
+  openresponses v0.0.19.
+- Changed: with agentsession v0.0.38 the binary raises every session it
+  appends to to format 0.21, and so does an embedder that takes this
+  release's floor by version selection (dax). A reader built on
+  agentsession before v0.0.38 refuses those files until it is upgraded.
+- Changed (#49): whose words a user message is comes from agentsession's
+  `WordsOf` (format 0.21's trigger kind `human`), as the new
+  `view.Row.Words` and `view.Queued.Words`. The TUI labels the person's
+  words "user", a message the host composed by where it came from ("not
+  your words"), now including one sent under another trigger kind with
+  no layers or trust, and a message no trigger claims "user
+  (unclaimed)". Sessions recorded before format 0.21 claim nothing, so
+  their typed lines now read "user (unclaimed)"; lines sent over
+  agentturn's front/control without `WithTriggerClaims` read as
+  composed ("sent by control: not your words"). A live row reads as its
+  entry will, a drained queued input's from its queued entry. A queued
+  input's `visible`, `trust` and `instructions_part` are read from
+  format 0.21's members first and agentturn v0.0.37's interim
+  `agentturn:` members after, so a hidden owed input stays hidden after the bump; a copied
+  input queued under the person's trigger (agentturn's `Queued.Copied`)
+  is not shown as theirs.
+- Changed (#50): `client.Direct` sends a steer through the control's
+  `Accept` when it is an `agentturn.Accepter` (agentkit's `Control`,
+  front/control's `Client`, a bare agent): it returns once the steer is
+  queued, and a steer that misses the run's last drain is taken by a
+  run the agent starts after it, where before it waited for the next
+  prompt. A follow-up still goes through `Queue`. `Direct` sets no
+  trigger: the embedder claims the person's words.
+- Fixed (#50): `console.Run` aborts again after canceling its context
+  at exit, so a run the agent started for a steer it accepted after the
+  first abort, which the cancel does not end, is not left writing to the
+  store the caller closes. A steer accepted before that abort starts no
+  run since agentturn v0.0.39 (agentturn#312), which settles its
+  delivery aborted. Run first waits, at most a second, for intents
+  still in flight, so a steer typed just before the quit lands before
+  the first abort, and exit does not wait out the drain timeout and
+  warn that a run did not end.
+- Changed (#50): the binary claims what is typed at its terminal as the
+  person's (a trigger of kind `human`, source `terminal`, on prompts and
+  steers, and the answerer of a reply), so its sessions record typed
+  lines as the person's words.
+- Added (#51): the inspect panes read agentpolicy v0.0.20's `replace`
+  verdict. A replacement of the policy ends the plain grants
+  (`Engine.Grant`, `GrantOver`) as of its entry, "ended by the policy's
+  replacement", and leaves grant sets in force; the session summary
+  lists each replacement with its new default, the default's note, its
+  sources and its reason, and a call's detail the replacement in force
+  when it was decided.
+- Added (#31): `console.WithStatus` makes up the status line:
+  `StatusLine` with a position (`StatusTop`, `StatusBottom`, under the
+  input's lower bar, its notices on a row just over it), a style (`StatusPlain`, `StatusPowerline`), the
+  segments in order (built-ins `BuiltinSegments()`: time, tokens, cost,
+  model, context, retry, turn, session, verified, stopped; and the
+  host's, `Host` by name as `func() Segment`, "" hiding one), colors
+  per segment with thresholds for the numeric ones (`SegmentColor`,
+  `Threshold`), the window the `context` segment divides by (`Window`)
+  and `Updates`, which redraws the line when a host segment changes.
+  `Run` refuses a segment it does not know, and a color for one. Without the option the line
+  is today's (`DefaultStatusSegments()`), except that a line too wide
+  for the terminal drops whole segments rather than being cut at a
+  column. `view.Model.LastCall` (`view.ModelCall`) is the viewed line's
+  last model call with its usage, which the context segment reads.
+- Changed (#31): the status line left unconfigured, too wide for the
+  terminal, now drops whole segments from the right and keeps its
+  notices (a read-only view's banner, a stopped feed, the client's note),
+  where before the whole line was cut at the last column.
+- Added (#7): `console.StatusLine.Model`, the model the host runs next.
+  The model segment names it from the start, with the record's model
+  beside it until a run under the host's lands ("model B (record: A
+  until the next run)"), so a resumed session shows the configured
+  model before the first prompt. The binary passes its `-model`.
+- Added (#43): Shift-Tab sends `client.NextMode`, an intent that names
+  no mode, for the host to move to its next one and show it in a status
+  line segment of its own. `client.Direct` refuses it with
+  `client.ErrNoModes`; the refusal shows on the status line.
+- Changed, breaking (#41, #42): the permission panel's `client.Answer`
+  carries what the person meant per call, not the control's answer:
+  `Answer.Calls` is a list of `client.CallAnswer` (the call, a `Verdict`
+  of `VerdictApprove`, `VerdictRefuse` or `VerdictStop`, the typed
+  reason, and for an approval a `Grant`, `GrantOnce`, `GrantSession` or
+  `GrantSaved`, with the host's `Rule`), where `Answer.Answers` held
+  `agentturn.Answer`s. `client.Direct` builds the answers with
+  `client.AnswerOf` (an approval, or "The user refused this call." with
+  the reason, as an output for a refusal and `agentturn.Refuse` for a
+  stop, each by "human") and makes no grant; `client.WithAnswers`, a
+  new `DirectOption`, gives it a product's own words.
+- Changed (#42): in the panel, n refuses and lets the run go on (the
+  model reads the refusal), where it ended the run; s refuses and
+  stops it. Both take an optional typed reason. These are dax's REPL's
+  keys.
+- Added (#41): `console.WithGrantOffer` asks the host, per permission
+  and off the program's goroutine, for a `client.GrantOffer` (the rule
+  an approval would grant, and whether it can be kept beyond the
+  session). With one, the panel shows the rule beside a (approve with a
+  session grant) and A (approve with the grant kept), and the intent
+  carries the grant for the host's controller to make. These are dax's
+  REPL's keys; a keeps meaning "allow with a note" on a question. A
+  asks to confirm before it answers (Enter saves the rule, any other key
+  goes back, a key the client takes first such as Tab or Esc included),
+  so one slip cannot keep a rule beyond the session.
+- Added (#45): `console.WithCompletion` completes the input from the
+  host. As the word that ends at the cursor changes, the host's
+  function is asked (`console.Completing`: the input up to the cursor,
+  the word, whether a run goes), off the program's goroutine with a
+  one-second timeout, and its `console.Completion`s (text and a line of
+  help) are listed over the input: Up and Down choose, Tab puts the
+  chosen text in place of the word, Esc closes the list. With no list
+  open Tab cycles the pane as before. The client gives a slash or an @
+  no meaning, and sends an `@path` as typed. The function is asked on
+  every keystroke that changes the word, with no debounce, so calls may
+  overlap: it must be safe for concurrent use.
+- Added (#47): `view.WithHidden` (a `view.Option`; `view.New` takes
+  options) and `console.WithHidden` list what the record marks hidden:
+  an input the host queued with `visible` false (`view.Queued.Hidden`)
+  and a hidden item entry (`view.Row.Hidden`), marked "hidden" and
+  never the person's words (a user message's `Words` is composed
+  whatever the trigger says, and with no trigger). The "(hidden)" tag
+  goes beside a row's other tag, so a hidden quarantined output keeps
+  its warning. Without it nothing changes.
+- Added (#47): `view.Branch.Open` counts the calls a branch the view is
+  not on left owed an output (its last run's pending calls, or the
+  calls a run that never ended dispatched), and the tree shows it ("1
+  call waiting"), so a dispatch left on another branch after a restart
+  is seen before the head moves there.
+
 ## v0.0.15 - 2026-11-04
 
 - Dependencies: agentturn and agentturn/session v0.0.37, agentsession

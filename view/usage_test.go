@@ -62,3 +62,36 @@ func TestWorkedSumsTheRunsThatEnded(t *testing.T) {
 		t.Errorf("no runs worked %v", got)
 	}
 }
+
+func TestLastCallIsTheLastModelCallSinceACompaction(t *testing.T) {
+	usage := func(in, out int) *openresponses.Usage {
+		return &openresponses.Usage{InputTokens: in, OutputTokens: out, TotalTokens: in + out}
+	}
+	if got := lastCall(nil); got.Model != "" || got.Usage.InputTokens != 0 {
+		t.Errorf("no call on the line: %+v", got)
+	}
+	path := []agentsession.Entry{
+		&agentsession.ConfigEntry{Model: "a"},
+		&agentsession.ResponseEntry{ResponseID: "1", Usage: usage(100, 10)},
+		&agentsession.ResponseEntry{ResponseID: "2", Usage: usage(300, 20)},
+		// A response with no usage says nothing of the context.
+		&agentsession.ResponseEntry{ResponseID: "3"},
+	}
+	if got := lastCall(path); got.Model != "a" || got.Usage.InputTokens != 300 {
+		t.Errorf("the last call: %+v, want model a, 300 in", got)
+	}
+	path = append(path, &agentsession.ResponseEntry{ResponseID: "4", Model: "b", Usage: usage(500, 5)})
+	if got := lastCall(path); got.Model != "b" || got.Usage.InputTokens != 500 {
+		t.Errorf("a call naming its model: %+v, want model b, 500 in", got)
+	}
+	// A compaction replaces the context: nothing is known of its size
+	// until the next call.
+	path = append(path, &agentsession.CompactionEntry{Config: agentsession.Settings{Model: "a"}, Usage: usage(900, 40)})
+	if got := lastCall(path); got.Usage.InputTokens != 0 {
+		t.Errorf("after a compaction: %+v, want no call", got)
+	}
+	path = append(path, &agentsession.ResponseEntry{ResponseID: "5", Usage: usage(60, 6)})
+	if got := lastCall(path); got.Model != "a" || got.Usage.InputTokens != 60 {
+		t.Errorf("the call after a compaction: %+v, want model a, 60 in", got)
+	}
+}

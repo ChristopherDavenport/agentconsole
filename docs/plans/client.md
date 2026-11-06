@@ -1085,7 +1085,8 @@ agentturn's and agentkit's now.
   record.
 - **Intents are plain values.** `client.Prompt{Items}`,
   `Queue{Mode, Items}` (a steer or a follow-up), `Abort{}`,
-  `Answer{Answers}` (the permission panel's answers, the run's resume),
+  `Answer{Answers}` (the permission panel's answers, the run's resume;
+  `Answer{Calls}` since #41/#42, see "the permission panel's answers"),
   `Reply{ID, Answer}` (a question's answer, its Note the user's words)
   and `ContinueFrom{EntryID}`. A `client.Controller` is
   `func(ctx, Intent) error` and returns promptly: nil says the intent
@@ -1285,7 +1286,8 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   off by a quiet tool, so a controller built on it could not answer
   promptly: the TUI's ordered send of a second steer would wait out the
   tool call. `Direct` keeps `Queue` until a delivery that returns once
-  it is accepted exists.
+  it is accepted exists. (It exists now, agentturn's `Accept`: see
+  "steer through Accept, and who claims the person's words".)
 
 ## Decided in implementation, a panel settles before it answers
 
@@ -1311,7 +1313,255 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   the queued entry's `agentturn:*` members, and from the live item
   events; the TUI labels the message with it in place of "user". A
   message with neither layers nor trust is the person's, whatever its
-  `source`, which every input carries as the run's trigger.
+  `source`, which every input carries as the run's trigger. (Superseded
+  by format 0.21's trigger kind `human`: see "whose words, and format
+  0.21's queued members".)
+
+## Decided in implementation, whose words, and format 0.21's queued members
+
+agentconsole#49, on the bump to agentsession v0.0.38 (format 0.21) and
+agentturn v0.0.38.
+
+- **Whose words a message is, is agentsession's `WordsOf`.** Format
+  0.21 defines one trigger kind, `human`: a person sent the input. A
+  `user` message is the person's words under it, composed under any
+  other kind or when it names `instructions_part` or `from_link`, and
+  unclaimed with no trigger, which a reader must not present as the
+  person's either. `view.Row.Words` and `view.Queued.Words` (exported,
+  of agentsession's type `Words`) carry the reading, `WordsUnclaimed`
+  for a row that is not a user message. `Provenance` is now what the
+  record says of a message that is not the person's words (its layers,
+  its source, its trust), or a trust label on the person's words; nil
+  otherwise. A message whose trigger is a hook's, a schedule's or
+  `control` (agentturn's front/control without `WithTriggerClaims`) now
+  reads as composed, where before a source alone marked nothing.
+- **The TUI labels by it.** "user" for the person's words, with any
+  trust label after it; where it came from and "not your words" for a
+  composed message; "user (unclaimed)", dimmed, for a message no
+  trigger claims, as every message a host sends with no trigger is
+  (the claim is the embedder's to make: see "steer through Accept").
+  The queued list says where a composed input came from and a trust
+  label, and nothing for an unclaimed one, since its line is not
+  labelled as anyone's.
+- **A live item reads as its entry will.** The item's source is the
+  provenance's when it names one and otherwise the run's trigger
+  (`ItemEnd.Trigger`), without the kind `human` for an item composed
+  from layers or copied, as agentturn/session's recorder writes it, so
+  the row does not change hands when its entry lands. An `item_start`
+  carries no trigger, and its `item_end` sets the reading again. A
+  drained input's `item_end` carries none either: its trigger rode on
+  its queued entry, which the recorder writes before the drain and
+  which stays on the path until the item's own entry lands. So an item
+  with no trigger that a queued entry holds, matched by the item's ID,
+  takes that entry's words and provenance, and the row does not change
+  hands when its entry lands. An item with no ID is not shown live at
+  all (the view keys the overlay by ID; a line the TUI sends has none),
+  so it is the queued list's until its entry lands.
+- **Queued members: format 0.21's first, the interim ones after.**
+  agentturn v0.0.38 writes a queued input's `visible`, `trust` and
+  `instructions_part` as 0.21's own members of the `queued` entry. The
+  view reads those, and for each the entry does not carry the
+  `agentturn:` member agentturn v0.0.37 wrote, as agentturn/session's
+  recorder reads them back, then judges the words with `WordsOf` over
+  what it read, so a v0.0.37 template queued under the person's trigger
+  is composed. The interim members are named by their strings, since
+  agentturn/session deprecated its constants.
+- **`Queued.Copied` is the recorder's to read.** A copied input queued
+  under the person's trigger is reported with `Copied`, and the
+  recorder writes its queued entry without the kind `human`, so the
+  queued list, which reads the record and not the live `queued` event
+  (`client.Copy` drops it), shows it as not the person's. The view
+  reads no live `queued` event: the entry lands no later.
+
+## Decided in implementation, steer through Accept, and who claims the person's words
+
+agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
+#303) and agentkit v0.0.17 (`Control.Accept`).
+
+- **A steer is a delivery the agent accepts.** `Direct` sends a `Queue`
+  intent of mode steer through the control's `Accept` when the control
+  is an `agentturn.Accepter`: agentkit's `Control` (which writes the
+  queued entry, carrying `deliver`, before the agent accepts), front/
+  control's `Client` (`POST /accept`) and a bare `*agentturn.Agent`.
+  `Accept` returns once the items are queued; `Direct` drops the
+  `Delivery`, whose outcome arrives as events and entries like any
+  run's. A follow-up, and a steer to a control without `Accept` (a
+  wrapper that embeds the `agentturn.Control` interface hides it), go
+  through `Queue` as before. What changes for the person: a steer that
+  misses the run's last drain is answered by a run the agent starts once
+  that run has ended, where `Queue` left it waiting for the next prompt;
+  an abort before the run takes it still leaves it queued, starting
+  nothing (agentturn v0.0.38), and since agentturn v0.0.39 (#312) so
+  does an abort that finds no run to stop because the run in flight had
+  ended and the delivery's had not started yet: the delivery settles
+  with `ErrAborted` and the items wait for the next prompt. `Direct`
+  drops the `Delivery`, so nothing here reads that outcome. The issue's premise, that a second steer
+  waited out a quiet tool, was `Deliver`'s, which `Direct` never used;
+  with `Queue` and with `Accept` alike both steers are on the record
+  while the tool runs, which a test over a bare agent and the TUI's
+  queued-steer test check.
+- **A run Accept starts ends only on an abort, so Run aborts twice at
+  exit.** agentturn starts the run for a steer that missed the last
+  drain on the context's values without its cancellation, so canceling
+  `console.Run`'s context, its last resort at exit, does not end it.
+  Run aborts, drains, cancels and aborts again (on a context without the
+  cancel, so a host's controller takes it) before its last drain. With
+  agentturn v0.0.38 the first abort stopped nothing when it landed
+  between the run that ended and the one the delivery starts, and the
+  second only narrowed that gap. agentturn v0.0.39 (#312) closes it: an
+  abort after a delivery is accepted and before its run starts settles
+  the delivery aborted and starts no run. The second abort stays, for a
+  steer the agent accepts after the first one, whose run that abort
+  could not reach; with no run and no delivery it does nothing. Before
+  the first abort Run waits, at most a second (`tui.Model.Settle`), for
+  the intents the TUI sent in commands still in flight as the program
+  ended, so a steer typed just before the quit lands first and the
+  first abort reaches its run; without the wait the drain waited that
+  run out and warned before the second abort ended it. A command the
+  program never ran is never answered, hence the bound.
+- **The person's words are the embedder's claim.** The view sends
+  intents and holds no identity, so `Direct` puts no trigger on a
+  context: a prompt or a steer sent through it alone is recorded with no
+  trigger, unclaimed, and shown "user (unclaimed)". The embedder, which
+  knows a person is at the keys, wraps its `Controller` and puts a
+  trigger of kind `human` on a `Prompt`'s and a `Queue`'s context
+  (`agentturn.ContextWithTrigger`), and the answerer on a `Reply`'s
+  (`ContextWithAnswerer`). `cmd/agentconsole` does (`typedAt`, with
+  kind `human`, source `terminal`), since every line it takes is typed;
+  dax must do the same for terminal input (today it puts its
+  `AtTerminal` trigger only on replies) and decide for its own slash
+  commands, which may compose. A message the host composes
+  from layers is recorded without the kind whatever the trigger, by
+  agentturn/session. Over front/control the claim is the server's to
+  grant (`WithTriggerClaims`). No library helper: one wrapper is a few
+  lines and its identity is the embedder's.
+
+## Decided in implementation, a policy replacement in the panes
+
+agentconsole#51, on the bump to agentpolicy v0.0.20 (RFC 0001 draft
+0.5, Grants). `Engine.SetPolicy(ctx, p, reason)` records the
+replacement as a verdict of kind `replace`, its action the new
+default's, its reason "replaced the policy" and the host's words after
+a colon, and its `policy` member the default, the default's note and
+the sources by name and hash.
+
+- **A replacement ends the plain grants.** The rules `Engine.Grant` and
+  `GrantOver` added joined the policy replaced, so the grants pane ends
+  each as of the replacement's entry, "ended by the policy's
+  replacement at ...", in the session summary and, for a call made
+  before it, "ended later by ...". Grant sets (an activation's
+  `grant_set`) stay. Internal to `inspect`: `Grant.PolicyReplaced`.
+- **The replacement shows where the grants do.** The session summary
+  lists each replacement on the line (the last eight, the rest
+  counted), "policy: replaced at ENTRY, default D (NOTE), from SOURCES:
+  REASON", and a call's detail the replacement in force when it was
+  decided, the last before its last decision. The rules a replacement's
+  record lists are not shown: its sources name where they are. No
+  exported name: `inspect` is internal.
+
+## Decided in implementation, the status line
+
+agentconsole#31, reshaped 2026-11-04: a configurable status line, which
+also carries the host's own segments (dax's executor line, #43's mode,
+#7's model). Implementation, no RFC rule. The user's decisions: the
+make-up is declarative (no command fed JSON, as Claude Code's is), the
+styles are plain and powerline, and the line sits on top or at the
+bottom.
+
+- **`console.WithStatus(console.StatusLine)`.** New exported names:
+  `StatusLine` {`Position`, `Style`, `Segments`, `Host`, `Colors`,
+  `Window`, `Updates`}, `StatusPosition` (`StatusTop` "top",
+  `StatusBottom` "bottom"), `StatusStyle` (`StatusPlain` "plain",
+  `StatusPowerline` "powerline"), `Segment` {`Text`, `Color`},
+  `SegmentColor` {`Color`, `Thresholds`}, `Threshold` {`At`,
+  `Color`}, `BuiltinSegments()`, `DefaultStatusSegments()`; in `view`,
+  `Model.LastCall` and its type `ModelCall` {`Model`, `Usage`}. Position
+  and style are strings so a host's config file maps onto them as
+  written; "" is the default. The names spell "Color", as Go and
+  lipgloss do (renamed from "Colour" before the first release).
+- **Left unset, the line is today's.** Without `WithStatus` (and with a
+  zero `StatusLine`) the segments are the default ones in today's order
+  (time, tokens, cost, model, retry, turn, session, verified, stopped),
+  plain, on top, and say what they said: on the plain line a cost right
+  after the tokens joins them with ", ", as before. One change: a line
+  wider than the terminal now loses whole segments from the right (the
+  notices around them stay) where it was cut at a column.
+- **Built-in segments come from the view model alone:** time, tokens,
+  cost (the `WithCost` price), model, context, retry, turn, session,
+  verified (shows "unverified" only), stopped. `context` is the last
+  model call's input tokens (`view.Model.LastCall`: the last response
+  on the viewed line reporting usage, with its model, zeroed by a
+  compaction or a branch summary after it, since the context's size is
+  then unknown until the next call) over the window the host's
+  `Window(model)` gives: "ctx 41% 410k/1.0M"; "-- ctx" before a call;
+  "ctx 410k" when the window is not known. The model asked for is the
+  one the requests carry: the host's (`StatusLine.Model`) when it names
+  one, else the record's (the turn's, then the config's), falling back
+  to the call's. Between a switch and the next run the last call was
+  made under the record's model and is measured against the host's
+  window, the one the next request goes to.
+- **Host segments are the host's state, read at each draw.** `Host`
+  maps a name to `func() Segment`, called on the program's goroutine as
+  the line is drawn; "" hides the segment and its separator. The host
+  sends on `Updates` when a value changes and the program redraws
+  without a key press (Run forwards each receive as a message until the
+  program ends; a closed channel stops it). A host segment may not take
+  a built-in's name. The console reads no product state.
+- **Colors.** A color is what lipgloss takes ("1".."255", "#rrggbb").
+  A host segment's own color comes first, then `Colors[name]`. A
+  numeric built-in (context in percent, tokens summed, cost in dollars,
+  time in seconds, turn, retry) takes the highest threshold its value
+  reaches; context is green, yellow from 50 and red from 80 unless
+  `Colors["context"]` is set. Plain: the line is reversed, and a
+  colored segment's text is drawn in its color, which the reversal
+  shows as its block. Powerline: each segment a block (its color, or
+  bright black with white text), U+E0B0 between blocks in the color of
+  the one it leaves on the one it enters.
+- **Position.** Top: the first row, as today, with the notices (the
+  read-only banner, a stopped feed, the client's note) around the
+  segments as before. Bottom: the last row, under the input's lower bar
+  (under the hint on the tree, keys and read-only screens); the
+  conversation then starts on the first row, and the notices take a row
+  of their own just over the line while there is one, so the
+  conversation's first row never moves as they come and go. A click, a
+  drag's selection and its copy count rows from where the conversation
+  starts (`vpTop`), and every change of the client's note lays the
+  screen out again, since at the bottom it adds or takes away a row.
+- **The host's model (#7).** `StatusLine.Model func() string` (a new
+  exported name) is the model the host runs next. agentturn RFC 0001
+  leaves a configuration's switch between runs to the host, and the
+  config entry is written when the next run starts, so after a relaunch
+  or a switch the record names the last run's model. The model segment
+  names the host's, and while the record's (the turn's, then the
+  config's) differs, the record's beside it: "model B (record: A until
+  the next run)"; once a run under B lands, "model B". `Model` must
+  return the name the requests carry (`Request.Model`, which agentturn
+  records as the turn's model, not the provider's echo), or the two
+  never agree and the record's stays beside it. The view gets no
+  configuration of its own: the console compares two names, and the
+  context segment's window is looked up for the host's model. The
+  binary passes its `-model`.
+- **The mode (#43).** The indicator is a host segment, not a field of
+  its own: the host names it ("mode" in its `Segments`), returns the
+  mode's name, and colors a mode that asks nothing (bypass) as a
+  warning with `Segment.Color`. Shift-Tab sends a new intent,
+  `client.NextMode{}`, which names no mode: the console knows none.
+  `client.Direct` refuses it with the new `client.ErrNoModes`, since a
+  bare agentturn Control has no modes; the embedder's controller
+  handles it before Direct, moves to its next mode (agentpolicy's
+  `SetPolicy(ctx, p, reason)`, a switch during a run applying at the
+  next turn boundary, as dax#145's vetting says) and sends on
+  `Updates`; the program also draws after the intent's answer, so the
+  new mode shows either way. A refusal is shown on the status line, as
+  the client's note "mode: ..." (where the mode is), not on the error
+  line, and a mode taken later clears it. Shift-Tab works on every
+  screen, as Ctrl-C does.
+- **Refused at Run.** An unknown segment name, position or style, a
+  host segment with a built-in's name or no function, a color for a
+  segment that is neither a built-in nor the host's, and thresholds on
+  a segment with no number make `Run` return an error before it starts
+  anything, never a segment silently dropped or a mistyped name
+  ignored. A color string itself is not checked.
 
 ## Decided in implementation, forks in the tree
 
@@ -1373,6 +1623,144 @@ v0.0.36 brought facts the record now carries; the view keeps each.
   question or a permission is answered are said on the status line and
   leave the input as it was. The exec is an internal option of the
   model, so a test without a program runs the editor at once.
+
+## Decided in implementation, the permission panel's answers
+
+agentconsole#41 and #42, vetted against agentpolicy RFC 0001 (Grants,
+Grant sets) and agentturn RFC 0001 (Pending calls and resume: an
+answer's `Terminate`, `StopRefused`). Implementation, no RFC rule.
+
+- **The panel sends what the person meant.** `client.Answer` is
+  `{Calls []CallAnswer}`: per call its ID, a `Verdict`
+  (`VerdictApprove`; `VerdictRefuse`, which lets the run go on;
+  `VerdictStop`, which ends it), the person's typed `Reason`, and for
+  an approval a `Grant` (`GrantOnce`, the zero value; `GrantSession`;
+  `GrantSaved`) with the `Rule` the host offered. Before, the TUI built
+  `agentturn.Answer`s itself, with its own refusal text: the control
+  value, which left a product's controller no say in the words the
+  model reads and no way to see an "always". The view sends intents,
+  not controls.
+- **`client.Direct` builds the control's answers.** `client.AnswerOf`
+  is its default: an approval, or an output "The user refused this
+  call." with " Reason: ..." after it, as `agentturn.Output` for a
+  refusal and `agentturn.Refuse` (Terminate, so `StopRefused`) for a
+  stop, each `By` "human" (the panel's keys are a person's, as before)
+  and the reason on `Reason`. `client.WithAnswers(fn)`, a
+  `DirectOption` (`Direct(c, ...DirectOption)`), puts a product's own
+  answers in its place, so dax's `Refusal(callID, note, stop)` gives
+  every front the same words (dax#150). A verdict of none of the three
+  is refused. Direct makes no grant: a control has none to make.
+- **The grant is the controller's.** dax makes it (dax#146): a
+  `GrantSet` under `Kit.GrantScope` for the session, and for saved a
+  rule in its own per-project source, then hands the Answer on.
+- **The host offers the rule.** `console.WithGrantOffer(fn)` (and
+  `tui.WithGrantOffer`): `fn(ctx, view.Permission)` returns a
+  `client.GrantOffer{Rule, Saved}`; dax predicts it with agentpolicy's
+  `Engine.Would`, which may run hooks, and over `dax attach` the
+  prediction is remote, so `fn` runs in a tea.Cmd, once per call out,
+  under a context that ends after two seconds. The answers are kept by
+  call and forgotten with the permission. Until one with a Rule is in,
+  the panel offers only "once". Not a field on `view.Permission`: the
+  view is the record's and the events', and the offer is neither.
+- **The keys.** y approves once; a approves with a session grant and A
+  with a saved one, shown with the rule ("[a] always bash(go test:*)
+  this session   [A] and save it", A only when `Saved`), the refusals
+  then on a line of their own; n refuses and lets the run go on, s
+  refuses and stops it, each taking an optional reason typed in the
+  input. All four are dax's REPL's (a and A dax#146, n and s dax#150),
+  so the fronts agree, and n changed meaning: it used to stop. The user
+  chose a/A over g/G (2026-11-06) to match the REPL; a keeps meaning
+  "allow with a note" on a question's panel, which never shows at the
+  same time as a permission's.
+- **A saved grant is confirmed.** A alone answers nothing: the panel
+  asks "Save bash(go test:*) beyond this session?", Enter makes the
+  grant and approves the call, and any other key, Esc or y included,
+  goes back to the panel without answering. The confirmation is
+  dropped before anything else reads the key, so a key the client takes
+  first (Tab cycling the pane, Esc closing it, Ctrl-T, a click) does
+  what it does and cancels it too; no Enter after it saves the rule. A rule kept beyond the
+  session outlives the slip that made it (a stray Shift, Caps Lock),
+  so it takes two deliberate keys; a session grant, which ends with
+  the conversation, takes one. The confirmation is forgotten when the
+  permission goes.
+
+## Decided in implementation, completion from the host
+
+agentconsole#45. Implementation, no RFC rule.
+
+- **`console.WithCompletion(fn)`.** `fn(ctx, console.Completing)
+  []console.Completion`. `Completing` is `Before` (the input up to the
+  cursor), `Word` (its end back to the last space or line break: what a
+  completion replaces) and `Running`; a `Completion` is `Text`, put in
+  place of the word, and `Help`, one line shown beside it. A struct of
+  its own rather than `Line`: the host needs the word and where the
+  cursor is, which a submitted line does not have.
+- **The host decides what a word is.** The client asks about every
+  word that ends at the cursor as it changes, and gives a slash or an @
+  no meaning, as it gives a submitted line none ("submitted lines"): a
+  slash command is the host's, and so are the paths, since the files
+  may be in a workspace elsewhere. dax returns its commands with their
+  help for a slash word at the input's start, and its workspace's paths
+  for an @ word; nothing for any other.
+- **Off the program's goroutine.** `fn` runs in a tea.Cmd under a
+  context that ends after a second (a remote workspace can be slow).
+  Each request is numbered, and an answer for a word since changed is
+  dropped; the list for the old word goes as soon as the word changes,
+  so Tab never puts a completion of another word in. There is no
+  debounce: `fn` is asked on every keystroke that changes the word,
+  prose included, and an answer slower than the typing leaves several
+  calls in flight at once, so the docs require `fn` to be safe for
+  concurrent use and quick to return nothing for a word it does not
+  complete. A debounce would be the client's to add if a host needs it.
+- **The list.** Over the input, under the submit lines, at most eight
+  rows around the chosen one (a count past that), the chosen one
+  marked, the help lined up in a column measured in terminal cells
+  (`lipgloss.Width`), so a wide character does not shift it. Tab takes
+  it, Up and Down choose (the history walk yields
+  while a list is open), Esc closes it until the word changes. A word
+  just completed is not asked about again, so a full completion does
+  not reopen the list on itself; typing on (after a directory) asks.
+  No list while a refusal's reason or a note is typed, on a read-only
+  view or another screen. With no list open, Tab cycles the pane.
+- **`@path` is text.** The line is sent as typed. What an @path sends
+  (the path, or the file's content) is the host's, in its submit
+  function; the client reads no file.
+
+## Decided in implementation, view follow-ups
+
+agentconsole#47, from the fix batch review. Implementation, no RFC
+rule.
+
+- **The show-hidden switch.** `view.WithHidden()`, a `view.Option`
+  (`view.New(...Option)`), and `console.WithHidden()`, which passes it
+  through `tui.Attach(..., ...view.Option)`. With it the view lists
+  what the record marks hidden from a person's view: a queued input
+  with `visible` false (`Queued.Hidden`) and an item entry with
+  `visible` false (`Row.Hidden`), the drained input among them. Each is
+  the host's: a user message's `Words` is `WordsComposed` even under
+  the person's trigger, and with no trigger at all (not "unclaimed": a
+  message kept from the person's view is not one they sent), so no
+  client shows it as their words. The TUI says "hidden, queued ..."
+  over the input and "(hidden)" on a row, beside the row's other tag
+  (copied, kept from the model, quarantined), never in its place. A
+  hidden item has no overlay (`client.Copy` drops it) and is listed
+  once its entry lands. A static option, not a key: a key would have
+  to reach the view under the feed's lock, and no one has asked for
+  one.
+- **`Model()` concurrency.** Documented, not made safe: a View is not
+  safe for concurrent use, Model included, since Model keeps the viewed
+  line's left-out cache; a caller holds one lock over Record, Live and
+  Model, as `tui.Attach` does (v0.0.15, 5053355).
+- **Calls waiting on another branch.** The tree marks them.
+  `view.Branch.Open` counts, for a branch the view is not on, the calls
+  its line left owed an output: walking back from the line's end to its
+  last run entry, an end's pending calls with no output after it, or,
+  for a start with no end (the process stopped mid-run), the calls
+  dispatched since with no output. The TUI adds "1 call waiting" ("N
+  calls waiting") to the branch. 0 on the viewed branch, whose calls are
+  `Permissions` and `CutOff`. The walk stops at the first run entry, so
+  it is short for a branch with runs; a branch with none walks to the
+  root, once per branch per step.
 
 ## Open questions
 

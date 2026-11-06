@@ -9,10 +9,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
-	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -172,6 +172,11 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 	case row.Live:
 		tag = dimStyle.Render(" (not committed yet)")
 	}
+	if row.Hidden {
+		// Beside the other tag, not in its place: a hidden row that is
+		// also quarantined keeps its warning.
+		tag = dimStyle.Render(" (hidden)") + tag
+	}
 	tail := ""
 	if row.Live && row.Open {
 		tail = cursor
@@ -183,11 +188,10 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		var label string
 		body := it.Text()
 		switch {
-		case row.Provenance != nil:
-			// Text the host composed: never shown as the person's words.
-			label = dimStyle.Render(provenanceText(row.Provenance))
 		case it.Role == openresponses.RoleUser:
-			label = userStyle.Render("user")
+			label = wordsLabel(row.Words, row.Provenance)
+		case row.Provenance != nil:
+			label = dimStyle.Render(provenanceText(row.Provenance))
 		case it.Role == openresponses.RoleAssistant:
 			label = assistantStyle.Render("agent")
 			body = md.render(body, width)
@@ -691,14 +695,24 @@ func currentRun(m view.Model, s runState) (view.Run, bool) {
 // runs on the line that ended, and the current turn's time so far. It is
 // "" before the line holds a run.
 func sessionTime(m view.Model, s runState, now time.Time) string {
-	if m.Run.ID == "" {
+	d, ok := sessionWorked(m, s, now)
+	if !ok {
 		return ""
+	}
+	return elapsed(d)
+}
+
+// sessionWorked is the session's time working, as [sessionTime] says it,
+// and whether the line holds a run.
+func sessionWorked(m view.Model, s runState, now time.Time) (time.Duration, bool) {
+	if m.Run.ID == "" {
+		return 0, false
 	}
 	d := m.Worked
 	if r, ok := currentRun(m, s); ok && r.Ended.IsZero() && !r.Started.IsZero() {
 		d += max(now.Sub(r.Started), 0)
 	}
-	return elapsed(d)
+	return d, true
 }
 
 // elapsed is a turn's running time to the second: 19s, 4m05s, 1h02m.
@@ -711,60 +725,6 @@ func elapsed(d time.Duration) string {
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// statusText is the session's view: its time working (worked, from
-// [sessionTime]; "" says none), its running token use and cost, the
-// model and attempt and the turn number. The run's state is on the run
-// line.
-func statusText(m view.Model, worked string, verified bool, cost client.Cost) string {
-	var parts []string
-	if worked != "" {
-		parts = append(parts, "time "+worked)
-	}
-	if m.Usage.TotalTokens > 0 || m.Usage.InputTokens > 0 || m.Usage.OutputTokens > 0 {
-		usage := fmt.Sprintf("tokens %s in, %s out", compactTokens(m.Usage.InputTokens), compactTokens(m.Usage.OutputTokens))
-		if cost != nil {
-			p := view.Price(m.UsageByModel, cost)
-			switch {
-			case p.Priced:
-				usage += fmt.Sprintf(", $%.4f", p.Total)
-			case len(p.Unpriced) > 0:
-				usage += fmt.Sprintf(", unpriced: %s", strings.Join(p.Unpriced, ", "))
-			}
-		}
-		parts = append(parts, usage)
-	}
-	model := m.Turn.Model
-	if model == "" {
-		model = m.Config
-	}
-	if model != "" {
-		parts = append(parts, "model "+model)
-	}
-	if m.Turn.Attempt > 0 {
-		parts = append(parts, fmt.Sprintf("retry %d", m.Turn.Attempt))
-	}
-	if m.Turn.Number > 0 {
-		parts = append(parts, fmt.Sprintf("turn %d", m.Turn.Number))
-	}
-	if m.Session != "" {
-		s := m.Session
-		if len(s) > 12 {
-			s = s[:12]
-		}
-		parts = append(parts, "session "+s)
-	}
-	if !verified {
-		parts = append(parts, "unverified")
-	}
-	switch {
-	case m.Turn.Withheld:
-		parts = append(parts, "last reply withheld")
-	case m.Turn.Cause != "":
-		parts = append(parts, "last run stopped: "+causeText(m.Turn.Cause))
-	}
-	return strings.Join(parts, " | ")
 }
 
 // causeText says in words what stopped a run.
@@ -801,10 +761,37 @@ func compactTokens(n int) string {
 	return fmt.Sprint(n)
 }
 
+// wordsLabel labels a user message by whose words the record says it
+// is (agentsession's WordsOf): "user" for the person's, with a trust
+// label when it carries one; where it came from for a message the host
+// composed, never shown as the person's words; and "user (unclaimed)",
+// dimmed, for one whose record makes no claim either way, which is not
+// shown as the person's words either.
+func wordsLabel(words agentsession.Words, p *view.Provenance) string {
+	switch words {
+	case agentsession.WordsPerson:
+		return userStyle.Render("user") + trustTag(p)
+	case agentsession.WordsComposed:
+		return dimStyle.Render(provenanceText(p))
+	}
+	return dimStyle.Render("user (unclaimed)") + trustTag(p)
+}
+
+// trustTag is a message's trust labels, " (untrusted)", "" for none.
+func trustTag(p *view.Provenance) string {
+	if p == nil || p.Trust == nil || len(p.Trust.Reads) == 0 {
+		return ""
+	}
+	return dimStyle.Render(" (" + strings.Join(p.Trust.Reads, ", ") + ")")
+}
+
 // provenanceText says where a message the host composed came from, and
 // that the person did not write it: "composed from agentsmd sub/AGENTS.md,
 // sent by hook dax.agentsmd, untrusted: not your words".
 func provenanceText(p *view.Provenance) string {
+	if p == nil {
+		p = &view.Provenance{}
+	}
 	var parts []string
 	if len(p.Layers) > 0 {
 		var ls []string

@@ -87,6 +87,9 @@ type Call struct {
 	// Grants are the skill grants in force when the call was made, and
 	// whether and when they were revoked later.
 	Grants []Grant
+	// Policy is the replacement of the policy in force when the call was
+	// made, the last on the path before it; nil when none was recorded.
+	Policy *Replacement
 }
 
 // Decision is a decision entry.
@@ -305,6 +308,15 @@ func callOf(s *agentsession.Session, path []agentsession.Entry, c *agentsession.
 		}
 		if v, ok := verdictOf(e); ok && v.CallID == c.ID() {
 			out.Verdicts = append(out.Verdicts, v)
+		}
+	}
+	if at >= 0 {
+		for i := at - 1; i >= 0; i-- {
+			if v, ok := verdictOf(path[i]); ok && v.Grant == kindReplace {
+				r := replacementOf(v)
+				out.Policy = &r
+				break
+			}
 		}
 	}
 	out.Asked = elicitationsFor(path, c.ID())

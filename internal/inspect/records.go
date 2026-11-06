@@ -94,6 +94,56 @@ type Verdict struct {
 	// did (agentpolicy v0.0.19).
 	Grant string `json:"grant,omitempty"`
 	Scope string `json:"scope,omitempty"`
+	// Policy is the policy a replacement put in force (agentpolicy
+	// v0.0.20, grant "replace").
+	Policy *policyRecord `json:"policy,omitempty"`
+}
+
+// policyRecord is what agentpolicy records of a policy a replacement put
+// in force: its default and the default's note, and its sources by name.
+// The rules it lists are not read.
+type policyRecord struct {
+	Default     string `json:"default"`
+	DefaultNote string `json:"default_note,omitempty"`
+	Sources     []struct {
+		Name string `json:"name"`
+	} `json:"sources,omitempty"`
+}
+
+// Replacement is a replacement of the policy (agentpolicy's
+// Engine.SetPolicy): the verdict entry, the reason as recorded ("replaced
+// the policy: <the host's reason>"), the new default and its note, and
+// the sources the new policy was merged from. Decisions after it on the
+// path are made under it.
+type Replacement struct {
+	Entry       string
+	Reason      string
+	Default     string
+	DefaultNote string
+	Sources     []string
+}
+
+// replacementOf reads a replacement verdict.
+func replacementOf(v Verdict) Replacement {
+	r := Replacement{Entry: v.Entry, Reason: v.Reason}
+	if p := v.Policy; p != nil {
+		r.Default, r.DefaultNote = p.Default, p.DefaultNote
+		for _, src := range p.Sources {
+			r.Sources = append(r.Sources, src.Name)
+		}
+	}
+	return r
+}
+
+// replacements are the policy's replacements on path, in order.
+func replacements(path []agentsession.Entry) []Replacement {
+	var out []Replacement
+	for _, e := range path {
+		if v, ok := verdictOf(e); ok && v.Grant == kindReplace {
+			out = append(out, replacementOf(v))
+		}
+	}
+	return out
 }
 
 func verdictOf(e agentsession.Entry) (Verdict, bool) {
@@ -123,9 +173,12 @@ type Grant struct {
 	Since string
 	// Ended is the verdict entry that revoked the source's grants, "" while
 	// they hold on the whole path; Replaced says it was the activation of
-	// the source's set again under the scope, not a revocation.
-	Ended    string
-	Replaced bool
+	// the source's set again under the scope, not a revocation, and
+	// PolicyReplaced that it was a replacement of the policy, which ends
+	// a plain grant (Engine.Grant or GrantOver) with the policy it joined.
+	Ended          string
+	Replaced       bool
+	PolicyReplaced bool
 }
 
 // The kinds agentpolicy (v0.0.19, RFC 0001 draft 0.4, The record)
@@ -139,11 +192,16 @@ const (
 	kindActivate    = "activate"
 	kindRevoke      = "revoke"
 	kindRevokeScope = "revoke_scope"
+	// kindReplace is a replacement of the policy (agentpolicy v0.0.20,
+	// RFC 0001 draft 0.5, Grants): it ends the plain grants, which
+	// joined the policy replaced, and leaves the grant sets.
+	kindReplace = "replace"
 )
 
 // grantKey is a set's key in agentpolicy's engine: its scope and its
 // source. A grant made by Engine.Grant or GrantOver joins the policy,
-// which no revocation touches, and is keyed apart (always).
+// which no revocation touches and a replacement of the policy ends, and
+// is keyed apart (always).
 type grantKey struct {
 	scope, source string
 	always        bool
@@ -151,8 +209,9 @@ type grantKey struct {
 
 // grants replays the path's verdicts. Each allow a skill's source
 // granted makes a grant; an activation replaces its source's set under
-// its scope, a revocation ends its source's set under its scope, and a
-// scope's revocation every set of the scope. A record with no grant
+// its scope, a revocation ends its source's set under its scope, a
+// scope's revocation every set of the scope, and a replacement of the
+// policy every plain grant. A record with no grant
 // member is read by its reason, as agentpolicy wrote it before
 // v0.0.19: there a scope's revocation, which named no scope a grant
 // could be matched to, ends every grant. It returns every grant, with
@@ -166,7 +225,7 @@ func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
 				continue
 			}
 			for _, g := range gs {
-				all[g].Ended, all[g].Replaced, ended[g] = v.Entry, v.Grant == kindActivate, i
+				all[g].Ended, all[g].Replaced, all[g].PolicyReplaced, ended[g] = v.Entry, v.Grant == kindActivate, v.Grant == kindReplace, i
 			}
 			delete(live, k)
 		}
@@ -192,6 +251,8 @@ func grants(path []agentsession.Entry) (all []Grant, began, ended []int) {
 				end(i, v, func(k grantKey) bool { return k == set })
 			case kindRevokeScope:
 				end(i, v, func(k grantKey) bool { return !k.always && k.scope == v.Scope })
+			case kindReplace:
+				end(i, v, func(k grantKey) bool { return k.always })
 			case kindGrantSet:
 				// A refused rule is recorded as a block of the set.
 				if v.Action == "allow" && v.Rule != "" {

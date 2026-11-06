@@ -156,11 +156,13 @@ func (m *Model) click(x, y int) tea.Cmd {
 		m.clickInput(x, y-m.inputY)
 		return nil
 	}
-	// The status line is line 0; the viewport starts under it.
-	if y < 1 || y > m.vp.Height() {
+	// The viewport starts on row vpTop: under the status line on top,
+	// the first row with the line at the bottom.
+	top := m.vpTop()
+	if y < top || y >= top+m.vp.Height() {
 		return nil
 	}
-	line := m.vp.YOffset() + y - 1
+	line := m.vp.YOffset() + y - top
 	switch m.screen {
 	case screenTree:
 		return m.clickTree(line)
@@ -460,6 +462,12 @@ func (m *Model) treeItems() []treeItem {
 		if b.RunID != "" {
 			run = "  run " + shortID(b.RunID)
 		}
+		switch {
+		case b.Open == 1:
+			run += "  1 call waiting"
+		case b.Open > 1:
+			run += "  " + itoa(b.Open) + " calls waiting"
+		}
 		out = append(out, treeItem{
 			text:   mark + when + b.Label + run,
 			leaf:   b.Leaf,
@@ -627,8 +635,7 @@ func (m *Model) openTreeItem() tea.Cmd {
 	}
 	it := items[m.treeCur]
 	if it.closed != "" {
-		m.note = it.closed
-		m.relayout()
+		m.setNote(it.closed)
 		return nil
 	}
 	m.screen = screenConversation
@@ -655,7 +662,15 @@ func (m *Model) frozenBanner() string {
 
 // noteHead is the status line's note that the head moved.
 func (m *Model) noteHead(entry string) {
-	m.note = "head moved to " + shortID(entry) + " at " + time.Now().Format("15:04:05")
+	m.setNote("head moved to " + shortID(entry) + " at " + time.Now().Format("15:04:05"))
+}
+
+// setNote sets the client's note on the status line and lays the screen
+// out again: with the line at the bottom a note takes a row of its own,
+// and the viewport has to give it up.
+func (m *Model) setNote(note string) {
+	m.note = note
+	m.relayout()
 }
 
 // fork is a session made from the followed one at a base: a listed

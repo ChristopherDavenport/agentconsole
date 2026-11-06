@@ -44,6 +44,13 @@ func start(t *testing.T, m *scripted.Model, opts ...console.Option) *rig {
 // startKit is start over a kit built with kopts.
 func startKit(t *testing.T, kopts []agentkit.Option, opts ...console.Option) *rig {
 	t.Helper()
+	return startWrapped(t, kopts, nil, opts...)
+}
+
+// startWrapped is startKit with the controller wrap makes of
+// client.Direct over the kit's Control, nil for Direct itself.
+func startWrapped(t *testing.T, kopts []agentkit.Option, wrap func(*rig, client.Controller) client.Controller, opts ...console.Option) *rig {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	store, err := jsonl.Open(t.TempDir())
@@ -75,7 +82,11 @@ func startKit(t *testing.T, kopts []agentkit.Option, opts ...console.Option) *ri
 	r := &rig{t: t, agent: ag, ctl: ctl, in: pw, out: termtest.New(80, 20), done: make(chan error, 1)}
 	t.Cleanup(func() { r.out.Close() })
 	opts = append([]console.Option{console.WithInput(pr), console.WithOutput(r.out), console.WithoutSignalHandler(), console.WithWindowSize(80, 20)}, opts...)
-	go func() { r.done <- console.Run(ctx, record, ctl, client.Direct(ctl), opts...) }()
+	act := client.Direct(ctl)
+	if wrap != nil {
+		act = wrap(r, act)
+	}
+	go func() { r.done <- console.Run(ctx, record, ctl, act, opts...) }()
 	return r
 }
 
@@ -152,6 +163,111 @@ func TestRunEndsARunItQuitsOver(t *testing.T) {
 	}
 	if r.agent.State().Running {
 		t.Error("Run returned with the run still going")
+	}
+}
+
+// TestRunEndsARunASteerStartsAtExit: a steer agentturn's Accept takes
+// while no run goes starts a run under ctx's values without its
+// cancellation, so canceling ctx does not end it. A steer accepted
+// before Run's abort at exit is agentturn's: since v0.0.39 (#312) the
+// abort settles its delivery and starts no run. One accepted after that
+// abort (an intent still in flight as the program ended) starts a run
+// the abort missed, so Run aborts again before its last wait, and does
+// not return, and let the caller close the store, with the run still
+// writing. The controller here sends the steer to the idle agent right
+// after the first abort.
+func TestRunEndsARunASteerStartsAtExit(t *testing.T) {
+	var aborts atomic.Int32
+	r := startWrapped(t, []agentkit.Option{agentkit.WithModel(scripted.New(scripted.SayThenBlock("late")), "scripted")},
+		func(r *rig, act client.Controller) client.Controller {
+			return func(ctx context.Context, in client.Intent) error {
+				err := act(ctx, in)
+				if _, ok := in.(client.Abort); !ok || aborts.Add(1) != 1 {
+					return err
+				}
+				steer := client.Queue{Mode: agentturn.QueueSteer, Items: []openresponses.Item{openresponses.UserText("missed the drain")}}
+				if err := act(ctx, steer); err != nil {
+					t.Errorf("the steer: %v", err)
+					return err
+				}
+				deadline := time.Now().Add(10 * time.Second)
+				for !r.agent.State().Running {
+					if time.Now().After(deadline) {
+						t.Error("the steer started no run")
+						break
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+				return err
+			}
+		},
+		console.WithDrainTimeout(200*time.Millisecond),
+		console.WithWarn(func(string) {}))
+	t.Cleanup(r.agent.Abort)
+	r.type_("\x03")
+	if err := r.waitEnd(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if aborts.Load() == 0 {
+		t.Fatal("Run sent no abort at exit")
+	}
+	if r.agent.State().Running {
+		t.Error("Run returned with the steer's run still going")
+	}
+}
+
+// TestRunLetsALateSteerLandBeforeItsAbort: a steer typed just before the
+// quit is still in flight when the program ends. Run waits for it to
+// land before its abort at exit, so that abort reaches the run the
+// steer starts (or settles its delivery, agentturn#312), and Run returns
+// without waiting out the drain timeout or warning that a run did not
+// end.
+func TestRunLetsALateSteerLandBeforeItsAbort(t *testing.T) {
+	var warned atomic.Value
+	drain := 3 * time.Second
+	r := startWrapped(t, []agentkit.Option{agentkit.WithModel(scripted.New(scripted.SayThenBlock("part"), scripted.SayThenBlock("late")), "scripted")},
+		func(r *rig, act client.Controller) client.Controller {
+			return func(ctx context.Context, in client.Intent) error {
+				if _, ok := in.(client.Queue); !ok {
+					return act(ctx, in)
+				}
+				// The steer is slow to land: the quit overtakes it, and
+				// the run aborted ends before it is accepted. Its own run
+				// has started by the time the intent returns, which
+				// makes the timing the test needs certain.
+				time.Sleep(300 * time.Millisecond)
+				err := act(ctx, in)
+				deadline := time.Now().Add(5 * time.Second)
+				for err == nil && !r.agent.State().Running {
+					if time.Now().After(deadline) {
+						t.Error("the late steer started no run")
+						break
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+				return err
+			}
+		},
+		console.WithDrainTimeout(drain),
+		console.WithWarn(func(s string) { warned.Store(s) }))
+	t.Cleanup(r.agent.Abort)
+	r.type_("go\r")
+	r.waitScreen("part")
+	began := time.Now()
+	r.type_("more\r")
+	r.type_("\x03")
+	r.type_("\x03")
+	if err := r.waitEnd(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if took := time.Since(began); took >= drain {
+		t.Errorf("Run took %v to return, the whole drain timeout", took)
+	}
+	if w := warned.Load(); w != nil {
+		t.Errorf("Run warned %q", w)
+	}
+	if r.agent.State().Running {
+		t.Error("Run returned with the steer's run still going")
 	}
 }
 
