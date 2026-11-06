@@ -44,8 +44,9 @@ var keyGroups = []keyGroup{
 		{"Esc", "clear the cursor and close the pane"},
 	}},
 	{"Permissions and questions", [][2]string{
-		{"y  a", "approve, or answer yes; a, on a question: with a note typed, Enter sends"},
-		{"g  G", "on a permission the host offers a rule for: approve and allow the rule for the session; G: and save it"},
+		{"y", "approve, or answer yes"},
+		{"a", "always: allow the host's rule this session; on a question, yes with a note"},
+		{"A", "always, the rule saved beyond the session: Enter confirms, other keys go back"},
 		{"n", "refuse it, and let the run go on; type an optional reason, Enter refuses, Esc goes back"},
 		{"s", "on a permission: refuse it and stop the run; type an optional reason as for n"},
 	}},

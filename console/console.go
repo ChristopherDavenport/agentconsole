@@ -129,8 +129,9 @@ func WithToolRenderers(rs toolview.Renderers) Option {
 // WithGrantOffer lets the permission panel offer "always": fn says, for
 // a permission, the rule an approval would grant and whether the host
 // can keep it beyond the session (dax predicts it with agentpolicy's
-// Engine.Would). With a rule, g approves with a grant of it for the
-// session and G, when Saved, with the grant kept; the [client.Answer]
+// Engine.Would). With a rule, a approves with a grant of it for the
+// session and A, when Saved, with the grant kept, once Enter confirms
+// it (any other key goes back, so one slip saves no rule); the [client.Answer]
 // carries the grant and the rule, and the controller makes the grant
 // ([client.Direct] makes none). fn runs off the program's goroutine,
 // once per call, under a context that ends after two seconds; until it

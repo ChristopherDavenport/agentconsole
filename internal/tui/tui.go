@@ -135,6 +135,9 @@ type Model struct {
 	// refusing is the kind of refusal whose reason is being typed, empty
 	// when none is.
 	refusing client.Verdict
+	// saving is the call whose grant, saved beyond the session, waits
+	// for the person to confirm it with Enter (A asks), empty when none.
+	saving string
 	// offer asks the host for the grant it offers for a permission
 	// (WithGrantOffer); offers are its answers so far, by call, and
 	// offering the calls it has been asked about.
@@ -616,6 +619,9 @@ func (m *Model) syncPermissions() {
 			delete(m.offers, id)
 		}
 	}
+	if !out[m.saving] {
+		m.saving = ""
+	}
 }
 
 // offerTimeout bounds the host's answer to what grant it offers for a
@@ -630,7 +636,7 @@ type offerMsg struct {
 
 // askOffers asks the host, off the program's goroutine, for the grant it
 // offers for each permission out that it has not been asked about. The
-// panel shows g and G once an answer with a rule is in.
+// panel shows a and A once an answer with a rule is in.
 func (m *Model) askOffers() tea.Cmd {
 	if m.offer == nil {
 		return nil
@@ -830,12 +836,14 @@ func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
 }
 
 // permissionKey handles a key while a permission is asked: y approves
-// this call; g approves it with a grant of the rule the host offers for
-// the session, and G with the grant saved, when the host offers one; n
-// starts a refusal that lets the run go on and s one that stops it, whose
-// optional reason is typed in the input, and Enter then refuses with it.
-// The keys are dax's REPL's (n continues, s stops), so the fronts agree;
-// a, which a question's panel takes for a note, is not used here.
+// this call; a approves it with a grant of the rule the host offers for
+// the session, when the host offers one, and A asks to confirm the grant
+// saved beyond the session, which Enter then makes and any other key
+// drops, so one slip saves no rule; n starts a refusal that lets the run
+// go on and s one that stops it, whose optional reason is typed in the
+// input, and Enter then refuses with it. The keys are dax's REPL's (a
+// and A always, n continues, s stops), so the fronts agree; on a
+// question's panel a is "allow with a note".
 func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model, tea.Cmd) {
 	if m.refusing != "" {
 		if isNewlineKey(msg) {
@@ -857,16 +865,28 @@ func (m *Model) permissionKey(msg tea.KeyPressMsg, p view.Permission) (tea.Model
 		return m, m.updateInput(msg)
 	}
 	offer := m.offers[p.CallID]
+	if m.saving == p.CallID {
+		// The confirmation of a saved grant: Enter makes it, any other
+		// key goes back to the panel, answering nothing.
+		m.saving = ""
+		if msg.Code == tea.KeyEnter && offer.Rule != "" && offer.Saved {
+			return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove, Grant: client.GrantSaved, Rule: offer.Rule})
+		}
+		m.relayout()
+		return m, nil
+	}
+	m.saving = ""
 	switch msg.String() {
 	case "y", "Y":
 		return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove})
-	case "g":
+	case "a":
 		if offer.Rule != "" {
 			return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove, Grant: client.GrantSession, Rule: offer.Rule})
 		}
-	case "G":
+	case "A":
 		if offer.Rule != "" && offer.Saved {
-			return m.decide(client.CallAnswer{CallID: p.CallID, Verdict: client.VerdictApprove, Grant: client.GrantSaved, Rule: offer.Rule})
+			m.saving = p.CallID
+			m.relayout()
 		}
 	case "n", "N":
 		m.refusing = client.VerdictRefuse
@@ -1111,20 +1131,24 @@ func (m *Model) panel() string {
 	if p.MayHaveRun {
 		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
 	}
-	switch m.refusing {
-	case client.VerdictRefuse:
+	o := m.offers[p.CallID]
+	switch {
+	case m.refusing == client.VerdictRefuse:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
-	case client.VerdictStop:
+	case m.refusing == client.VerdictStop:
 		b.WriteString("\n  Reason for refusing and stopping the run (optional), Enter to refuse, Esc to go back")
+	case m.saving == p.CallID:
+		b.WriteString("\n  " + warnStyle.Render("Save "+o.Rule+" beyond this session?"))
+		b.WriteString("\n  Enter saves it and approves the call; any other key goes back")
 	default:
 		b.WriteString("\n  [y] approve")
 		sep := "   "
-		if o := m.offers[p.CallID]; o.Rule != "" {
+		if o.Rule != "" {
 			// The grant's rule may be long: the refusals go on a line
 			// of their own.
-			b.WriteString("   [g] always " + o.Rule + " this session")
+			b.WriteString("   [a] always " + o.Rule + " this session")
 			if o.Saved {
-				b.WriteString("   [G] and save it")
+				b.WriteString("   [A] and save it")
 			}
 			sep = "\n  "
 		}

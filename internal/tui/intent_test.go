@@ -92,6 +92,13 @@ func (c *intents) setRefuse(err error) {
 	c.refuse = err
 }
 
+// count is the number of intents sent so far.
+func (c *intents) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.got)
+}
+
 // next waits for the n-th intent (from 1) and returns it.
 func (c *intents) next(t *testing.T, n int) client.Intent {
 	t.Helper()
@@ -234,9 +241,11 @@ func TestTheViewSendsIntentsAndHoldsNoControl(t *testing.T) {
 }
 
 // TestThePanelOffersTheHostsGrant: with a host that offers a rule, the
-// panel shows it beside g and G, and g sends the approval with a session
-// grant of that rule; with none it offers only once (#41). n refuses and
-// lets the run go on, s refuses and stops it, each with a reason (#42).
+// panel shows it beside a and A, and a sends the approval with a session
+// grant of that rule; A asks to confirm before it saves the grant beyond
+// the session, so one slip saves nothing; with no rule offered the panel
+// offers only once (#41). n refuses and lets the run go on, s refuses and
+// stops it, each with a reason (#42).
 func TestThePanelOffersTheHostsGrant(t *testing.T) {
 	src := &handSource{}
 	ctl := &intents{}
@@ -251,21 +260,21 @@ func TestThePanelOffersTheHostsGrant(t *testing.T) {
 	next := func() client.Intent { n++; return ctl.next(t, n) }
 
 	askAbout(src, "run1", "c1")
-	a.waitFor("the offer", has("Permission requested (1/1): rm", "[g] always bash(go test:*) this session", "[G] and save it", "[n] refuse", "[s] refuse and stop"))
-	a.typeText("g")
+	a.waitFor("the offer", has("Permission requested (1/1): rm", "[a] always bash(go test:*) this session", "[A] and save it", "[n] refuse", "[s] refuse and stop"))
+	a.typeText("a")
 	in, ok := next().(client.Answer)
 	want := client.CallAnswer{CallID: "c1", Verdict: client.VerdictApprove, Grant: client.GrantSession, Rule: "bash(go test:*)"}
 	if !ok || len(in.Calls) != 1 || in.Calls[0] != want {
 		t.Fatalf("intent = %#v, want c1 approved with a session grant", in)
 	}
 
-	// No rule offered: no g, and g does nothing.
+	// No rule offered: no a or A, and neither does anything.
 	askAbout(src, "run2", "c2")
-	s := a.waitFor("the plain panel", all(has("Permission requested (1/1): rm", "[y] approve"), lacks("[g]", "[G]")))
-	a.typeText("g")
-	a.typeText("G")
-	if s2 := a.screen(); !strings.Contains(s2, "[y] approve") {
-		t.Fatalf("g answered with no rule offered:\n%s\nwas\n%s", s2, s)
+	s := a.waitFor("the plain panel", all(has("Permission requested (1/1): rm", "[y] approve"), lacks("[a]", "[A]")))
+	a.typeText("a")
+	a.typeText("A")
+	if s2 := a.screen(); !strings.Contains(s2, "[y] approve") || strings.Contains(s2, "beyond this session") {
+		t.Fatalf("a or A answered with no rule offered:\n%s\nwas\n%s", s2, s)
 	}
 
 	// s refuses and stops, with a reason.
@@ -278,10 +287,22 @@ func TestThePanelOffersTheHostsGrant(t *testing.T) {
 		t.Fatalf("intent = %#v, want c2 refused and stopped", in)
 	}
 
-	// G saves the grant.
+	// A alone saves nothing: it asks to confirm, and any key but Enter
+	// goes back to the panel, answering nothing.
 	askAbout(src, "run3", "c1")
-	a.waitFor("the offer again", has("[G] and save it"))
-	a.typeText("G")
+	a.waitFor("the offer again", has("[A] and save it"))
+	a.typeText("A")
+	a.waitFor("the confirmation", all(has("Save bash(go test:*) beyond this session?", "Enter saves it"), lacks("[y] approve")))
+	a.typeText("y")
+	a.waitFor("the panel again", all(has("[A] and save it", "[y] approve"), lacks("beyond this session?")))
+	if got := ctl.count(); got != n {
+		t.Fatalf("%d intents after A and a key that is not Enter, want %d: nothing answered", got, n)
+	}
+
+	// A, then Enter, saves the grant.
+	a.typeText("A")
+	a.waitFor("the confirmation", has("Save bash(go test:*) beyond this session?"))
+	a.key("enter")
 	in, ok = next().(client.Answer)
 	want.Grant = client.GrantSaved
 	if !ok || len(in.Calls) != 1 || in.Calls[0] != want {

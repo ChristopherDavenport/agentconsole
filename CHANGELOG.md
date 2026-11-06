@@ -99,9 +99,12 @@ versions may break the API.
 - Added (#41): `console.WithGrantOffer` asks the host, per permission
   and off the program's goroutine, for a `client.GrantOffer` (the rule
   an approval would grant, and whether it can be kept beyond the
-  session). With one, the panel shows the rule beside g (approve with a
-  session grant) and G (approve with the grant kept), and the intent
-  carries the grant for the host's controller to make.
+  session). With one, the panel shows the rule beside a (approve with a
+  session grant) and A (approve with the grant kept), and the intent
+  carries the grant for the host's controller to make. These are dax's
+  REPL's keys; a keeps meaning "allow with a note" on a question. A
+  asks to confirm before it answers (Enter saves the rule, any other key
+  goes back), so one slip cannot keep a rule beyond the session.
 - Added (#45): `console.WithCompletion` completes the input from the
   host. As the word that ends at the cursor changes, the host's
   function is asked (`console.Completing`: the input up to the cursor,

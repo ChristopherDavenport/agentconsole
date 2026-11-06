@@ -1657,16 +1657,24 @@ answer's `Terminate`, `StopRefused`). Implementation, no RFC rule.
   call and forgotten with the permission. Until one with a Rule is in,
   the panel offers only "once". Not a field on `view.Permission`: the
   view is the record's and the events', and the offer is neither.
-- **The keys.** y approves once; g approves with a session grant and G
-  with a saved one, shown with the rule ("[g] always bash(go test:*)
-  this session   [G] and save it", G only when `Saved`), the refusals
+- **The keys.** y approves once; a approves with a session grant and A
+  with a saved one, shown with the rule ("[a] always bash(go test:*)
+  this session   [A] and save it", A only when `Saved`), the refusals
   then on a line of their own; n refuses and lets the run go on, s
   refuses and stops it, each taking an optional reason typed in the
-  input. n and s are dax's REPL's (dax#150), so the fronts agree, and n
-  changed meaning: it used to stop. "Always" is not a: on a question's
-  panel a is "allow with a note", and the same key granting a rule on a
-  permission's would be the riskier surprise; dax's REPL took a and A
-  (dax#146), so the two fronts differ there.
+  input. All four are dax's REPL's (a and A dax#146, n and s dax#150),
+  so the fronts agree, and n changed meaning: it used to stop. The user
+  chose a/A over g/G (2026-11-06) to match the REPL; a keeps meaning
+  "allow with a note" on a question's panel, which never shows at the
+  same time as a permission's.
+- **A saved grant is confirmed.** A alone answers nothing: the panel
+  asks "Save bash(go test:*) beyond this session?", Enter makes the
+  grant and approves the call, and any other key, Esc or y included,
+  goes back to the panel without answering. A rule kept beyond the
+  session outlives the slip that made it (a stray Shift, Caps Lock),
+  so it takes two deliberate keys; a session grant, which ends with
+  the conversation, takes one. The confirmation is forgotten when the
+  permission goes.
 
 ## Decided in implementation, completion from the host
 
