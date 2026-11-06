@@ -178,12 +178,17 @@ func (e Entry) Lines() []string {
 		} else {
 			add("  output:   none yet")
 		}
+		if p := c.Policy; p != nil {
+			add("  policy:   in force: %s", p.line())
+		}
 		if len(c.Grants) == 0 {
 			add("  grants:   no skill grant in force")
 		}
 		for _, g := range c.Grants {
 			s := fmt.Sprintf("  grant:    %s allowed %s%s (entry %s)", g.Skill, g.Rule, underScope(g.Scope), short(g.Since))
 			switch {
+			case g.PolicyReplaced:
+				s += fmt.Sprintf(", ended later by the policy's replacement at %s", short(g.Ended))
 			case g.Replaced:
 				s += fmt.Sprintf(", replaced later at %s", short(g.Ended))
 			case g.Ended != "":
@@ -403,6 +408,8 @@ func (s Session) Lines() []string {
 		}
 		state := "in force"
 		switch {
+		case g.PolicyReplaced:
+			state = "ended by the policy's replacement at " + short(g.Ended)
 		case g.Replaced:
 			state = "replaced at " + short(g.Ended)
 		case g.Ended != "":
@@ -410,7 +417,29 @@ func (s Session) Lines() []string {
 		}
 		add("grants:   %s allowed %s%s, %s", g.Skill, g.Rule, underScope(g.Scope), state)
 	}
+	for i, r := range s.Replacements {
+		if n := len(s.Replacements); i == 0 && n > maxListed {
+			add("policy:   %d earlier replacements", n-maxListed)
+		}
+		if i < len(s.Replacements)-maxListed {
+			continue
+		}
+		add("policy:   %s", r.line())
+	}
 	return l
+}
+
+// line says what a replacement of the policy put in force, and why:
+// "replaced at abc, default deny (plan mode): replaced the policy: ...".
+func (r Replacement) line() string {
+	s := "replaced at " + short(r.Entry) + ", default " + orNone(r.Default)
+	if r.DefaultNote != "" {
+		s += " (" + clip(r.DefaultNote, 80) + ")"
+	}
+	if len(r.Sources) > 0 {
+		s += ", from " + strings.Join(r.Sources, ", ")
+	}
+	return s + ": " + clip(orNone(r.Reason), 160)
 }
 
 // underScope names the grant scope a grant was made under, if any.

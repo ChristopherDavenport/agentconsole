@@ -153,10 +153,13 @@ The tree and the record detail:
   hide that row's reasoning or tool output alone; with none, every row's.
 - `tab` opens the detail of the selected row (its entry, whether its
   request verifies and why not, the response's model and usage, a call's
-  policy decision, who decided, dispatch, output and skill grants, what a
-  compaction folded), then the session summary (header, verification over
-  the line, token usage by model, config, refs, memory manifest, and the
-  cost when a host supplies a price source), then closes the pane.
+  policy decision, who decided, dispatch, output, skill grants and the
+  policy in force when the host had replaced it, what a compaction
+  folded), then the session summary (header, verification over the line,
+  token usage by model, config, refs, memory manifest, skill grants and
+  what ended them, each replacement of the policy with its new default
+  and reason, and the cost when a host supplies a price source), then
+  closes the pane.
 
 ## License
 

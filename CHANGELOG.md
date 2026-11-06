@@ -26,6 +26,13 @@ versions may break the API.
   after, so a hidden owed input stays hidden after the bump; a copied
   input queued under the person's trigger (agentturn's `Queued.Copied`)
   is not shown as theirs.
+- Added (#51): the inspect panes read agentpolicy v0.0.20's `replace`
+  verdict. A replacement of the policy ends the plain grants
+  (`Engine.Grant`, `GrantOver`) as of its entry, "ended by the policy's
+  replacement", and leaves grant sets in force; the session summary
+  lists each replacement with its new default, the default's note, its
+  sources and its reason, and a call's detail the replacement in force
+  when it was decided.
 
 ## v0.0.15 - 2026-11-04
 

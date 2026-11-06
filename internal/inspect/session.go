@@ -54,8 +54,11 @@ type Session struct {
 	Manifest        *Manifest
 	ManifestRefused []Refusal
 	// Grants are the skill grants in force at the end of the line, and
-	// those a revocation ended.
+	// those a revocation or a replacement of the policy ended.
 	Grants []Grant
+	// Replacements are the replacements of the policy on the line, in
+	// order (agentpolicy's replace verdict); the last is in force.
+	Replacements []Replacement
 	// Redaction is set for a redacted session (agentsession RFC 0001,
 	// The redacted session), nil otherwise.
 	Redaction *Redaction
@@ -192,6 +195,7 @@ func (in *Inspector) Session(ctx context.Context, sessionID, tail string, entrie
 	out.ManifestRefused = refused
 	all, _, _ := grants(path)
 	out.Grants = all
+	out.Replacements = replacements(path)
 	in.usage(&out, path)
 	return out, nil
 }

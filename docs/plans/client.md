@@ -1366,6 +1366,29 @@ agentturn v0.0.38.
   (`client.Copy` drops it), shows it as not the person's. The view
   reads no live `queued` event: the entry lands no later.
 
+## Decided in implementation, a policy replacement in the panes
+
+agentconsole#51, on the bump to agentpolicy v0.0.20 (RFC 0001 draft
+0.5, Grants). `Engine.SetPolicy(ctx, p, reason)` records the
+replacement as a verdict of kind `replace`, its action the new
+default's, its reason "replaced the policy" and the host's words after
+a colon, and its `policy` member the default, the default's note and
+the sources by name and hash.
+
+- **A replacement ends the plain grants.** The rules `Engine.Grant` and
+  `GrantOver` added joined the policy replaced, so the grants pane ends
+  each as of the replacement's entry, "ended by the policy's
+  replacement at ...", in the session summary and, for a call made
+  before it, "ended later by ...". Grant sets (an activation's
+  `grant_set`) stay. Internal to `inspect`: `Grant.PolicyReplaced`.
+- **The replacement shows where the grants do.** The session summary
+  lists each replacement on the line (the last eight, the rest
+  counted), "policy: replaced at ENTRY, default D (NOTE), from SOURCES:
+  REASON", and a call's detail the replacement in force when it was
+  decided, the last before its last decision. The rules a replacement's
+  record lists are not shown: its sources name where they are. No
+  exported name: `inspect` is internal.
+
 ## Decided in implementation, forks in the tree
 
 - **Listing is an optional `client.Lister`.** `client.Record` follows
