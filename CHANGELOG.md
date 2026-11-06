@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.16 - 2026-11-06
 
 - Dependencies: agentturn and agentturn/session v0.0.39, agentsession
   v0.0.38, agentkit v0.0.17, agentpolicy v0.0.20, agenttool v0.0.30,
