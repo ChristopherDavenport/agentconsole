@@ -1395,6 +1395,16 @@ agentconsole#50, on the bump to agentturn v0.0.38 (agentturn#302,
   with `Queue` and with `Accept` alike both steers are on the record
   while the tool runs, which a test over a bare agent and the TUI's
   queued-steer test check.
+- **A run Accept starts ends only on an abort, so Run aborts twice at
+  exit.** agentturn starts the run for a steer that missed the last
+  drain on the context's values without its cancellation, so canceling
+  `console.Run`'s context, its last resort at exit, does not end it.
+  The abort Run sends when the program ends stops nothing when it lands
+  between the run that ended and the one the delivery starts. Run now
+  aborts, drains, cancels and aborts again (on a context without the
+  cancel, so a host's controller takes it) before its last drain. Both
+  aborts landing in that gap is still possible, but needs the
+  delivery's start to be later than a drain and a cancel.
 - **The person's words are the embedder's claim.** The view sends
   intents and holds no identity, so `Direct` puts no trigger on a
   context: a prompt or a steer sent through it alone is recorded with no

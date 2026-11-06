@@ -37,6 +37,10 @@ versions may break the API.
   run the agent starts after it, where before it waited for the next
   prompt. A follow-up still goes through `Queue`. `Direct` sets no
   trigger: the embedder claims the person's words.
+- Fixed (#50): `console.Run` aborts again after canceling its context
+  at exit, so a run the agent started for a steer that missed the last
+  drain, which the cancel does not end, is not left writing to the
+  store the caller closes.
 - Changed (#50): the binary claims what is typed at its terminal as the
   person's (a trigger of kind `human`, source `terminal`, on prompts and
   steers, and the answerer of a reply), so its sessions record typed

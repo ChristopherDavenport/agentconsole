@@ -176,8 +176,10 @@ func WithHistory(past []string, record func(line string)) Option {
 // Run runs the terminal client over the session rec follows and the
 // events src gives, sending what the user asks to act, until the user
 // quits, ctx is done, or the program fails, and returns the program's
-// error. ctx is the context of every intent; with [client.Direct] a run
-// is under it.
+// error. ctx is the context of every intent; with [client.Direct] a
+// prompt's run is under it, while a run the agent starts for a steer
+// (Accept's, for a steer that missed the last drain) takes ctx's values
+// without its cancellation and ends only on an abort.
 //
 // Run refuses a status line [WithStatus] makes up that it cannot draw,
 // before it starts anything.
@@ -187,7 +189,9 @@ func WithHistory(past []string, record func(line string)) Option {
 // Run does not close anything it did not open. The agent, its store and
 // its recorder are the caller's, and are safe to close once Run returns:
 // the run that went has ended, as src reports, or the drain timeout
-// passed.
+// passed. At exit Run aborts, waits, cancels ctx and aborts again before
+// a last wait, so a run a steer's delivery started after the first
+// abort is ended too.
 //
 // A canceled ctx ends the program with an error, as bubbletea's
 // WithContext does.
@@ -280,6 +284,11 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 		cfg.warn("a run did not end; closing the session as it is")
 	}
 	stop()
+	// A run Accept started for a steer that missed the last drain is
+	// under ctx's values without its cancellation, so stop does not end
+	// it, and the abort above stops nothing when it lands between the
+	// run that ended and the one the delivery starts: abort again.
+	_ = act(context.WithoutCancel(ctx), client.Abort{})
 	m.Drain(cfg.drain)
 	wait()
 	return err
