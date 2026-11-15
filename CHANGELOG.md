@@ -33,8 +33,9 @@ versions may break the API.
   `user` color) or blue. Of the basic colors 0, 1, 4, 5 and 8 count as
   dark; 16 to 255 and `#rrggbb` are judged by relative luminance.
 - Fixed: `client.Copy` copies a run end's new `Incomplete` details,
-  their extension members included, so a view keeps nothing the agent
-  holds.
+  their extension members included, and leaves out its `Notes` and
+  `Quarantined` and a pending call's `Notes`, which the view does not
+  read, so a copy keeps nothing the agent holds.
 
 ## v0.0.16 - 2026-11-06
 

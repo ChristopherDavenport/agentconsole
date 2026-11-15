@@ -87,6 +87,14 @@ func TestCopyKeepsWhatTheViewReads(t *testing.T) {
 	if !end.Withheld || end.Cause != agentturn.StopMaxTurns || len(end.Items) != 0 {
 		t.Errorf("run_end copy = %+v", end)
 	}
+	// The notes the agent hands the next run and the quarantined items
+	// are the agent's, and the view reads neither.
+	notes := []agentturn.Note{{Item: openresponses.UserText("n")}}
+	ev, _ = Copy(&agentturn.RunEnd{RunID: "r", Notes: notes, Quarantined: openresponses.Items{openresponses.UserText("q")},
+		Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1"}, Notes: notes}}})
+	if end := ev.(*agentturn.RunEnd); end.Notes != nil || end.Quarantined != nil || end.Pending[0].Notes != nil {
+		t.Errorf("run_end copy keeps notes %v, quarantined %v, a pending call's notes %v", end.Notes, end.Quarantined, end.Pending[0].Notes)
+	}
 	ev, _ = Copy(&agentturn.TurnStart{RunID: "r", Turn: 1, Request: openresponses.Request{Model: "m", Input: openresponses.Items{openresponses.UserText("x")}}})
 	if ts := ev.(*agentturn.TurnStart); ts.Request.Model != "m" || len(ts.Request.Input) != 0 {
 		t.Errorf("turn_start copy = %+v", ts)

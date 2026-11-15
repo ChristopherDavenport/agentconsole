@@ -93,9 +93,10 @@ func (q *queue) take() []agentturn.Event {
 // subscriber copies it before its callback returns, as [Live] does.
 //
 // What the view does not read and could be large is left out of the
-// copy: a run end's transcript, a request's input (only its model is
-// kept), an update's raw stream event, a response's output items (its
-// ID, model, status and usage are kept), and a pending call's tool.
+// copy: a run end's transcript, notes and quarantine, a request's input
+// (only its model is kept), an update's raw stream event, a response's
+// output items (its ID, model, status and usage are kept), and a
+// pending call's tool and notes.
 func Copy(ev agentturn.Event) (agentturn.Event, bool) {
 	switch e := ev.(type) {
 	case *agentturn.RunStart:
@@ -157,10 +158,10 @@ func Copy(ev agentturn.Event) (agentturn.Event, bool) {
 		return &c, true
 	case *agentturn.RunEnd:
 		c := *e
-		c.Items = nil
+		c.Items, c.Notes, c.Quarantined = nil, nil, nil
 		c.Pending = make([]agentturn.PendingCall, 0, len(e.Pending))
 		for _, p := range e.Pending {
-			p.Tool = nil
+			p.Tool, p.Notes = nil, nil
 			if p.Call != nil {
 				p.Call = CloneItem(p.Call).(*openresponses.FunctionCall)
 			}
