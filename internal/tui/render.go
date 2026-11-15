@@ -258,7 +258,7 @@ func refusals(m *openresponses.Message) string {
 // is "" for any other end and while a run goes.
 func runEndNote(m view.Model) string {
 	cause, d, ok := lastEnd(m)
-	if !ok || m.Turn.State != view.Idle {
+	if !ok {
 		return ""
 	}
 	var s string
@@ -284,16 +284,18 @@ func runEndNote(m view.Model) string {
 	return warnStyle.Render(s)
 }
 
-// lastEnd is how the last run on the viewed line ended: the record's
-// end once its end entry is on the line, else the live end when it is
-// that run's, and false when neither has it.
+// lastEnd is how the last run on the viewed line ended, while nothing
+// goes: the record's end once its end entry is on the line, else the
+// live end when it is that run's, and false when neither has it or a
+// run goes (the next run's start entry may not have landed yet, so the
+// record's last run is still the one before it).
 func lastEnd(m view.Model) (agentturn.StopCause, *openresponses.IncompleteDetails, bool) {
 	switch r, t := m.Run, m.Turn; {
-	case r.ID == "":
+	case r.ID == "", t.State != view.Idle:
 		return "", nil, false
 	case !r.Ended.IsZero():
 		return r.Cause, r.Incomplete, true
-	case t.RunID == r.ID && t.State == view.Idle:
+	case t.RunID == r.ID:
 		return t.Cause, t.Incomplete, true
 	}
 	return "", nil, false

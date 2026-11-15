@@ -425,3 +425,19 @@ func TestACutResponseShowsUnderAnotherStop(t *testing.T) {
 		}
 	}
 }
+
+// TestANewRunClearsTheStoppedSegment (#54): once the next run starts,
+// before its start entry lands, the line no longer says how the last
+// one, still the record's last, stopped.
+func TestANewRunClearsTheStoppedSegment(t *testing.T) {
+	c := StatusConfig{Segments: []string{"stopped"}}
+	m := view.Model{Run: view.Run{ID: "r1", Ended: time.Unix(1, 0), Cause: agentturn.StopContentFilter},
+		Turn: view.Turn{State: view.Running, RunID: "r2"}}
+	if ps := c.pieces(statusIn{v: m}); len(ps) != 0 {
+		t.Errorf("running r2: %+v, want no stopped segment", ps)
+	}
+	m.Turn = view.Turn{State: view.Idle, RunID: "r1", Cause: agentturn.StopContentFilter}
+	if ps := c.pieces(statusIn{v: m}); len(ps) != 1 || ps[0].text != "last run stopped: the provider refused" {
+		t.Errorf("idle after r1: %+v", ps)
+	}
+}
