@@ -5,6 +5,20 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentkit v0.0.19, agentmemory v0.0.13, agentsession
+  v0.0.39, agentturn and agentturn/session v0.0.40, openresponses
+  v0.0.20, agentsmd v0.0.6 (indirect).
+- Changed: with agentturn v0.0.40 a run the provider's content filter
+  stopped, or whose answer its output limit cut, ends stopped with the
+  cause `content_filter` or `max_output_tokens`, where v0.0.39 ended it
+  done; the status line's `stopped` segment says the last run stopped,
+  as for any other cause.
+- Fixed: `client.Copy` copies a run end's new `Incomplete` details,
+  their extension members included, so a view keeps nothing the agent
+  holds.
+
 ## v0.0.16 - 2026-11-06
 
 - Dependencies: agentturn and agentturn/session v0.0.39, agentsession

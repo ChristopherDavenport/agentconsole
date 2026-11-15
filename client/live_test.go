@@ -35,6 +35,19 @@ func TestCopySharesNothingWithTheAgent(t *testing.T) {
 	if p.Call.Arguments != "{}" || p.Decision.Subject != "rm -rf x" || !p.Decision.Held || !p.Dispatched {
 		t.Errorf("pending = %+v, decision %+v: the copy changed or lost the decision", p, p.Decision)
 	}
+
+	// A refused or cut response's details, extension members included,
+	// are the agent's too.
+	inc := &openresponses.IncompleteDetails{Reason: openresponses.IncompleteReasonContentFilter,
+		Extra: map[string]any{"anthropic.refusal_category": "cyber"}}
+	ev, _ = Copy(&agentturn.RunEnd{RunID: "r", Reason: agentturn.ReasonStopped, Cause: agentturn.StopContentFilter,
+		Incomplete: inc, Refusal: "I can't help with that."})
+	inc.Reason, inc.Extra["anthropic.refusal_category"] = "changed", "changed"
+	end := ev.(*agentturn.RunEnd)
+	if end.Incomplete == nil || end.Incomplete.Reason != openresponses.IncompleteReasonContentFilter ||
+		end.Incomplete.Extra["anthropic.refusal_category"] != "cyber" || end.Refusal != "I can't help with that." {
+		t.Errorf("run_end copy = %+v, incomplete %+v: the copy changed with the agent's", end, end.Incomplete)
+	}
 }
 
 func TestCopyLeavesOutWhatTheViewDoesNotRead(t *testing.T) {
