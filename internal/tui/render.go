@@ -251,26 +251,26 @@ func refusals(m *openresponses.Message) string {
 }
 
 // runEndNote says how the last run on the line ended when the provider
-// ended its response incomplete: refused by its content filter, with
-// the members it added to the details (such as
-// anthropic.refusal_category), or its answer cut at the output limit.
-// It is the live end's, so it is "" once another run starts, on another
-// line, and for every other end.
+// ended its last response incomplete: refused by its content filter, or
+// its answer cut at the output limit, whatever stop came after the cut,
+// each with the members the provider added to the details (such as
+// anthropic.refusal_category). It reads the run's end ([lastEnd]), and
+// is "" for any other end and while a run goes.
 func runEndNote(m view.Model) string {
-	t := m.Turn
-	if t.State != view.Idle || t.RunID == "" || t.RunID != m.Run.ID {
+	cause, d, ok := lastEnd(m)
+	if !ok || m.Turn.State != view.Idle {
 		return ""
 	}
 	var s string
-	switch t.Cause {
-	case agentturn.StopContentFilter:
+	switch {
+	case cause == agentturn.StopContentFilter, cause == "" && d != nil && d.Reason == openresponses.IncompleteReasonContentFilter:
 		s = "⊘ the provider refused: content filter"
-	case agentturn.StopMaxOutputTokens:
+	case cause == agentturn.StopMaxOutputTokens, d != nil:
 		s = "✂ the answer was cut at the model's output limit"
 	default:
 		return ""
 	}
-	if d := t.Incomplete; d != nil && len(d.Extra) > 0 {
+	if d != nil && len(d.Extra) > 0 {
 		keys := make([]string, 0, len(d.Extra))
 		for k := range d.Extra {
 			keys = append(keys, k)
@@ -282,6 +282,21 @@ func runEndNote(m view.Model) string {
 		s += " (" + strings.Join(keys, ", ") + ")"
 	}
 	return warnStyle.Render(s)
+}
+
+// lastEnd is how the last run on the viewed line ended: the record's
+// end once its end entry is on the line, else the live end when it is
+// that run's, and false when neither has it.
+func lastEnd(m view.Model) (agentturn.StopCause, *openresponses.IncompleteDetails, bool) {
+	switch r, t := m.Run, m.Turn; {
+	case r.ID == "":
+		return "", nil, false
+	case !r.Ended.IsZero():
+		return r.Cause, r.Incomplete, true
+	case t.RunID == r.ID && t.State == view.Idle:
+		return t.Cause, t.Incomplete, true
+	}
+	return "", nil, false
 }
 
 // moving is whether a call is in motion: its arguments still streaming,

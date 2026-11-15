@@ -230,11 +230,18 @@ func (c StatusConfig) builtin(name string, in statusIn) (string, float64, bool) 
 			return "unverified", 0, false
 		}
 	case "stopped":
+		// The record's cause once the run's end is on the line, so a
+		// reopened session says it too; a guard's stop is written with
+		// its error and names none, and the live end's says it.
+		cause := v.Turn.Cause
+		if c, _, ok := lastEnd(v); ok && c != "" {
+			cause = c
+		}
 		switch {
 		case v.Turn.Withheld:
 			return "last reply withheld", 0, false
-		case v.Turn.Cause != "":
-			return "last run stopped: " + causeText(v.Turn.Cause), 0, false
+		case cause != "":
+			return "last run stopped: " + causeText(cause), 0, false
 		}
 	}
 	return "", 0, false

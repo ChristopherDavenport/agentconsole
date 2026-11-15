@@ -61,6 +61,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/internal/incomplete"
 )
 
 // TurnState says what the agent is doing.
@@ -105,15 +106,18 @@ type Turn struct {
 	Withheld bool
 	// Cause is what stopped the last run, when it ended with
 	// [agentturn.ReasonStopped] (a turn limit, a hook, a guard, a tool
-	// that ended it, a refusal), and "" otherwise. It is the live end's:
-	// the record does not hold it.
+	// that ended it, a refusal, the provider's content filter, the
+	// output limit), and "" otherwise. It is the live end's; the
+	// record's is [Run.Cause], which a client prefers once the run's end
+	// entry is on the line.
 	Cause agentturn.StopCause
 	// Incomplete is the live end's [agentturn.RunEnd.Incomplete]: the
 	// details of the response the provider ended incomplete, when its
 	// content filter stopped the last run ([agentturn.StopContentFilter])
 	// or its output limit cut it ([agentturn.StopMaxOutputTokens], or
 	// another stop after the cut), extension members such as
-	// anthropic.refusal_category in Extra; nil for any other end.
+	// anthropic.refusal_category in Extra; nil for any other end. The
+	// record's is [Run.Incomplete].
 	Incomplete *openresponses.IncompleteDetails
 	// Err is what failed the last run, when it ended with
 	// [agentturn.ReasonError], and nil otherwise: the live end's.
@@ -1425,20 +1429,6 @@ func (v *View) runEnded(e *agentturn.RunEnd) {
 	v.flushIfSettled(e.RunID)
 }
 
-// cloneIncomplete copies incomplete details through their JSON, which
-// carries their extension members, so a model shares none of them with
-// the view.
-func cloneIncomplete(d *openresponses.IncompleteDetails) *openresponses.IncompleteDetails {
-	if d == nil {
-		return nil
-	}
-	c := openresponses.IncompleteDetails{Reason: d.Reason}
-	if b, err := json.Marshal(d); err == nil {
-		_ = json.Unmarshal(b, &c)
-	}
-	return &c
-}
-
 // Model returns what to render now. It shares nothing with the view. It
 // updates the view's cache of the viewed line, so it is called under the
 // same lock as Record and Live, never beside them.
@@ -1453,7 +1443,7 @@ func (v *View) Model() Model {
 		Origin:  v.origin,
 		Links:   append([]Link(nil), v.links...),
 	}
-	m.Turn.Incomplete = cloneIncomplete(v.turn.Incomplete)
+	m.Turn.Incomplete = incomplete.Copy(v.turn.Incomplete)
 	m.Branches = append([]Branch(nil), v.branches...)
 	m.Usage, m.UsageByModel = Usage(v.path)
 	m.LastCall = lastCall(v.path)

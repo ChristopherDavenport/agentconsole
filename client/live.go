@@ -9,6 +9,8 @@ import (
 
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
+
+	"github.com/ChristopherDavenport/agentconsole/internal/incomplete"
 )
 
 // Live subscribes to src when it is called, not when the result is
@@ -169,7 +171,7 @@ func Copy(ev agentturn.Event) (agentturn.Event, bool) {
 			p.Decision = copyDecision(p.Decision)
 			c.Pending = append(c.Pending, p)
 		}
-		c.Incomplete = copyIncomplete(e.Incomplete)
+		c.Incomplete = incomplete.Copy(e.Incomplete)
 		return &c, true
 	case *agentturn.Question:
 		c := *e
@@ -198,39 +200,6 @@ func copyDecision(d *agentturn.ToolDecision) *agentturn.ToolDecision {
 	c := *d
 	c.Args = slices.Clone(d.Args)
 	return &c
-}
-
-// copyIncomplete copies a response's incomplete details, their
-// extension members (decoded JSON values) included.
-func copyIncomplete(d *openresponses.IncompleteDetails) *openresponses.IncompleteDetails {
-	if d == nil {
-		return nil
-	}
-	c := *d
-	if d.Extra != nil {
-		c.Extra = copyJSON(d.Extra).(map[string]any)
-	}
-	return &c
-}
-
-// copyJSON deep-copies a decoded JSON value: its maps and slices are
-// copied, anything else is a value already.
-func copyJSON(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		c := make(map[string]any, len(x))
-		for k, e := range x {
-			c[k] = copyJSON(e)
-		}
-		return c
-	case []any:
-		c := make([]any, len(x))
-		for i, e := range x {
-			c[i] = copyJSON(e)
-		}
-		return c
-	}
-	return v
 }
 
 // CloneItem returns a deep copy of item, which shares nothing with it.

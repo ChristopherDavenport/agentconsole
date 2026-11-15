@@ -22,8 +22,11 @@ versions may break the API.
   conversation, with the details' extension members such as
   `anthropic.refusal_category`, and one whose answer the output limit
   cut with "the answer was cut at the model's output limit"; the
-  `stopped` status segment names both. `view.Turn.Incomplete` carries
-  the live end's details.
+  `stopped` status segment names both. Both are read from the record
+  once the run's end entry lands (the new `view.Run.Cause` and
+  `view.Run.Incomplete`), so a reopened session or a late viewer shows
+  them too; `view.Turn.Incomplete` carries the live end's details until
+  then.
 - Fixed (#53): the powerline status line draws a block's text light on
   a dark block and dark on a light one, where it drew every colored
   block's text black, which could not be read on black (dax's default

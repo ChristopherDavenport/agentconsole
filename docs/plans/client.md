@@ -1774,19 +1774,28 @@ no RFC rule.
   parts, so a provider's refusal read as an empty assistant turn. A
   message's row now shows its text, then each refusal part after
   "refusal:", committed or live.
-- **The end is the turn's, under the conversation.** `view.Turn`
-  gains `Incomplete`, the live end's `RunEnd.Incomplete`, copied for
-  each model (its `Extra` through its JSON), cleared by the next run as
-  `Cause` is. While the last run on the viewed line is that run and
-  nothing goes, the TUI writes its end under the last row: "the
-  provider refused: content filter" with every extension member of the
-  details (`anthropic.refusal_category: cyber`), or "the answer was cut
-  at the model's output limit". The status line's `stopped` segment
-  says "the provider refused" or "answer cut at the output limit": a
-  line too narrow drops the segment, and the conversation keeps the
-  category. Live only, as `Cause`: the record holds the cause (the
-  recorder writes such an end `aborted`, the cause as its `ref`), but
-  nothing reads it back yet.
+- **The end is the record's, under the conversation.** `view.Run`
+  gains `Cause` and `Incomplete`, read from the line's last run: the
+  cause its end entry names (a `stopped` end's ref, or an `aborted`
+  end's after a response ended incomplete, which agentturn v0.0.40
+  writes with the cause as ref; ref `incomplete` reads as
+  `max_output_tokens`, as agentturn reads it back), and the details of
+  its last response entry when that ended incomplete, extension members
+  included. `view.Turn` gains `Incomplete`, the live end's
+  `RunEnd.Incomplete`, cleared by the next run as `Cause` is. The TUI
+  reads the record's end once the run's end entry is on the line and
+  the live end until then, so a reopened session or a viewer that
+  attaches late shows what the one that saw the run did. While nothing
+  goes it writes the end under the last row: "the provider refused:
+  content filter" with every extension member of the details
+  (`anthropic.refusal_category: cyber`), or "the answer was cut at the
+  model's output limit", also when another stop (the stop hook, the
+  turn limit) followed the cut. The status line's `stopped` segment
+  says "the provider refused" or "answer cut at the output limit", the
+  record's cause first; a guard's stop names no cause on the record and
+  is the live end's. A line too narrow drops the segment, and the
+  conversation keeps the category. Each model's details are copies
+  (`internal/incomplete`, which `client.Copy` shares).
 - **`client.Copy` copies `RunEnd.Incomplete`.** The details and their
   extension members are the agent's.
 
