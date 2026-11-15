@@ -15,6 +15,15 @@ versions may break the API.
   cause `content_filter` or `max_output_tokens`, where v0.0.39 ended it
   done; the status line's `stopped` segment says the last run stopped,
   as for any other cause.
+- Added (#54): the transcript shows a message's `refusal` parts after
+  "refusal:", where it showed only the text, so a provider's refusal
+  read as an empty assistant turn. A run the provider's content filter
+  stopped ends with "the provider refused: content filter" under the
+  conversation, with the details' extension members such as
+  `anthropic.refusal_category`, and one whose answer the output limit
+  cut with "the answer was cut at the model's output limit"; the
+  `stopped` status segment names both. `view.Turn.Incomplete` carries
+  the live end's details.
 - Fixed (#53): the powerline status line draws a block's text light on
   a dark block and dark on a light one, where it drew every colored
   block's text black, which could not be read on black (dax's default

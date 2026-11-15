@@ -108,6 +108,13 @@ type Turn struct {
 	// that ended it, a refusal), and "" otherwise. It is the live end's:
 	// the record does not hold it.
 	Cause agentturn.StopCause
+	// Incomplete is the live end's [agentturn.RunEnd.Incomplete]: the
+	// details of the response the provider ended incomplete, when its
+	// content filter stopped the last run ([agentturn.StopContentFilter])
+	// or its output limit cut it ([agentturn.StopMaxOutputTokens], or
+	// another stop after the cut), extension members such as
+	// anthropic.refusal_category in Extra; nil for any other end.
+	Incomplete *openresponses.IncompleteDetails
 	// Err is what failed the last run, when it ended with
 	// [agentturn.ReasonError], and nil otherwise: the live end's.
 	Err error
@@ -1404,6 +1411,7 @@ func (v *View) permit(p Permission) {
 
 func (v *View) runEnded(e *agentturn.RunEnd) {
 	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld, v.turn.Cause = e.RunID, 0, 0, e.Withheld, e.Cause
+	v.turn.Incomplete = e.Incomplete
 	v.turn.Err = nil
 	if e.Reason == agentturn.ReasonError {
 		v.turn.Err = e.Err
@@ -1415,6 +1423,20 @@ func (v *View) runEnded(e *agentturn.RunEnd) {
 	// its end, and the record's after.
 	v.reconcilePending()
 	v.flushIfSettled(e.RunID)
+}
+
+// cloneIncomplete copies incomplete details through their JSON, which
+// carries their extension members, so a model shares none of them with
+// the view.
+func cloneIncomplete(d *openresponses.IncompleteDetails) *openresponses.IncompleteDetails {
+	if d == nil {
+		return nil
+	}
+	c := openresponses.IncompleteDetails{Reason: d.Reason}
+	if b, err := json.Marshal(d); err == nil {
+		_ = json.Unmarshal(b, &c)
+	}
+	return &c
 }
 
 // Model returns what to render now. It shares nothing with the view. It
@@ -1431,6 +1453,7 @@ func (v *View) Model() Model {
 		Origin:  v.origin,
 		Links:   append([]Link(nil), v.links...),
 	}
+	m.Turn.Incomplete = cloneIncomplete(v.turn.Incomplete)
 	m.Branches = append([]Branch(nil), v.branches...)
 	m.Usage, m.UsageByModel = Usage(v.path)
 	m.LastCall = lastCall(v.path)

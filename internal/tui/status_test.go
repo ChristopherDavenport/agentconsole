@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
@@ -378,5 +379,34 @@ func TestInkOnJudgesTheBlock(t *testing.T) {
 		if got := inkOn(bg); got != want {
 			t.Errorf("inkOn(%q) = %q, want %q", bg, got, want)
 		}
+	}
+}
+
+// TestTheStoppedSegmentNamesTheProvidersEnds (#54): a run the content
+// filter stopped, or whose answer the output limit cut, is not shown as
+// a plain finish.
+func TestTheStoppedSegmentNamesTheProvidersEnds(t *testing.T) {
+	c := StatusConfig{Segments: []string{"stopped"}}
+	for cause, want := range map[agentturn.StopCause]string{
+		agentturn.StopContentFilter:   "last run stopped: the provider refused",
+		agentturn.StopMaxOutputTokens: "last run stopped: answer cut at the output limit",
+	} {
+		ps := c.pieces(statusIn{v: view.Model{Turn: view.Turn{Cause: cause}}})
+		if len(ps) != 1 || ps[0].text != want {
+			t.Errorf("%s: %+v, want %q", cause, ps, want)
+		}
+	}
+}
+
+// TestARefusalPartFollowsTheMessagesText (#54): a message with text and
+// a refusal part shows both, the refusal marked.
+func TestARefusalPartFollowsTheMessagesText(t *testing.T) {
+	msg := &openresponses.Message{Role: openresponses.RoleAssistant, Content: openresponses.Contents{
+		&openresponses.OutputText{Text: "Sure,"}, &openresponses.Refusal{Refusal: "I can't help with that."},
+	}}
+	got := ansi.Strip(renderRow(view.Row{Item: msg}, opts{}, nil, "", 60, newMarkdown()))
+	if !strings.Contains(got, "Sure,") || !strings.Contains(got, "refusal: I can't help with that.") ||
+		strings.Index(got, "Sure,") > strings.Index(got, "refusal:") {
+		t.Errorf("row:\n%s", got)
 	}
 }

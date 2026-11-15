@@ -1765,6 +1765,31 @@ rule.
   it is short for a branch with runs; a branch with none walks to the
   root, once per branch per step.
 
+## Decided in implementation, a provider's refusal and a cut answer
+
+agentconsole#54, on agentturn v0.0.40 (agentturn#314). Implementation,
+no RFC rule.
+
+- **A refusal part is shown.** `Message.Text` leaves out `refusal`
+  parts, so a provider's refusal read as an empty assistant turn. A
+  message's row now shows its text, then each refusal part after
+  "refusal:", committed or live.
+- **The end is the turn's, under the conversation.** `view.Turn`
+  gains `Incomplete`, the live end's `RunEnd.Incomplete`, copied for
+  each model (its `Extra` through its JSON), cleared by the next run as
+  `Cause` is. While the last run on the viewed line is that run and
+  nothing goes, the TUI writes its end under the last row: "the
+  provider refused: content filter" with every extension member of the
+  details (`anthropic.refusal_category: cyber`), or "the answer was cut
+  at the model's output limit". The status line's `stopped` segment
+  says "the provider refused" or "answer cut at the output limit": a
+  line too narrow drops the segment, and the conversation keeps the
+  category. Live only, as `Cause`: the record holds the cause (the
+  recorder writes such an end `aborted`, the cause as its `ref`), but
+  nothing reads it back yet.
+- **`client.Copy` copies `RunEnd.Incomplete`.** The details and their
+  extension members are the agent's.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
