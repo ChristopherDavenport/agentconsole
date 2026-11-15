@@ -1782,9 +1782,11 @@ no RFC rule.
   cause its end entry names (a `stopped` end's ref, or an `aborted`
   end's after a response ended incomplete, which agentturn v0.0.40
   writes with the cause as ref; ref `incomplete` reads as
-  `max_output_tokens`, as agentturn reads it back), and the details of
-  its last response entry when that ended incomplete, extension members
-  included. `view.Turn` gains `Incomplete`, the live end's
+  `max_output_tokens`, as agentturn reads it back), and, when the end
+  names such a cause, the details of its last response entry when that
+  ended incomplete, extension members included: a cut response whose
+  calls ran before an abort or a failure ended the run is no cut
+  answer. `view.Turn` gains `Incomplete`, the live end's
   `RunEnd.Incomplete`, cleared by the next run as `Cause` is. The TUI
   reads the record's end once the run's end entry is on the line and
   the live end until then, so a reopened session or a viewer that

@@ -263,7 +263,7 @@ func runEndNote(m view.Model) string {
 	}
 	var s string
 	switch {
-	case cause == agentturn.StopContentFilter, cause == "" && d != nil && d.Reason == openresponses.IncompleteReasonContentFilter:
+	case cause == agentturn.StopContentFilter:
 		s = "⊘ the provider refused: content filter"
 	case cause == agentturn.StopMaxOutputTokens, d != nil:
 		s = "✂ the answer was cut at the model's output limit"

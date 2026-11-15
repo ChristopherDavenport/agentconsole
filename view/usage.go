@@ -96,9 +96,11 @@ type Run struct {
 	// end, a guard's stop included.
 	Cause agentturn.StopCause
 	// Incomplete is the incomplete details of the run's last response
-	// when it ended incomplete and the run has an end entry, extension
-	// members such as anthropic.refusal_category in Extra, and nil
-	// otherwise: the record's [agentturn.RunEnd.Incomplete].
+	// when it ended incomplete and the run's end entry names a stop
+	// cause (Cause), extension members such as
+	// anthropic.refusal_category in Extra, and nil otherwise, an abort
+	// or a failure after a cut response's calls included: the record's
+	// [agentturn.RunEnd.Incomplete].
 	Incomplete *openresponses.IncompleteDetails
 }
 
@@ -142,7 +144,9 @@ func lastRun(path []agentsession.Entry) Run {
 			case *agentsession.RunEntry:
 				if x.IsEnd() && x.RunID == start.RunID {
 					r.Ended, r.Cause = x.Timestamp, recordedCause(x)
-					if last != nil {
+					// A cut response whose calls ran before an abort or
+					// a failure ended the run is no answer that was cut.
+					if last != nil && r.Cause != "" {
 						r.Incomplete = incomplete.Copy(last.Incomplete)
 					}
 					return r
