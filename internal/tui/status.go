@@ -3,6 +3,8 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -306,14 +308,75 @@ func plainSep(prev, p piece) string {
 	return " | "
 }
 
-// The powerline look: a block's colors when its segment has none, the
-// glyph between blocks, and the text on a colored block.
+// The powerline look: a block's color when its segment has none, the
+// glyph between blocks, and the text on a dark block and on a light one.
 const (
 	powerBlock = "8"
-	powerText  = "15"
-	powerInk   = "0"
 	powerSep   = ""
+	lightInk   = "15"
+	darkInk    = "0"
 )
+
+// inkOn is the text color that reads on a block of color bg: light on a
+// dark block, dark on a light one. Among the 16 basic colors black, red,
+// blue, magenta and bright black are dark, as in the agnoster look; a
+// color from 16 to 255 and a #rrggbb are judged by relative luminance,
+// with the xterm cube and gray ramp for the former. A color it cannot
+// read gets dark text.
+func inkOn(bg string) string {
+	r, g, b, ok := rgbOf(bg)
+	if !ok {
+		if n, err := strconv.Atoi(bg); err == nil && n >= 0 && n < 16 {
+			switch n {
+			case 0, 1, 4, 5, 8:
+				return lightInk
+			}
+		}
+		return darkInk
+	}
+	// Light text reads better on a block darker than the point where its
+	// contrast with white and with black are equal.
+	if luminance(r, g, b) < 0.179 {
+		return lightInk
+	}
+	return darkInk
+}
+
+// rgbOf is the red, green and blue of a color from 16 to 255 or a
+// #rrggbb, and false for a basic color or anything else.
+func rgbOf(c string) (r, g, b uint8, ok bool) {
+	if hex, found := strings.CutPrefix(c, "#"); found {
+		v, err := strconv.ParseUint(hex, 16, 32)
+		if err != nil || len(hex) != 6 {
+			return 0, 0, 0, false
+		}
+		return uint8(v >> 16), uint8(v >> 8), uint8(v), true
+	}
+	n, err := strconv.Atoi(c)
+	switch {
+	case err != nil, n < 16, n > 255:
+		return 0, 0, 0, false
+	case n >= 232:
+		v := uint8(8 + 10*(n-232))
+		return v, v, v, true
+	}
+	level := [6]uint8{0, 95, 135, 175, 215, 255}
+	n -= 16
+	return level[n/36], level[n/6%6], level[n%6], true
+}
+
+// luminance is the relative luminance of an sRGB color, 0 for black to
+// 1 for white.
+func luminance(r, g, b uint8) float64 {
+	lin := func(c uint8) float64 {
+		v := float64(c) / 255
+		if v <= 0.04045 {
+			return v / 12.92
+		}
+		return math.Pow((v+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+}
 
 // statusRows are the status line's rows: top, the first row, "" when the
 // line is at the bottom, and bottom, the last rows, "" when the line is on
@@ -443,10 +506,11 @@ func (m *Model) drawPowerline(pre string, ps []piece, post string) (string, int)
 		width += lipgloss.Width(pre)
 	}
 	block := func(p piece) (bg, fg string) {
-		if p.color == "" {
-			return powerBlock, powerText
+		bg = p.color
+		if bg == "" {
+			bg = powerBlock
 		}
-		return p.color, powerInk
+		return bg, inkOn(bg)
 	}
 	for i, p := range ps {
 		bg, fg := block(p)

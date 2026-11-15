@@ -15,6 +15,11 @@ versions may break the API.
   cause `content_filter` or `max_output_tokens`, where v0.0.39 ended it
   done; the status line's `stopped` segment says the last run stopped,
   as for any other cause.
+- Fixed (#53): the powerline status line draws a block's text light on
+  a dark block and dark on a light one, where it drew every colored
+  block's text black, which could not be read on black (dax's default
+  `user` color) or blue. Of the basic colors 0, 1, 4, 5 and 8 count as
+  dark; 16 to 255 and `#rrggbb` are judged by relative luminance.
 - Fixed: `client.Copy` copies a run end's new `Incomplete` details,
   their extension members included, so a view keeps nothing the agent
   holds.

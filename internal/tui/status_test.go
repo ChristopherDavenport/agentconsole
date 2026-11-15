@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -310,5 +312,71 @@ func TestTheModelSegmentNamesTheHostsModel(t *testing.T) {
 	}
 	if got := text(view.Model{Config: "b"}); got != "model b" {
 		t.Errorf("after a run: %q", got)
+	}
+}
+
+// TestPowerlineInkReadsOnItsBlock (#53): the powerline line draws a
+// colored block's text light on a dark block and dark on a light one,
+// as a terminal shows it, and the uncolored block keeps its light text.
+func TestPowerlineInkReadsOnItsBlock(t *testing.T) {
+	light, dark := lipgloss.Color("15"), lipgloss.Color("0")
+	cases := []struct {
+		text, color string
+		ink         color.Color
+	}{
+		{"black", "0", light},
+		{"blue", "4", light},
+		{"green", "2", dark},
+		{"yellow", "3", dark},
+		{"darkhex", "#202020", light},
+		{"lighthex", "#f0f0f0", dark},
+		{"plain", "", light},
+	}
+	var ps []piece
+	for _, c := range cases {
+		ps = append(ps, piece{name: c.text, text: c.text, color: c.color})
+	}
+	m := &Model{width: 120, status: StatusConfig{Powerline: true}}
+	term := termtest.New(120, 2)
+	defer term.Close()
+	if _, err := term.Write([]byte(m.drawLine("", ps, ""))); err != nil {
+		t.Fatal(err)
+	}
+	row := []rune(strings.SplitN(term.Screen(), "\n", 2)[0])
+	same := func(a, b color.Color) bool {
+		if a == nil || b == nil {
+			return a == b
+		}
+		ar, ag, ab, _ := a.RGBA()
+		br, bg, bb, _ := b.RGBA()
+		return ar == br && ag == bg && ab == bb
+	}
+	for _, c := range cases {
+		x := strings.Index(string(row), " "+c.text+" ")
+		if x < 0 {
+			t.Fatalf("%s: not on the line %q", c.text, string(row))
+		}
+		x = len([]rune(string(row)[:x])) + 1
+		fg, _ := term.Colors(x, 0)
+		if !same(fg, c.ink) {
+			t.Errorf("%s on %q: ink %v, want %v", c.text, c.color, fg, c.ink)
+		}
+	}
+}
+
+// TestInkOnJudgesTheBlock (#53): the basic colors by the agnoster
+// split, 16 to 255 and #rrggbb by luminance.
+func TestInkOnJudgesTheBlock(t *testing.T) {
+	cases := map[string]string{
+		"0": "15", "1": "15", "4": "15", "5": "15", "8": "15",
+		"2": "0", "3": "0", "6": "0", "7": "0", "15": "0",
+		"16": "15", "21": "15", "231": "0", "46": "0", "232": "15", "255": "0",
+		"#202020": "15", "#f0f0f0": "0", "#0000ff": "15", "#ffff00": "0",
+		"bogus": "0",
+	}
+	for bg, want := range cases {
+		if got := inkOn(bg); got != want {
+			t.Errorf("inkOn(%q) = %q, want %q", bg, got, want)
+		}
 	}
 }

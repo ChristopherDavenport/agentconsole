@@ -1515,8 +1515,11 @@ bottom.
   `Colors["context"]` is set. Plain: the line is reversed, and a
   colored segment's text is drawn in its color, which the reversal
   shows as its block. Powerline: each segment a block (its color, or
-  bright black with white text), U+E0B0 between blocks in the color of
-  the one it leaves on the one it enters.
+  bright black), U+E0B0 between blocks in the color of the one it
+  leaves on the one it enters. A block's text is white on a dark block
+  and black on a light one (#53): of the basic colors 0, 1, 4, 5 and 8
+  are dark, and 16 to 255 and `#rrggbb` are judged by relative
+  luminance.
 - **Position.** Top: the first row, as today, with the notices (the
   read-only banner, a stopped feed, the client's note) around the
   segments as before. Bottom: the last row, under the input's lower bar
