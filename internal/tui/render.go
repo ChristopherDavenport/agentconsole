@@ -139,6 +139,13 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		blocks = append(blocks, b)
 		at += h + 1
 	}
+	if note := runEndNote(m); note != "" {
+		b := wrap(note, w)
+		if sel != "" {
+			b = "  " + strings.ReplaceAll(b, "\n", "\n  ")
+		}
+		blocks = append(blocks, b)
+	}
 	md.sweep()
 	return strings.Join(blocks, "\n\n"), spans
 }
@@ -198,6 +205,12 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		default:
 			label = dimStyle.Render(string(it.Role))
 		}
+		if r := refusals(it); r != "" {
+			if body != "" {
+				body += "\n"
+			}
+			body += warnStyle.Render("refusal:") + " " + r
+		}
 		return label + tag + "\n" + body + tail
 	case *openresponses.ReasoningItem:
 		text := it.Summary.Text()
@@ -223,6 +236,69 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		return dimStyle.Render("[compaction]") + tag
 	}
 	return dimStyle.Render("["+row.Item.ItemType()+"]") + tag
+}
+
+// refusals is the text of a message's refusal parts, joined by
+// newlines, which its Text leaves out.
+func refusals(m *openresponses.Message) string {
+	var parts []string
+	for _, c := range m.Content {
+		if r, ok := c.(*openresponses.Refusal); ok && r.Refusal != "" {
+			parts = append(parts, r.Refusal)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// runEndNote says how the last run on the line ended when the provider
+// ended its last response incomplete: refused by its content filter, or
+// its answer cut at the output limit, whatever stop came after the cut,
+// each with the members the provider added to the details (such as
+// anthropic.refusal_category). It reads the run's end ([lastEnd]), and
+// is "" for any other end and while a run goes.
+func runEndNote(m view.Model) string {
+	cause, d, ok := lastEnd(m)
+	if !ok {
+		return ""
+	}
+	var s string
+	switch {
+	case cause == agentturn.StopContentFilter:
+		s = "⊘ the provider refused: content filter"
+	case cause == agentturn.StopMaxOutputTokens, d != nil:
+		s = "✂ the answer was cut at the model's output limit"
+	default:
+		return ""
+	}
+	if d != nil && len(d.Extra) > 0 {
+		keys := make([]string, 0, len(d.Extra))
+		for k := range d.Extra {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for i, k := range keys {
+			keys[i] = fmt.Sprintf("%s: %v", k, d.Extra[k])
+		}
+		s += " (" + strings.Join(keys, ", ") + ")"
+	}
+	return warnStyle.Render(s)
+}
+
+// lastEnd is how the last run on the viewed line ended, while nothing
+// goes: the record's end once its end entry is on the line, else the
+// live end when it is that run's, and false when neither has it or a
+// run goes (the next run's start entry may not have landed yet, so the
+// record's last run is still the one before it).
+func lastEnd(m view.Model) (agentturn.StopCause, *openresponses.IncompleteDetails, bool) {
+	switch r, t := m.Run, m.Turn; {
+	case r.ID == "", t.State != view.Idle:
+		return "", nil, false
+	case !r.Ended.IsZero():
+		return r.Cause, r.Incomplete, true
+	case t.RunID == r.ID:
+		return t.Cause, t.Incomplete, true
+	}
+	return "", nil, false
 }
 
 // moving is whether a call is in motion: its arguments still streaming,
@@ -740,6 +816,10 @@ func causeText(c agentturn.StopCause) string {
 		return "a tool ended it"
 	case agentturn.StopRefused:
 		return "a refusal ended it"
+	case agentturn.StopContentFilter:
+		return "the provider refused"
+	case agentturn.StopMaxOutputTokens:
+		return "answer cut at the output limit"
 	}
 	return string(c)
 }

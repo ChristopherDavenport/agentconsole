@@ -35,6 +35,19 @@ func TestCopySharesNothingWithTheAgent(t *testing.T) {
 	if p.Call.Arguments != "{}" || p.Decision.Subject != "rm -rf x" || !p.Decision.Held || !p.Dispatched {
 		t.Errorf("pending = %+v, decision %+v: the copy changed or lost the decision", p, p.Decision)
 	}
+
+	// A refused or cut response's details, extension members included,
+	// are the agent's too.
+	inc := &openresponses.IncompleteDetails{Reason: openresponses.IncompleteReasonContentFilter,
+		Extra: map[string]any{"anthropic.refusal_category": "cyber"}}
+	ev, _ = Copy(&agentturn.RunEnd{RunID: "r", Reason: agentturn.ReasonStopped, Cause: agentturn.StopContentFilter,
+		Incomplete: inc, Refusal: "I can't help with that."})
+	inc.Reason, inc.Extra["anthropic.refusal_category"] = "changed", "changed"
+	end := ev.(*agentturn.RunEnd)
+	if end.Incomplete == nil || end.Incomplete.Reason != openresponses.IncompleteReasonContentFilter ||
+		end.Incomplete.Extra["anthropic.refusal_category"] != "cyber" || end.Refusal != "I can't help with that." {
+		t.Errorf("run_end copy = %+v, incomplete %+v: the copy changed with the agent's", end, end.Incomplete)
+	}
 }
 
 func TestCopyLeavesOutWhatTheViewDoesNotRead(t *testing.T) {
@@ -73,6 +86,14 @@ func TestCopyKeepsWhatTheViewReads(t *testing.T) {
 	end := ev.(*agentturn.RunEnd)
 	if !end.Withheld || end.Cause != agentturn.StopMaxTurns || len(end.Items) != 0 {
 		t.Errorf("run_end copy = %+v", end)
+	}
+	// The notes the agent hands the next run and the quarantined items
+	// are the agent's, and the view reads neither.
+	notes := []agentturn.Note{{Item: openresponses.UserText("n")}}
+	ev, _ = Copy(&agentturn.RunEnd{RunID: "r", Notes: notes, Quarantined: openresponses.Items{openresponses.UserText("q")},
+		Pending: []agentturn.PendingCall{{Call: &openresponses.FunctionCall{CallID: "c1"}, Notes: notes}}})
+	if end := ev.(*agentturn.RunEnd); end.Notes != nil || end.Quarantined != nil || end.Pending[0].Notes != nil {
+		t.Errorf("run_end copy keeps notes %v, quarantined %v, a pending call's notes %v", end.Notes, end.Quarantined, end.Pending[0].Notes)
 	}
 	ev, _ = Copy(&agentturn.TurnStart{RunID: "r", Turn: 1, Request: openresponses.Request{Model: "m", Input: openresponses.Items{openresponses.UserText("x")}}})
 	if ts := ev.(*agentturn.TurnStart); ts.Request.Model != "m" || len(ts.Request.Input) != 0 {

@@ -44,7 +44,8 @@ const (
 // red, "2" green, "3" yellow, "0" to "15" the basic colors, up to
 // "255"), or "#rrggbb". On the plain line it colors the segment's text,
 // which the reversed line shows as its block; on the powerline line it
-// is the block's.
+// is the block's, and the text is drawn light on a dark block and dark
+// on a light one.
 type Segment struct {
 	Text  string
 	Color string

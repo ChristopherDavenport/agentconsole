@@ -103,6 +103,32 @@ func TestTheRunsStopCauseIsOnTheTurn(t *testing.T) {
 	}
 }
 
+// TestTheRefusedResponsesDetailsAreOnTheTurn (#54): a run the content
+// filter stopped carries the response's details, extension members
+// included, on the turn, in a copy the model shares with nothing; the
+// next run clears them.
+func TestTheRefusedResponsesDetailsAreOnTheTurn(t *testing.T) {
+	l := newLog(t)
+	l.v.Live(&agentturn.RunStart{RunID: "run1"})
+	l.v.Live(&agentturn.RunEnd{RunID: "run1", Reason: agentturn.ReasonStopped, Cause: agentturn.StopContentFilter,
+		Incomplete: &openresponses.IncompleteDetails{Reason: openresponses.IncompleteReasonContentFilter,
+			Extra: map[string]any{"anthropic.refusal_category": "cyber"}}})
+	m := l.v.Model()
+	d := m.Turn.Incomplete
+	if m.Turn.Cause != agentturn.StopContentFilter || d == nil || d.Reason != openresponses.IncompleteReasonContentFilter ||
+		d.Extra["anthropic.refusal_category"] != "cyber" {
+		t.Fatalf("turn = %+v, incomplete %+v", m.Turn, d)
+	}
+	d.Extra["anthropic.refusal_category"] = "changed"
+	if got := l.v.Model().Turn.Incomplete.Extra["anthropic.refusal_category"]; got != "cyber" {
+		t.Errorf("a model's details changed the view's: %v", got)
+	}
+	l.v.Live(&agentturn.RunStart{RunID: "run2"})
+	if d := l.v.Model().Turn.Incomplete; d != nil {
+		t.Errorf("details after the next start = %+v", d)
+	}
+}
+
 // TestAQuestionIsShownOnceUntilItCloses: a subscriber that attaches
 // while a question waits is sent it again, which the view does not
 // double; its close takes it off.

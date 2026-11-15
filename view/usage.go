@@ -3,13 +3,16 @@ package view
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/agentturn/session"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/internal/incomplete"
 )
 
 // Usage sums the token usage of every model call on a path, split by the
@@ -84,6 +87,42 @@ type Run struct {
 	// Ended is zero while the line holds no end entry for the run.
 	Ended time.Time
 	Usage openresponses.Usage
+	// Cause is what stopped the run, by its end entry: the cause an end
+	// written stopped names in its ref, or one written aborted after
+	// its last response ended incomplete (agentturn v0.0.40: the
+	// provider's content filter, the output limit, or a stop after a
+	// response the limit cut; ref "incomplete" reads as
+	// max_output_tokens). It is "" with no end entry and for any other
+	// end, a guard's stop included.
+	Cause agentturn.StopCause
+	// Incomplete is the incomplete details of the run's last response
+	// when it ended incomplete and the run's end entry names a stop
+	// cause (Cause), extension members such as
+	// anthropic.refusal_category in Extra, and nil otherwise, an abort
+	// or a failure after a cut response's calls included: the record's
+	// [agentturn.RunEnd.Incomplete].
+	Incomplete *openresponses.IncompleteDetails
+}
+
+// recordedCause is the stop cause a run's end entry names, as agentturn
+// reads it back: a stopped end's ref, before any ":", and an aborted
+// end's when it names a stop cause other than a guard's, which is
+// written with its error.
+func recordedCause(end *agentsession.RunEntry) agentturn.StopCause {
+	cause, _, _ := strings.Cut(end.Ref, ":")
+	switch end.Reason {
+	case agentsession.ReasonStopped:
+		return agentturn.StopCause(cause)
+	case agentsession.ReasonAborted:
+		switch c := agentturn.StopCause(cause); c {
+		case agentturn.StopMaxTurns, agentturn.StopHook, agentturn.StopTerminate, agentturn.StopPartialTerminate,
+			agentturn.StopRefused, agentturn.StopContentFilter, agentturn.StopMaxOutputTokens:
+			return c
+		case "incomplete":
+			return agentturn.StopMaxOutputTokens
+		}
+	}
+	return ""
 }
 
 // lastRun is the last run whose start entry is on path, zero when there
@@ -97,9 +136,21 @@ func lastRun(path []agentsession.Entry) Run {
 		}
 		r := Run{ID: start.RunID, Started: start.Timestamp}
 		r.Usage, _ = Usage(path[i+1:])
+		var last *agentsession.ResponseEntry
 		for _, e := range path[i+1:] {
-			if end, ok := e.(*agentsession.RunEntry); ok && end.IsEnd() && end.RunID == start.RunID {
-				r.Ended = end.Timestamp
+			switch x := e.(type) {
+			case *agentsession.ResponseEntry:
+				last = x
+			case *agentsession.RunEntry:
+				if x.IsEnd() && x.RunID == start.RunID {
+					r.Ended, r.Cause = x.Timestamp, recordedCause(x)
+					// A cut response whose calls ran before an abort or
+					// a failure ended the run is no answer that was cut.
+					if last != nil && r.Cause != "" {
+						r.Incomplete = incomplete.Copy(last.Incomplete)
+					}
+					return r
+				}
 			}
 		}
 		return r

@@ -562,3 +562,57 @@ func TestACopiedQueuedInputIsNotThePersons(t *testing.T) {
 		t.Error("the copied input reads as the person's words")
 	}
 }
+
+// refusing ends its one response incomplete with content_filter, the
+// details carrying a provider's category, after a refusal part.
+type refusing struct{}
+
+func (refusing) CreateStream(_ context.Context, req openresponses.Request, sink openresponses.EventSink) error {
+	next := sink
+	sink = openresponses.EventSinkFunc(func(ev openresponses.StreamEvent) error {
+		if e, ok := ev.(*openresponses.ResponseIncompleteEvent); ok {
+			e.Response.IncompleteDetails.Extra = map[string]any{"anthropic.refusal_category": "cyber"}
+		}
+		return next.Send(ev)
+	})
+	em := openresponses.NewEmitter(sink, openresponses.NewResponse(req))
+	w, err := em.Message(openresponses.PhaseFinalAnswer)
+	if err != nil {
+		return err
+	}
+	if err := w.Refusal("no"); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return em.Incomplete(openresponses.IncompleteReasonContentFilter)
+}
+
+// TestARefusedRunsEndIsReadFromTheRecord (#54): a view fed the record
+// alone has the stop cause and the refused response's details, its
+// category included, on the line's last run, in a copy each model owns.
+func TestARefusedRunsEndIsReadFromTheRecord(t *testing.T) {
+	r := newRig(t, agentturn.Config{ModelName: "m", Model: refusing{}})
+	r.finish(r.prompt("go"))
+	r.waitFor("the end", func(m view.Model) bool { return idle(m) && !m.Run.Ended.IsZero() })
+
+	late := view.New()
+	for ch, err := range r.record.Follow(r.ctx, "") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		late.Record(ch)
+		break
+	}
+	m := late.Model()
+	d := m.Run.Incomplete
+	if m.Run.Cause != agentturn.StopContentFilter || d == nil || d.Reason != openresponses.IncompleteReasonContentFilter ||
+		d.Extra["anthropic.refusal_category"] != "cyber" {
+		t.Fatalf("run = %+v, incomplete %+v", m.Run, d)
+	}
+	d.Extra["anthropic.refusal_category"] = "changed"
+	if got := late.Model().Run.Incomplete.Extra["anthropic.refusal_category"]; got != "cyber" {
+		t.Errorf("a model's details changed the record's: %v", got)
+	}
+}

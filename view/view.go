@@ -61,6 +61,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/internal/incomplete"
 )
 
 // TurnState says what the agent is doing.
@@ -105,9 +106,19 @@ type Turn struct {
 	Withheld bool
 	// Cause is what stopped the last run, when it ended with
 	// [agentturn.ReasonStopped] (a turn limit, a hook, a guard, a tool
-	// that ended it, a refusal), and "" otherwise. It is the live end's:
-	// the record does not hold it.
+	// that ended it, a refusal, the provider's content filter, the
+	// output limit), and "" otherwise. It is the live end's; the
+	// record's is [Run.Cause], which a client prefers once the run's end
+	// entry is on the line.
 	Cause agentturn.StopCause
+	// Incomplete is the live end's [agentturn.RunEnd.Incomplete]: the
+	// details of the response the provider ended incomplete, when its
+	// content filter stopped the last run ([agentturn.StopContentFilter])
+	// or its output limit cut it ([agentturn.StopMaxOutputTokens], or
+	// another stop after the cut), extension members such as
+	// anthropic.refusal_category in Extra; nil for any other end. The
+	// record's is [Run.Incomplete].
+	Incomplete *openresponses.IncompleteDetails
 	// Err is what failed the last run, when it ended with
 	// [agentturn.ReasonError], and nil otherwise: the live end's.
 	Err error
@@ -1404,6 +1415,7 @@ func (v *View) permit(p Permission) {
 
 func (v *View) runEnded(e *agentturn.RunEnd) {
 	v.turn.RunID, v.turn.Number, v.turn.Attempt, v.turn.Withheld, v.turn.Cause = e.RunID, 0, 0, e.Withheld, e.Cause
+	v.turn.Incomplete = e.Incomplete
 	v.turn.Err = nil
 	if e.Reason == agentturn.ReasonError {
 		v.turn.Err = e.Err
@@ -1431,6 +1443,7 @@ func (v *View) Model() Model {
 		Origin:  v.origin,
 		Links:   append([]Link(nil), v.links...),
 	}
+	m.Turn.Incomplete = incomplete.Copy(v.turn.Incomplete)
 	m.Branches = append([]Branch(nil), v.branches...)
 	m.Usage, m.UsageByModel = Usage(v.path)
 	m.LastCall = lastCall(v.path)

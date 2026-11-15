@@ -5,6 +5,41 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentkit v0.0.19, agentmemory v0.0.13, agentsession
+  v0.0.39, agentturn and agentturn/session v0.0.40, openresponses
+  v0.0.20, agentsmd v0.0.6 (indirect).
+- Changed: with agentturn v0.0.40 a run the provider's content filter
+  stopped, or whose answer its output limit cut, ends stopped with the
+  cause `content_filter` or `max_output_tokens`, where v0.0.39 ended it
+  done; the status line's `stopped` segment says the last run stopped,
+  as for any other cause.
+- Added (#54): the transcript shows a message's `refusal` parts after
+  "refusal:", where it showed only the text, so a provider's refusal
+  read as an empty assistant turn. A run the provider's content filter
+  stopped ends with "the provider refused: content filter" under the
+  conversation, with the details' extension members such as
+  `anthropic.refusal_category`, and one whose answer the output limit
+  cut with "the answer was cut at the model's output limit"; the
+  `stopped` status segment names both. Both are read from the record
+  once the run's end entry lands (the new `view.Run.Cause` and
+  `view.Run.Incomplete`), so a reopened session or a late viewer shows
+  them too; `view.Turn.Incomplete` carries the live end's details until
+  then. A cut answer says so under another stop that followed it (the
+  stop hook, the turn limit), and the inspect panes and the tree
+  describe a refusal-only message by its refusal.
+- Fixed (#53): the powerline status line draws a block's text light on
+  a dark block and dark on a light one, where it drew every colored
+  block's text black, which could not be read on black (dax's default
+  `user` color) or blue. Of the basic colors 0, 1, 4, 5, 8 and 12
+  count as dark; 16 to 255 and `#rrggbb` are judged by relative
+  luminance.
+- Fixed: `client.Copy` copies a run end's new `Incomplete` details,
+  their extension members included, and leaves out its `Notes` and
+  `Quarantined` and a pending call's `Notes`, which the view does not
+  read, so a copy keeps nothing the agent holds.
+
 ## v0.0.16 - 2026-11-06
 
 - Dependencies: agentturn and agentturn/session v0.0.39, agentsession

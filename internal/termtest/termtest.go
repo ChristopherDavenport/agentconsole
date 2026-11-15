@@ -7,6 +7,7 @@ package termtest
 
 import (
 	"bytes"
+	"image/color"
 	"io"
 	"sync"
 
@@ -52,6 +53,18 @@ func (t *Term) Screen() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.emu.String()
+}
+
+// Colors are the foreground and background of the cell at column x of
+// row y, nil for the terminal's default, both nil off the screen.
+func (t *Term) Colors(x, y int) (fg, bg color.Color) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	c := t.emu.CellAt(x, y)
+	if c == nil {
+		return nil, nil
+	}
+	return c.Style.Fg, c.Style.Bg
 }
 
 // Raw is every byte the program wrote, for what is a command to the

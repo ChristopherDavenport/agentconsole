@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -8,9 +9,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
@@ -310,5 +313,131 @@ func TestTheModelSegmentNamesTheHostsModel(t *testing.T) {
 	}
 	if got := text(view.Model{Config: "b"}); got != "model b" {
 		t.Errorf("after a run: %q", got)
+	}
+}
+
+// TestPowerlineInkReadsOnItsBlock (#53): the powerline line draws a
+// colored block's text light on a dark block and dark on a light one,
+// as a terminal shows it, and the uncolored block keeps its light text.
+func TestPowerlineInkReadsOnItsBlock(t *testing.T) {
+	light, dark := lipgloss.Color("15"), lipgloss.Color("0")
+	cases := []struct {
+		text, color string
+		ink         color.Color
+	}{
+		{"black", "0", light},
+		{"blue", "4", light},
+		{"green", "2", dark},
+		{"yellow", "3", dark},
+		{"darkhex", "#202020", light},
+		{"lighthex", "#f0f0f0", dark},
+		{"plain", "", light},
+	}
+	var ps []piece
+	for _, c := range cases {
+		ps = append(ps, piece{name: c.text, text: c.text, color: c.color})
+	}
+	m := &Model{width: 120, status: StatusConfig{Powerline: true}}
+	term := termtest.New(120, 2)
+	defer term.Close()
+	if _, err := term.Write([]byte(m.drawLine("", ps, ""))); err != nil {
+		t.Fatal(err)
+	}
+	row := []rune(strings.SplitN(term.Screen(), "\n", 2)[0])
+	same := func(a, b color.Color) bool {
+		if a == nil || b == nil {
+			return a == b
+		}
+		ar, ag, ab, _ := a.RGBA()
+		br, bg, bb, _ := b.RGBA()
+		return ar == br && ag == bg && ab == bb
+	}
+	for _, c := range cases {
+		x := strings.Index(string(row), " "+c.text+" ")
+		if x < 0 {
+			t.Fatalf("%s: not on the line %q", c.text, string(row))
+		}
+		x = len([]rune(string(row)[:x])) + 1
+		fg, _ := term.Colors(x, 0)
+		if !same(fg, c.ink) {
+			t.Errorf("%s on %q: ink %v, want %v", c.text, c.color, fg, c.ink)
+		}
+	}
+}
+
+// TestInkOnJudgesTheBlock (#53): the basic colors by the agnoster
+// split, 16 to 255 and #rrggbb by luminance.
+func TestInkOnJudgesTheBlock(t *testing.T) {
+	cases := map[string]string{
+		// 12 is xterm's #5c5cff, luminance 0.17.
+		"0": "15", "1": "15", "4": "15", "5": "15", "8": "15", "12": "15",
+		"2": "0", "3": "0", "6": "0", "7": "0", "9": "0", "13": "0", "15": "0",
+		"16": "15", "21": "15", "231": "0", "46": "0", "232": "15", "255": "0",
+		"#202020": "15", "#f0f0f0": "0", "#0000ff": "15", "#ffff00": "0",
+		"bogus": "0",
+	}
+	for bg, want := range cases {
+		if got := inkOn(bg); got != want {
+			t.Errorf("inkOn(%q) = %q, want %q", bg, got, want)
+		}
+	}
+}
+
+// TestTheStoppedSegmentNamesTheProvidersEnds (#54): a run the content
+// filter stopped, or whose answer the output limit cut, is not shown as
+// a plain finish.
+func TestTheStoppedSegmentNamesTheProvidersEnds(t *testing.T) {
+	c := StatusConfig{Segments: []string{"stopped"}}
+	for cause, want := range map[agentturn.StopCause]string{
+		agentturn.StopContentFilter:   "last run stopped: the provider refused",
+		agentturn.StopMaxOutputTokens: "last run stopped: answer cut at the output limit",
+	} {
+		ps := c.pieces(statusIn{v: view.Model{Turn: view.Turn{Cause: cause}}})
+		if len(ps) != 1 || ps[0].text != want {
+			t.Errorf("%s: %+v, want %q", cause, ps, want)
+		}
+	}
+}
+
+// TestARefusalPartFollowsTheMessagesText (#54): a message with text and
+// a refusal part shows both, the refusal marked.
+func TestARefusalPartFollowsTheMessagesText(t *testing.T) {
+	msg := &openresponses.Message{Role: openresponses.RoleAssistant, Content: openresponses.Contents{
+		&openresponses.OutputText{Text: "Sure,"}, &openresponses.Refusal{Refusal: "I can't help with that."},
+	}}
+	got := ansi.Strip(renderRow(view.Row{Item: msg}, opts{}, nil, "", 60, newMarkdown()))
+	if !strings.Contains(got, "Sure,") || !strings.Contains(got, "refusal: I can't help with that.") ||
+		strings.Index(got, "Sure,") > strings.Index(got, "refusal:") {
+		t.Errorf("row:\n%s", got)
+	}
+}
+
+// TestACutResponseShowsUnderAnotherStop (#54): a stop the hook made
+// after a response the output limit cut still says the answer was cut.
+func TestACutResponseShowsUnderAnotherStop(t *testing.T) {
+	cut := &openresponses.IncompleteDetails{Reason: openresponses.IncompleteReasonMaxOutputTokens}
+	for name, m := range map[string]view.Model{
+		"live":   {Run: view.Run{ID: "r"}, Turn: view.Turn{RunID: "r", Cause: agentturn.StopHook, Incomplete: cut}},
+		"record": {Run: view.Run{ID: "r", Ended: time.Unix(1, 0), Cause: agentturn.StopHook, Incomplete: cut}},
+	} {
+		if got := ansi.Strip(runEndNote(m)); got != "✂ the answer was cut at the model's output limit" {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+}
+
+// TestANewRunClearsTheStoppedSegment (#54): once the next run starts,
+// before its start entry lands, the line no longer says how the last
+// one, still the record's last, stopped.
+func TestANewRunClearsTheStoppedSegment(t *testing.T) {
+	c := StatusConfig{Segments: []string{"stopped"}}
+	m := view.Model{Run: view.Run{ID: "r1", Ended: time.Unix(1, 0), Cause: agentturn.StopContentFilter},
+		Turn: view.Turn{State: view.Running, RunID: "r2"}}
+	if ps := c.pieces(statusIn{v: m}); len(ps) != 0 {
+		t.Errorf("running r2: %+v, want no stopped segment", ps)
+	}
+	m.Turn = view.Turn{State: view.Idle, RunID: "r1", Cause: agentturn.StopContentFilter}
+	if ps := c.pieces(statusIn{v: m}); len(ps) != 1 || ps[0].text != "last run stopped: the provider refused" {
+		t.Errorf("idle after r1: %+v", ps)
 	}
 }

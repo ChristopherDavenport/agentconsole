@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ChristopherDavenport/agentsession"
+	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 )
 
@@ -93,5 +94,35 @@ func TestLastCallIsTheLastModelCallSinceACompaction(t *testing.T) {
 	path = append(path, &agentsession.ResponseEntry{ResponseID: "5", Usage: usage(60, 6)})
 	if got := lastCall(path); got.Model != "a" || got.Usage.InputTokens != 60 {
 		t.Errorf("the call after a compaction: %+v, want model a, 60 in", got)
+	}
+}
+
+// TestACutResponseCountsOnlyUnderAStop (#54): the last response's
+// incomplete details are the run's end only when the run ended stopped
+// with a cause; a cut response whose calls ran before an abort or a
+// failure ended the run gave no answer to call cut.
+func TestACutResponseCountsOnlyUnderAStop(t *testing.T) {
+	cut := &openresponses.IncompleteDetails{Reason: openresponses.IncompleteReasonMaxOutputTokens}
+	path := func(reason, ref string) []agentsession.Entry {
+		return []agentsession.Entry{
+			agentsession.NewRunStart("r1", "", ""),
+			&agentsession.ResponseEntry{ResponseID: "a", Incomplete: cut},
+			agentsession.NewRunEnd("r1", reason, ref, nil),
+		}
+	}
+	for _, tc := range []struct {
+		name, reason, ref string
+		cause             agentturn.StopCause
+		details           bool
+	}{
+		{"cut answer", agentsession.ReasonAborted, "max_output_tokens", agentturn.StopMaxOutputTokens, true},
+		{"hook after a cut", agentsession.ReasonAborted, "hook", agentturn.StopHook, true},
+		{"aborted after its calls", agentsession.ReasonAborted, "", "", false},
+		{"failed after its calls", agentsession.ReasonError, "boom", "", false},
+	} {
+		r := lastRun(path(tc.reason, tc.ref))
+		if r.Cause != tc.cause || (r.Incomplete != nil) != tc.details {
+			t.Errorf("%s: cause %q, incomplete %+v; want %q, details %v", tc.name, r.Cause, r.Incomplete, tc.cause, tc.details)
+		}
 	}
 }

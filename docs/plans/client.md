@@ -1515,8 +1515,14 @@ bottom.
   `Colors["context"]` is set. Plain: the line is reversed, and a
   colored segment's text is drawn in its color, which the reversal
   shows as its block. Powerline: each segment a block (its color, or
-  bright black with white text), U+E0B0 between blocks in the color of
-  the one it leaves on the one it enters.
+  bright black), U+E0B0 between blocks in the color of the one it
+  leaves on the one it enters. A block's text is white on a dark block
+  and black on a light one (#53): of the basic colors 0, 1, 4, 5, 8
+  and 12 are dark, and 16 to 255 and `#rrggbb` are judged by relative
+  luminance. 12 is xterm's #5c5cff, luminance 0.17, under the 0.179
+  point where white and black contrast alike; 8 (#7f7f7f, 0.21) is
+  over it but stays dark as vetted, so the uncolored block keeps 8
+  with 15.
 - **Position.** Top: the first row, as today, with the notices (the
   read-only banner, a stopped feed, the client's note) around the
   segments as before. Bottom: the last row, under the input's lower bar
@@ -1761,6 +1767,42 @@ rule.
   `Permissions` and `CutOff`. The walk stops at the first run entry, so
   it is short for a branch with runs; a branch with none walks to the
   root, once per branch per step.
+
+## Decided in implementation, a provider's refusal and a cut answer
+
+agentconsole#54, on agentturn v0.0.40 (agentturn#314). Implementation,
+no RFC rule.
+
+- **A refusal part is shown.** `Message.Text` leaves out `refusal`
+  parts, so a provider's refusal read as an empty assistant turn. A
+  message's row now shows its text, then each refusal part after
+  "refusal:", committed or live.
+- **The end is the record's, under the conversation.** `view.Run`
+  gains `Cause` and `Incomplete`, read from the line's last run: the
+  cause its end entry names (a `stopped` end's ref, or an `aborted`
+  end's after a response ended incomplete, which agentturn v0.0.40
+  writes with the cause as ref; ref `incomplete` reads as
+  `max_output_tokens`, as agentturn reads it back), and, when the end
+  names such a cause, the details of its last response entry when that
+  ended incomplete, extension members included: a cut response whose
+  calls ran before an abort or a failure ended the run is no cut
+  answer. `view.Turn` gains `Incomplete`, the live end's
+  `RunEnd.Incomplete`, cleared by the next run as `Cause` is. The TUI
+  reads the record's end once the run's end entry is on the line and
+  the live end until then, so a reopened session or a viewer that
+  attaches late shows what the one that saw the run did. While nothing
+  goes it writes the end under the last row: "the provider refused:
+  content filter" with every extension member of the details
+  (`anthropic.refusal_category: cyber`), or "the answer was cut at the
+  model's output limit", also when another stop (the stop hook, the
+  turn limit) followed the cut. The status line's `stopped` segment
+  says "the provider refused" or "answer cut at the output limit", the
+  record's cause first; a guard's stop names no cause on the record and
+  is the live end's. A line too narrow drops the segment, and the
+  conversation keeps the category. Each model's details are copies
+  (`internal/incomplete`, which `client.Copy` shares).
+- **`client.Copy` copies `RunEnd.Incomplete`.** The details and their
+  extension members are the agent's.
 
 ## Open questions
 
