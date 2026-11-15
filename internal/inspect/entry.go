@@ -377,7 +377,21 @@ func describeEntry(e agentsession.Entry) string {
 func itemText(item openresponses.Item) (string, bool) {
 	switch v := item.(type) {
 	case *openresponses.Message:
-		return v.Text(), true
+		// A message with no text but a refusal, which Text leaves out,
+		// is described by the refusal.
+		if t := v.Text(); t != "" {
+			return t, true
+		}
+		var refused []string
+		for _, c := range v.Content {
+			if r, ok := c.(*openresponses.Refusal); ok && r.Refusal != "" {
+				refused = append(refused, r.Refusal)
+			}
+		}
+		if len(refused) == 0 {
+			return "", true
+		}
+		return "refusal: " + strings.Join(refused, "\n"), true
 	case *openresponses.ReasoningItem:
 		t := v.Summary.Text()
 		if t == "" {

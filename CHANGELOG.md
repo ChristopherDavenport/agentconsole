@@ -26,12 +26,15 @@ versions may break the API.
   once the run's end entry lands (the new `view.Run.Cause` and
   `view.Run.Incomplete`), so a reopened session or a late viewer shows
   them too; `view.Turn.Incomplete` carries the live end's details until
-  then.
+  then. A cut answer says so under another stop that followed it (the
+  stop hook, the turn limit), and the inspect panes and the tree
+  describe a refusal-only message by its refusal.
 - Fixed (#53): the powerline status line draws a block's text light on
   a dark block and dark on a light one, where it drew every colored
   block's text black, which could not be read on black (dax's default
-  `user` color) or blue. Of the basic colors 0, 1, 4, 5 and 8 count as
-  dark; 16 to 255 and `#rrggbb` are judged by relative luminance.
+  `user` color) or blue. Of the basic colors 0, 1, 4, 5, 8 and 12
+  count as dark; 16 to 255 and `#rrggbb` are judged by relative
+  luminance.
 - Fixed: `client.Copy` copies a run end's new `Incomplete` details,
   their extension members included, and leaves out its `Notes` and
   `Quarantined` and a pending call's `Notes`, which the view does not

@@ -369,8 +369,9 @@ func TestPowerlineInkReadsOnItsBlock(t *testing.T) {
 // split, 16 to 255 and #rrggbb by luminance.
 func TestInkOnJudgesTheBlock(t *testing.T) {
 	cases := map[string]string{
-		"0": "15", "1": "15", "4": "15", "5": "15", "8": "15",
-		"2": "0", "3": "0", "6": "0", "7": "0", "15": "0",
+		// 12 is xterm's #5c5cff, luminance 0.17.
+		"0": "15", "1": "15", "4": "15", "5": "15", "8": "15", "12": "15",
+		"2": "0", "3": "0", "6": "0", "7": "0", "9": "0", "13": "0", "15": "0",
 		"16": "15", "21": "15", "231": "0", "46": "0", "232": "15", "255": "0",
 		"#202020": "15", "#f0f0f0": "0", "#0000ff": "15", "#ffff00": "0",
 		"bogus": "0",
@@ -408,5 +409,19 @@ func TestARefusalPartFollowsTheMessagesText(t *testing.T) {
 	if !strings.Contains(got, "Sure,") || !strings.Contains(got, "refusal: I can't help with that.") ||
 		strings.Index(got, "Sure,") > strings.Index(got, "refusal:") {
 		t.Errorf("row:\n%s", got)
+	}
+}
+
+// TestACutResponseShowsUnderAnotherStop (#54): a stop the hook made
+// after a response the output limit cut still says the answer was cut.
+func TestACutResponseShowsUnderAnotherStop(t *testing.T) {
+	cut := &openresponses.IncompleteDetails{Reason: openresponses.IncompleteReasonMaxOutputTokens}
+	for name, m := range map[string]view.Model{
+		"live":   {Run: view.Run{ID: "r"}, Turn: view.Turn{RunID: "r", Cause: agentturn.StopHook, Incomplete: cut}},
+		"record": {Run: view.Run{ID: "r", Ended: time.Unix(1, 0), Cause: agentturn.StopHook, Incomplete: cut}},
+	} {
+		if got := ansi.Strip(runEndNote(m)); got != "✂ the answer was cut at the model's output limit" {
+			t.Errorf("%s: %q", name, got)
+		}
 	}
 }
