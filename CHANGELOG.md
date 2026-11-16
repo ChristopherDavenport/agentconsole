@@ -7,6 +7,19 @@ versions may break the API.
 
 ## Unreleased
 
+- Dependencies: agentkit v0.0.20, agentmemory v0.0.14, agentsession
+  v0.0.40, agentturn and agentturn/session v0.0.41, openresponses
+  v0.0.21. A kit's `WithAfterToolCall` now chains and a compaction
+  budget of 0 is no budget; the binary sets neither.
+- Changed: with agentturn v0.0.41 an answer the provider ended
+  incomplete with an empty reason ends the run stopped at the output
+  limit, where v0.0.40 ended it done, so the conversation says "the
+  answer was cut at the model's output limit" under it and the
+  `stopped` segment names the cut, live and from the record.
+- Added: a compaction's record detail names the budget the fold was
+  made under ("budget 4000 tokens", "no budget"), from the `fold`
+  member agentturn/session v0.0.41 writes; an older record says
+  nothing of it.
 - Security (#56): text the client did not write no longer reaches the
   terminal with control characters in it. A carriage return or an SGR
   in a call's policy subject could draw over the permission panel's

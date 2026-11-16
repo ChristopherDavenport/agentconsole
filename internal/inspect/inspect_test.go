@@ -432,6 +432,9 @@ func TestACompactionShowsWhatItFolded(t *testing.T) {
 	}
 	c.TokensBefore = 900
 	c.Pinned = openresponses.Items{openresponses.UserText("remember this")}
+	// The fold member agentturn/session v0.0.41 writes: the model the
+	// fold's request named and the budget it was made under.
+	c.Unknown = map[string]json.RawMessage{session.FoldMember: json.RawMessage(`{"response_id":"resp_9","model":"m-sum","budget":4000}`)}
 	if _, err := r.store.Append(r.ctx, s.ID(), c); err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +452,7 @@ func TestACompactionShowsWhatItFolded(t *testing.T) {
 		t.Errorf("first kept = %q, want a description with its text", f.FirstKeptDesc)
 	}
 	text := joined(e.Lines())
-	for _, want := range []string{"compaction", "folded:    2 items", "18 chars", "pinned:    1 items", "user message", "about 900"} {
+	for _, want := range []string{"compaction", "folded:    2 items", "18 chars", "pinned:    1 items", "user message", "about 900", "fold call: model m-sum, response resp_9, budget 4000 tokens"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the detail lacks %q:\n%s", want, text)
 		}

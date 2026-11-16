@@ -112,6 +112,10 @@ func TestAReopenedSessionShowsHowTheRunEnded(t *testing.T) {
 			[]string{"refusal: I can't help with that.", "the provider refused: content filter (anthropic.refusal_category: cyber)", "last run stopped: the provider refused"}},
 		{"cut", &ending{reason: openresponses.IncompleteReasonMaxOutputTokens, text: "Once upon a time"},
 			[]string{"Once upon a time", "the answer was cut at the model's output limit", "last run stopped: answer cut at the output limit"}},
+		// agentturn v0.0.41: a response ended incomplete with an empty
+		// reason is cut at the output limit too, live and on the record.
+		{"cut, no reason", &ending{text: "Once upon a time"},
+			[]string{"Once upon a time", "the answer was cut at the model's output limit", "last run stopped: answer cut at the output limit"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newApp(t, agentturn.Config{ModelName: "scripted", Model: tc.model})
