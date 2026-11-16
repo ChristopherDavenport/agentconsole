@@ -82,6 +82,33 @@ state, the output, the tool's schema), never the tool, so it draws a
 live call, a historical one and an MCP tool's alike, and a call it
 declines is shown the default way.
 
+Text the client did not write (what a model, a tool, a provider, an MCP
+server or a peer wrote, and what the record holds of it) never reaches
+the terminal with a control character in it. Before it styles a string
+or renders it as Markdown, the client drops every C0 control but newline
+and tab, DEL, every C1 control and the bidirectional formatting
+characters (U+061C, U+200E-F, U+202A-E, U+2066-9). A dropped character
+leaves no mark: an escape sequence shows as the text after its ESC
+(`[2J`, `]0;title`), a carriage return cannot take the cursor back over
+the permission panel, and a right-to-left override cannot make a
+command read as another. A byte that is not UTF-8 shows as U+FFFD.
+Where the client lays text out as one row (a name, an ID, an error, a
+status segment, a tree line, a completion, what a panel asks about),
+newlines and tabs become spaces too, so the text cannot add a line that
+reads as the client's own; in a panel, each run of white space is also
+drawn as one space, so padding cannot push a command's tail out of
+sight, and a question, subject or address is cut to three rows, ending
+"… (ctrl+o)", so the panel leaves the input its place. Ctrl-O shows each
+whole on the call's row: the arguments, the question, what it is about,
+the rule the host offers, and a tool's question with the call it asks
+about and its address. The
+client's own styles, and the links glamour draws in a rendered message,
+are written as before. This applies to a renderer's spans as well, so a
+`toolview.Renderer` need not clean the text it returns. `view.Clean`
+and `view.CleanLine` (its one-row form) are exported for an embedder to
+use on what it writes to the terminal itself (printed output, an ACP
+title).
+
 ## Usage
 
 ```sh

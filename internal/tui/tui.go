@@ -453,9 +453,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case paneMsg:
 		if msg.seq == m.panes.seq && msg.key == m.panes.want {
-			m.panes.have, m.panes.lines, m.panes.err = msg.key, msg.lines, ""
+			// The panes show what the record holds: arguments,
+			// outputs, reasons and text the model and tools wrote.
+			lines := make([]string, len(msg.lines))
+			for i, l := range msg.lines {
+				lines[i] = view.Clean(l)
+			}
+			m.panes.have, m.panes.lines, m.panes.err = msg.key, lines, ""
 			if msg.err != nil {
-				m.panes.err = msg.err.Error()
+				m.panes.err = view.Clean(msg.err.Error())
 			}
 			m.relayout()
 		}
@@ -1085,7 +1091,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md)
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers))
 	m.setContent(content)
 	m.spans = spans
 	switch {
@@ -1146,23 +1152,30 @@ func (m *Model) panel() string {
 	if !ok {
 		return ""
 	}
+	// What the panel says of the call is the model's and the policy's:
+	// one line each (panelText), so a carriage return, a sequence or a
+	// newline in it cannot draw over the panel's own lines or add one
+	// that reads as the panel's, and each is cut to a few rows.
+	w := max(m.width, 10)
+	p.Name, p.Args, p.Question, p.Subject = panelText(p.Name), panelText(p.Args), panelText(p.Question), panelText(p.Subject)
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Permission requested") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Permissions)) + "): " + p.Name)
 	if p.Args != "" {
 		b.WriteString(" " + clipLine(p.Args, false))
 	}
 	if p.Question != "" {
-		b.WriteString("\n  " + p.Question)
+		b.WriteString(panelField("", p.Question, w))
 	}
 	if p.Subject != "" && !strings.Contains(p.Question, p.Subject) {
 		// A compound call's question is about one part of it, which is
 		// also where the policy says why.
-		b.WriteString("\n  about: " + p.Subject)
+		b.WriteString(panelField("about: ", p.Subject, w))
 	}
 	if p.MayHaveRun {
 		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
 	}
 	o := m.offers[p.CallID]
+	o.Rule = cutField(panelText(o.Rule), w)
 	switch {
 	case m.refusing == client.VerdictRefuse:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
@@ -1185,7 +1198,47 @@ func (m *Model) panel() string {
 		}
 		b.WriteString(sep + "[n] refuse   [s] refuse and stop")
 	}
-	return wrap(b.String(), max(m.width, 10))
+	return wrap(b.String(), w)
+}
+
+// panelRows is how many rows one field of a panel (a question, what it
+// is about, an address) takes at most.
+const panelRows = 3
+
+// panelText is a panel's field as drawn: cleaned (view.Clean), and each
+// run of white space, newlines and tabs among it, one space, so a run of
+// spaces cannot push the tail of a command past the panel's cut.
+func panelText(s string) string { return strings.Join(strings.Fields(view.Clean(s)), " ") }
+
+// cutMark ends a field the panel cut: the conversation's row of the
+// call has the whole of it under ctrl+o.
+const cutMark = "… (ctrl+o)"
+
+// panelField is a panel's field on rows of its own: a newline, label
+// and s (one line, from panelText) wrapped to width under a
+// two-column indent, the rows it wraps onto indented four, so none
+// reads as a field of the panel's own, and cut to panelRows rows, so
+// the panel leaves the input its place however long the field is.
+func panelField(label, s string, width int) string {
+	ls := strings.Split(wrap(label+s, max(width-4, 6)), "\n")
+	for i := range ls {
+		ls[i] = strings.TrimRight(ls[i], " ")
+	}
+	if len(ls) > panelRows {
+		ls = ls[:panelRows]
+		ls[panelRows-1] = truncate(ls[panelRows-1], max(width-4-lipgloss.Width(cutMark), 5)) + cutMark
+	}
+	return "\n  " + strings.Join(ls, "\n    ")
+}
+
+// cutField is s (one line) cut to about panelRows rows of width, for a
+// field inside a panel's line.
+func cutField(s string, width int) string {
+	n := panelRows * max(width-4, 6)
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	return truncate(s, n-lipgloss.Width(cutMark)) + cutMark
 }
 
 // questionPanel is the panel for a question a running call asked.
@@ -1193,20 +1246,25 @@ func (m *Model) questionPanel(q agentturn.Question, i int) string {
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Question") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Questions)) + ")")
 	if c := q.Call; c != nil {
-		b.WriteString(": " + c.Name)
+		b.WriteString(": " + panelText(c.Name))
 		if len(c.Args) > 0 {
-			b.WriteString(" " + clipLine(string(c.Args), false))
+			b.WriteString(" " + clipLine(panelText(string(c.Args)), false))
 		}
 	}
-	e := q.Elicitation
-	if e.Message != "" {
-		b.WriteString("\n  " + e.Message)
+	// The question, its subject and its address are the tool's: one
+	// line each, cut to a few rows, as in the permission panel.
+	w := max(m.width, 10)
+	msg, url := panelText(q.Elicitation.Message), panelText(q.Elicitation.URL)
+	if msg != "" {
+		b.WriteString(panelField("", msg, w))
 	}
-	if c := q.Call; c != nil && c.Decision != nil && c.Decision.Subject != "" && !strings.Contains(e.Message, c.Decision.Subject) {
-		b.WriteString("\n  about: " + c.Decision.Subject)
+	if c := q.Call; c != nil && c.Decision != nil {
+		if s := panelText(c.Decision.Subject); s != "" && !strings.Contains(msg, s) {
+			b.WriteString(panelField("about: ", s, w))
+		}
 	}
-	if e.URL != "" {
-		b.WriteString("\n  " + e.URL)
+	if url != "" {
+		b.WriteString(panelField("", url, w))
 	}
 	switch {
 	case m.refusingQ:
@@ -1262,7 +1320,9 @@ func (m *Model) frame() string {
 		parts = append(parts, p)
 	}
 	if m.err != "" {
-		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
+		// An error's text is a provider's, a tool's or a controller's, on
+		// the one row relayout gave it.
+		parts = append(parts, errStyle.Render(truncate(view.CleanLine(m.err), m.width)))
 	}
 	// A blank line keeps the run line off what is above it.
 	parts = append(parts, "", runLine(state, runPhase(m.view), runFigures(m.view, state, now), m.spinner.View(), m.width))

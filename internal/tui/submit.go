@@ -11,6 +11,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // Line is a line the user submitted in the input.
@@ -157,10 +158,10 @@ func (m *Model) submitLines() []string {
 	}
 	var rows []string
 	if m.handling {
-		rows = append(rows, dimStyle.Render(truncate("  sending: "+m.handled, m.width)))
+		rows = append(rows, dimStyle.Render(truncate("  sending: "+view.CleanLine(m.handled), m.width)))
 	}
 	for _, l := range m.waiting {
-		rows = append(rows, dimStyle.Render(truncate("  waiting: "+l, m.width)))
+		rows = append(rows, dimStyle.Render(truncate("  waiting: "+view.CleanLine(l), m.width)))
 	}
 	limit := max(min(answerMaxRows, m.height/3), 1)
 	for i, l := range m.answer {
@@ -168,7 +169,8 @@ func (m *Model) submitLines() []string {
 			rows = append(rows, dimStyle.Render(truncate("  ... "+itoa(len(m.answer)-i)+" more lines", m.width)))
 			break
 		}
-		rows = append(rows, dimStyle.Render(truncate(l, m.width)))
+		// The host's reply may carry what a command printed.
+		rows = append(rows, dimStyle.Render(truncate(view.CleanLine(l), m.width)))
 	}
 	return rows
 }

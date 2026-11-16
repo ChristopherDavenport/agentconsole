@@ -68,7 +68,7 @@ func TestARendererDrawsItsToolsCalls(t *testing.T) {
 			Children: []view.Call{{CallID: "c6", Name: "read", Args: `{"path":"c.go"}`, State: view.CallRunning, Partial: "going"}}}),
 		callRow("e7", view.Call{CallID: "c7", Name: "read", Args: `{"path":"d.go"}`, State: view.CallEnded, Output: "z"}),
 	}}
-	out, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown())
+	out, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown(), asks{})
 	got := plain(out)
 	for _, want := range []string{
 		"○ read a.go\n  read it",    // the head for the arguments, the body for the output
@@ -92,7 +92,7 @@ func TestARendererDrawsItsToolsCalls(t *testing.T) {
 
 	// Expanded, the raw arguments are shown above the renderer's body,
 	// always: what a call does is read from what it was given.
-	out, _ = renderRows(m, opts{output: true}, nil, tools, 80, "", "", newMarkdown())
+	out, _ = renderRows(m, opts{output: true}, nil, tools, 80, "", "", newMarkdown(), asks{})
 	got = plain(out)
 	if !strings.Contains(got, "○ read a.go [ended]\n  args: {\"path\":\"a.go\"}\n  file: x\n  y") {
 		t.Errorf("the expanded call is not the head, the arguments and the body:\n%s", got)

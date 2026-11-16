@@ -36,7 +36,8 @@ committed, and live events carry only what is not committed yet.
     the sessions made from one, optional), `Cost`.
   - `view`: the reconciler. A pure model: record `Change`s and
     agentturn's events in, what a client renders out. No goroutines, no
-    I/O, no terminal.
+    I/O, no terminal. `Clean` drops the control and bidi characters
+    from text the client did not write.
   - `toolview`: per-tool renderers of calls, which an embedder hands
     `console.Run`. A renderer reads a `view.Call` (the record's facts
     about the call and its tool's schema), never the tool, and returns
@@ -85,6 +86,10 @@ committed, and live events carry only what is not committed yet.
 - `Change.Session` is valid until the next step of the follow. The view
   copies what it keeps, never the session.
 - The contract grows when a feature needs it, not before.
+- Text the client did not write goes through `view.Clean` before it is
+  styled or rendered as Markdown, at the leaf where it meets a style:
+  never write a model's, a tool's, a provider's or the record's string
+  to the frame without it.
 
 ## The TUI
 

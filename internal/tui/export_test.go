@@ -17,3 +17,6 @@ func (m *Model) Selecting() bool { return m.sel != nil }
 // err, for a test to play a refusal that lands at a moment of its
 // choosing.
 func IntentDone(kind string, err error) tea.Msg { return intentDoneMsg{kind: kind, err: err} }
+
+// ShortID is nav.go's ID cutter, for tests.
+var ShortID = shortID

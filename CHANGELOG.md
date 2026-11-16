@@ -5,6 +5,47 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Dependencies: agentkit v0.0.20, agentmemory v0.0.14, agentsession
+  v0.0.40, agentturn and agentturn/session v0.0.41, openresponses
+  v0.0.21. A kit's `WithAfterToolCall` now chains and a compaction
+  budget of 0 is no budget; the binary sets neither.
+- Changed: with agentturn v0.0.41 an answer the provider ended
+  incomplete with an empty reason ends the run stopped at the output
+  limit, where v0.0.40 ended it done, so the conversation says "the
+  answer was cut at the model's output limit" under it and the
+  `stopped` segment names the cut, live and from the record.
+- Added: a compaction's record detail names the budget the fold was
+  made under ("budget 4000 tokens", "no budget"), from the `fold`
+  member agentturn/session v0.0.41 writes; an older record says
+  nothing of it.
+- Security (#56): text the client did not write no longer reaches the
+  terminal with control characters in it. A carriage return or an SGR
+  in a call's policy subject could draw over the permission panel's
+  "about:" line, and an OSC 8 link, a cursor move, a window title or a
+  clipboard write in model or tool text was passed to the terminal's
+  renderer. Every C0 control but newline and tab, DEL, every C1 control
+  and the bidirectional formatting characters are now dropped before
+  styling or Markdown, in the transcript (messages, refusals, reasoning,
+  calls and outputs, a renderer's spans), the run's end note, the
+  permission and question panels, run and stream errors, the tree, the
+  record panes, the status line, the queued, submit and completion
+  lines. Added `view.Clean`, the one cleaner, for an embedder to use
+  too, and `view.CleanLine`, which also turns newlines and tabs into
+  spaces: the client uses it where it lays text out as one row (names,
+  IDs, errors, the status line, the tree, completions, a panel's
+  fields), so a newline in a policy's subject can no longer add an
+  "about:" line to the permission panel, and a multi-line error no
+  longer pushes the input off the screen. A panel's question, subject
+  and address are cut to three rows, ending "… (ctrl+o)", and each
+  run of white space in a panel's fields, its arguments included, is
+  drawn as one space, so padding cannot push a command's tail past the
+  cut. Expanded with ctrl+o, a call's row shows the whole of what its
+  panel asks: the permission's question and subject, the host's
+  offered rule, and a tool's question, the call it asks about, that
+  call's subject and the question's address.
+
 ## v0.0.17 - 2026-11-15
 
 - Dependencies: agentkit v0.0.19, agentmemory v0.0.13, agentsession

@@ -248,7 +248,17 @@ func (e Entry) Lines() []string {
 			add("usage:     %s", usageLine(f.Usage))
 		}
 		if c := f.Call; c != nil {
-			add("fold call: model %s, response %s", orNone(c.Model), orNone(c.ResponseID))
+			// The budget is on records agentturn/session v0.0.41 writes,
+			// 0 for none; an older record does not say.
+			budget := ""
+			switch {
+			case c.Budget == nil:
+			case *c.Budget == 0:
+				budget = ", no budget"
+			default:
+				budget = fmt.Sprintf(", budget %d tokens", *c.Budget)
+			}
+			add("fold call: model %s, response %s%s", orNone(c.Model), orNone(c.ResponseID), budget)
 		}
 	}
 	return l
