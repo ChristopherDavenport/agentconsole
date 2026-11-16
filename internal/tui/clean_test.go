@@ -450,3 +450,83 @@ func TestACutPanelFieldIsWholeUnderCtrlO(t *testing.T) {
 		a.waitFor("the tool's question whole", has("ELICIT-TAIL", "URL-TAIL"))
 	})
 }
+
+// TestTheInputTakesNoBidiControls: the textarea's own sanitizer drops C0
+// and C1 controls but keeps the bidi formatting characters, so a paste,
+// a host's completion put in with Tab and a line from the host's history
+// could each put a right-to-left override into the input line. None
+// reaches the frame or the prompt sent; ordinary Unicode of any script
+// is kept.
+func TestTheInputTakesNoBidiControls(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	complete := func(_ context.Context, c tui.Completing) []tui.Completion {
+		if strings.HasPrefix(c.Word, "@d") {
+			return []tui.Completion{{Text: "@\u2066doc\u2069\u202e.md"}}
+		}
+		return nil
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithCompletion(complete),
+		tui.WithHistory([]string{"\u200fpast \u061cline"}, func(string) {}))
+	bidi := []string{"\u061c", "\u200e", "\u200f", "\u202a", "\u202c", "\u202e", "\u2066", "\u2069"}
+	noBidi := func(what, s string) {
+		t.Helper()
+		for _, c := range bidi {
+			if strings.Contains(s, c) {
+				t.Errorf("%s holds %q", what, c)
+			}
+		}
+	}
+
+	// A paste.
+	a.paste("say \u202eevil\u202c ok \u200e— שלום 日本 héllo")
+	s := a.waitFor("the paste", has("שלום 日本 héllo"))
+	noBidi("the frame after a paste", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "say evil ok — שלום 日本 héllo") {
+		t.Errorf("the input is %q, want the paste less its bidi controls", in)
+	}
+	a.key("enter")
+	in, ok := ctl.next(t, 1).(client.Prompt)
+	if !ok || len(in.Items) != 1 {
+		t.Fatalf("intent = %#v, want a prompt", in)
+	}
+	noBidi("the prompt sent", itemJSON(t, in.Items[0]))
+
+	// A completion put in with Tab.
+	a.typeText("open @d")
+	a.waitFor("the completion", has("@doc.md"))
+	a.key("tab")
+	s = a.waitFor("the completion put in", func(s string) bool { return strings.Contains(inputLine(s), "open @doc") })
+	noBidi("the frame after a completion", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "open @doc.md") {
+		t.Errorf("the input is %q, want the completion less its bidi controls", in)
+	}
+
+	// A line from the host's history, older than the prompt sent.
+	for range []rune("open @doc.md") {
+		a.key("backspace")
+	}
+	a.key("up")
+	a.waitFor("the prompt sent", func(s string) bool { return strings.Contains(inputLine(s), "say evil") })
+	a.key("up")
+	s = a.waitFor("the history", func(s string) bool { return strings.Contains(inputLine(s), "line") })
+	noBidi("the frame after the history", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "past line") {
+		t.Errorf("the input is %q, want the history line less its bidi controls", in)
+	}
+}
+
+// TestNoBidiDropsWhatCleanDrops: the input's bidi filter drops a
+// character outside the C0 and C1 controls, which the textarea drops
+// itself, exactly when view.Clean does, so the two sets cannot drift.
+func TestNoBidiDropsWhatCleanDrops(t *testing.T) {
+	for r := rune(0); r <= utf8.MaxRune; r++ {
+		if r < 0x20 || r >= 0x7f && r <= 0x9f || r >= 0xd800 && r <= 0xdfff {
+			continue
+		}
+		s := string(r)
+		if got, want := tui.NoBidi(s) == "", view.Clean(s) == ""; got != want {
+			t.Errorf("U+%04X: the input drops it %v, Clean drops it %v", r, got, want)
+		}
+	}
+}

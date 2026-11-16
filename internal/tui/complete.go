@@ -180,7 +180,7 @@ func (m *Model) accept(c Completion) {
 	for range []rune(cur.Word) {
 		m.in, _ = m.in.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	}
-	m.in.InsertString(c.Text)
+	m.in.InsertString(noBidi(c.Text))
 	now, _ := m.completing()
 	m.closeCompletion(now.Word)
 }
@@ -197,8 +197,8 @@ func (m *Model) completionLines() []string {
 		from = min(max(m.comp.at-completeRows/2, 0), len(items)-completeRows)
 	}
 	// A completion is the host's, and may be a file's name: what is
-	// drawn of it is cleaned; what Tab inserts goes through the input's
-	// own sanitizer.
+	// drawn of it is cleaned; what Tab inserts loses its bidi controls
+	// and goes through the input's own sanitizer.
 	shown := make([]Completion, len(items))
 	for i, c := range items {
 		shown[i] = Completion{Text: view.CleanLine(c.Text), Help: view.CleanLine(c.Help)}

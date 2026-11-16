@@ -1871,7 +1871,15 @@ No RFC holds it; it is this plan's.
   messages, reasoning, arguments expanded, outputs.
 - **What the input keeps.** The person's input is the textarea's, whose
   sanitizer removes C0 and C1 controls from typing, a paste and a
-  completion put in with Tab, but not bidi controls.
+  completion put in with Tab, but not bidi controls. So the model takes
+  Clean's bidi set out of every text it puts in the input first
+  (`noBidi`): a paste (in `updateInput`), a completion Tab inserts,
+  and every value it sets (`setInput`: the host's history, the editor's
+  text, a refused line or steer given back, the draft). A bidi override
+  there would make the line about to be sent read as another. Keys
+  typed one by one are the person's own and are left to the textarea;
+  a terminal's paste arrives bracketed, as one paste. A test holds the
+  filter's set to Clean's.
 
 ## Open questions
 

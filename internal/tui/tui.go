@@ -514,7 +514,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The steer was not queued: give its text back to edit or
 			// send again, unless something else is being typed.
 			if m.in.Value() == "" {
-				m.in.SetValue(msg.text)
+				m.setInput(msg.text)
 			}
 		}
 		m.relayout()
@@ -1373,8 +1373,12 @@ func (m *Model) typing() bool {
 // updateInput edits the input and then lays the screen out again. The
 // textarea is given its full height first, so its own scroll follows the
 // cursor while the key is applied; relayout shrinks the box to what the
-// value actually needs.
+// value actually needs. A paste loses its bidi controls first (noBidi).
 func (m *Model) updateInput(msg tea.Msg) tea.Cmd {
+	if p, ok := msg.(tea.PasteMsg); ok {
+		p.Content = noBidi(p.Content)
+		msg = p
+	}
 	m.in.SetHeight(inputMaxRows)
 	var cmd tea.Cmd
 	m.in, cmd = m.in.Update(msg)
@@ -1487,7 +1491,7 @@ func (m *Model) beginAnswerText() {
 func (m *Model) endAnswerText() {
 	m.in.Reset()
 	if m.draft != "" {
-		m.in.SetValue(m.draft)
+		m.setInput(m.draft)
 		m.draft = ""
 	}
 }

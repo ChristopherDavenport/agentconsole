@@ -80,3 +80,31 @@ func (m *Model) clickInput(x, y int) {
 	}
 	m.in.SetCursorColumn(col)
 }
+
+// noBidi is s less the bidirectional formatting characters view.Clean
+// removes (U+061C, U+200E-U+200F, U+202A-U+202E, U+2066-U+2069). Text put
+// in the input goes through the textarea's own sanitizer, which drops the
+// C0 and C1 controls but keeps these, so a paste, a host's completion or
+// a line from the host's history could put a right-to-left override in
+// the input line, where it makes what is about to be sent read as
+// something else. Every other character is kept, of any script.
+// TestNoBidiDropsWhatCleanDrops holds the set to view.Clean's.
+func noBidi(s string) string {
+	if strings.IndexFunc(s, isBidi) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isBidi(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isBidi(r rune) bool {
+	return r == 0x061c || r == 0x200e || r == 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
+}
+
+// setInput is the textarea's SetValue less the bidi controls: every value
+// the model sets comes through here.
+func (m *Model) setInput(s string) { m.in.SetValue(noBidi(s)) }
