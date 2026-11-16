@@ -16,6 +16,11 @@ versions may break the API.
   `view.Clean` removes, as do the editor's text and a line given back
   after a refusal, and the cursor stays where the text puts it; every
   other character is kept.
+- Fixed: ctrl+v's paste of the clipboard is the client's, not the
+  textarea's: the clipboard's text, read in a command, arrives as a
+  paste and is put in the input only if the input is still on screen,
+  so switching to the tree or a read-only view before it answers no
+  longer fills the hidden input.
 
 ## v0.0.18 - 2026-11-16
 

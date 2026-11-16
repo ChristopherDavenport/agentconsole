@@ -1875,9 +1875,12 @@ No RFC holds it; it is this plan's.
   Clean's bidi set out of the input after every message the textarea
   takes (`dropBidi`, in `updateInput`), whatever its type: a typed key
   (an RLM key, an IME, a paste arriving as keys without bracketed
-  paste), a `tea.PasteMsg`, and the textarea's own ctrl+v, which reads
-  the clipboard and inserts it through an unexported message of its
-  own. The cursor stays where the person's text puts it. What the model
+  paste) and a `tea.PasteMsg`. The cursor stays where the person's
+  text puts it. ctrl+v is the model's, not the textarea's (whose own
+  binding is off): it reads the clipboard in a command and hands the
+  text back as a `tea.PasteMsg`, so it goes through `paste` and its
+  `typing()` check when it arrives, and a clipboard answering after
+  the person left the conversation does not fill the hidden input. What the model
   puts in itself does not pass through the textarea's Update, so a
   completion Tab inserts and every value it sets (`setInput`: the
   host's history, the editor's text, a refused line or steer given

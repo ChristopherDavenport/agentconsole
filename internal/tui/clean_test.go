@@ -571,28 +571,42 @@ func TestTypedBidiNeverReachesTheInput(t *testing.T) {
 	noBidiIn(t, "the prompt sent", itemJSON(t, in.Items[0]))
 }
 
-// TestCtrlVPasteTakesNoBidi: ctrl+v is the textarea's own paste, which
-// reads the system clipboard and inserts it through a message of its
-// own, not a tea.PasteMsg. A clipboard holding a bidi override puts none
-// in the input. The clipboard library finds its command when the
-// process starts, so the test runs itself again with a fake xclip first
-// on PATH.
-func TestCtrlVPasteTakesNoBidi(t *testing.T) {
+// inFakeClipboard runs the calling test again in a child process whose
+// clipboard is a fake xclip, first on PATH, printing content, and says
+// whether this is that child. The clipboard library finds its command
+// when the process starts, so a fake must be on PATH before then. In the
+// parent it returns false once the child passed, and fails t otherwise;
+// it skips where the fake cannot run (not Linux, a noexec temp dir).
+func inFakeClipboard(t *testing.T, content string) bool {
+	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("the fake clipboard is xclip's")
 	}
-	if os.Getenv("AGENTCONSOLE_FAKE_CLIPBOARD") == "" {
-		bin := t.TempDir()
-		script := "#!/bin/sh\nprintf 'say \\342\\200\\256evil\\342\\200\\254 ok'\n"
-		if err := os.WriteFile(filepath.Join(bin, "xclip"), []byte(script), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.Command(os.Args[0], "-test.run=^TestCtrlVPasteTakesNoBidi$", "-test.count=1", "-test.v")
-		cmd.Env = append(os.Environ(), "AGENTCONSOLE_FAKE_CLIPBOARD=1", "WAYLAND_DISPLAY=", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-		out, err := cmd.CombinedOutput()
-		if err != nil || !bytes.Contains(out, []byte("--- PASS: TestCtrlVPasteTakesNoBidi")) {
-			t.Fatalf("the run with the fake clipboard: %v\n%s", err, out)
-		}
+	if os.Getenv("AGENTCONSOLE_FAKE_CLIPBOARD") == t.Name() {
+		return true
+	}
+	bin := t.TempDir()
+	xclip := filepath.Join(bin, "xclip")
+	if err := os.WriteFile(xclip, []byte("#!/bin/sh\nprintf '%s' \"$AGENTCONSOLE_CLIPBOARD_TEXT\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command(xclip).Run(); err != nil {
+		t.Skipf("the fake clipboard cannot run here: %v", err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), "AGENTCONSOLE_FAKE_CLIPBOARD="+t.Name(), "AGENTCONSOLE_CLIPBOARD_TEXT="+content,
+		"WAYLAND_DISPLAY=", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil || !bytes.Contains(out, []byte("--- PASS: "+t.Name())) {
+		t.Fatalf("the run with the fake clipboard: %v\n%s", err, out)
+	}
+	return false
+}
+
+// TestCtrlVPasteTakesNoBidi: ctrl+v reads the system clipboard into the
+// input; a clipboard holding a bidi override puts none in it.
+func TestCtrlVPasteTakesNoBidi(t *testing.T) {
+	if !inFakeClipboard(t, "say \u202eevil\u202c ok") {
 		return
 	}
 	src := &handSource{}
@@ -603,6 +617,45 @@ func TestCtrlVPasteTakesNoBidi(t *testing.T) {
 	noBidiIn(t, "the frame", a.frame())
 	if in := inputLine(s); !strings.Contains(in, "say evil ok") {
 		t.Errorf("the input is %q, want the clipboard less its bidi controls", in)
+	}
+}
+
+// TestCtrlVPasteWaitsForTheInput: the clipboard is read in a command, so
+// its text arrives after the key. If the person has left the
+// conversation by then (the tree, here), the text is not put in the
+// input the screen hides, as a paste on that screen is not.
+func TestCtrlVPasteWaitsForTheInput(t *testing.T) {
+	if !inFakeClipboard(t, "PASTED-LATE") {
+		return
+	}
+	src := &handSource{}
+	ctl := &intents{}
+	a := newViewApp(t, src, ctl.act)
+	a.mu.Lock()
+	_, cmd := a.m.Update(keyPress(t, "ctrl+v"))
+	a.mu.Unlock()
+	a.key("ctrl+t")
+	a.waitFor("the tree", has("branches of session"))
+	var deliver func(tea.Cmd)
+	deliver = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		switch msg := c().(type) {
+		case nil:
+		case tea.BatchMsg:
+			for _, c := range msg {
+				deliver(c)
+			}
+		default:
+			a.send(msg)
+		}
+	}
+	deliver(cmd)
+	a.key("ctrl+t")
+	s := a.waitFor("the conversation", has("> "))
+	if strings.Contains(s, "PASTED-LATE") {
+		t.Errorf("the clipboard's text landed in the input the tree hid:\n%s", s)
 	}
 }
 

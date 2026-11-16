@@ -108,9 +108,9 @@ func isBidi(r rune) bool {
 // dropBidi takes the bidi controls out of the input after the textarea
 // has changed it, and puts the cursor back where the person's text puts
 // it: on the same line, less the controls that were before it. It is the
-// one place every message the textarea takes (a typed key, a paste, the
-// textarea's own ctrl+v paste of the clipboard) is filtered, whatever
-// the message's type.
+// one place every message the textarea takes (a typed key, a paste,
+// ctrl+v's read of the clipboard) is filtered, whatever the message's
+// type.
 func (m *Model) dropBidi() {
 	v := m.in.Value()
 	if strings.IndexFunc(v, isBidi) < 0 {
