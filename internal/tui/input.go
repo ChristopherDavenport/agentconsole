@@ -122,7 +122,11 @@ func (m *Model) dropBidi() {
 		col -= len(line[:min(col, len(line))]) - len([]rune(noBidi(string(line[:min(col, len(line))]))))
 	}
 	m.in.SetValue(noBidi(v))
-	for m.in.Line() > row {
+	// SetValue leaves the cursor on the last row; each CursorUp moves it
+	// one row the textarea wraps to, so there are at most as many steps
+	// as rows, and a textarea that would not move cannot hang Update.
+	rows, _ := m.inputRows()
+	for i := 0; m.in.Line() > row && i <= len(rows); i++ {
 		m.in.CursorUp()
 	}
 	m.in.SetCursorColumn(col)
