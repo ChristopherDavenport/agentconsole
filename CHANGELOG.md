@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.19 - 2026-11-16
 
 - Security: the input line no longer takes a bidi control. The
   textarea's own sanitizer drops C0 and C1 controls but kept U+061C,
