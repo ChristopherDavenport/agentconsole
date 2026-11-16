@@ -158,10 +158,10 @@ func (m *Model) submitLines() []string {
 	}
 	var rows []string
 	if m.handling {
-		rows = append(rows, dimStyle.Render(truncate("  sending: "+view.Clean(m.handled), m.width)))
+		rows = append(rows, dimStyle.Render(truncate("  sending: "+view.CleanLine(m.handled), m.width)))
 	}
 	for _, l := range m.waiting {
-		rows = append(rows, dimStyle.Render(truncate("  waiting: "+view.Clean(l), m.width)))
+		rows = append(rows, dimStyle.Render(truncate("  waiting: "+view.CleanLine(l), m.width)))
 	}
 	limit := max(min(answerMaxRows, m.height/3), 1)
 	for i, l := range m.answer {
@@ -170,7 +170,7 @@ func (m *Model) submitLines() []string {
 			break
 		}
 		// The host's reply may carry what a command printed.
-		rows = append(rows, dimStyle.Render(truncate(view.Clean(l), m.width)))
+		rows = append(rows, dimStyle.Render(truncate(view.CleanLine(l), m.width)))
 	}
 	return rows
 }

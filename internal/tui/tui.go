@@ -1153,27 +1153,29 @@ func (m *Model) panel() string {
 		return ""
 	}
 	// What the panel says of the call is the model's and the policy's:
-	// cleaned, so a carriage return or a sequence in it cannot draw over
-	// the panel's own lines.
-	p.Name, p.Args, p.Question, p.Subject = view.Clean(p.Name), view.Clean(p.Args), view.Clean(p.Question), view.Clean(p.Subject)
+	// cleaned to one line each (view.CleanLine), so a carriage return, a
+	// sequence or a newline in it cannot draw over the panel's own lines
+	// or add one that reads as the panel's, and each is cut to a few rows.
+	w := max(m.width, 10)
+	p.Name, p.Args, p.Question, p.Subject = view.CleanLine(p.Name), view.CleanLine(p.Args), view.CleanLine(p.Question), view.CleanLine(p.Subject)
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Permission requested") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Permissions)) + "): " + p.Name)
 	if p.Args != "" {
 		b.WriteString(" " + clipLine(p.Args, false))
 	}
 	if p.Question != "" {
-		b.WriteString("\n  " + p.Question)
+		b.WriteString(panelField("", p.Question, w))
 	}
 	if p.Subject != "" && !strings.Contains(p.Question, p.Subject) {
 		// A compound call's question is about one part of it, which is
 		// also where the policy says why.
-		b.WriteString("\n  about: " + p.Subject)
+		b.WriteString(panelField("about: ", p.Subject, w))
 	}
 	if p.MayHaveRun {
 		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
 	}
 	o := m.offers[p.CallID]
-	o.Rule = view.Clean(o.Rule)
+	o.Rule = cutField(view.CleanLine(o.Rule), w)
 	switch {
 	case m.refusing == client.VerdictRefuse:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
@@ -1196,7 +1198,38 @@ func (m *Model) panel() string {
 		}
 		b.WriteString(sep + "[n] refuse   [s] refuse and stop")
 	}
-	return wrap(b.String(), max(m.width, 10))
+	return wrap(b.String(), w)
+}
+
+// panelRows is how many rows one field of a panel (a question, what it
+// is about, an address) takes at most.
+const panelRows = 3
+
+// panelField is a panel's field on rows of its own: a newline, label
+// and s (one line, from view.CleanLine) wrapped to width under a
+// two-column indent, the rows it wraps onto indented four, so none
+// reads as a field of the panel's own, and cut to panelRows rows, so
+// the panel leaves the input its place however long the field is.
+func panelField(label, s string, width int) string {
+	ls := strings.Split(wrap(label+s, max(width-4, 6)), "\n")
+	for i := range ls {
+		ls[i] = strings.TrimRight(ls[i], " ")
+	}
+	if len(ls) > panelRows {
+		ls = ls[:panelRows]
+		ls[panelRows-1] = truncate(ls[panelRows-1], max(width-5, 5)) + "…"
+	}
+	return "\n  " + strings.Join(ls, "\n    ")
+}
+
+// cutField is s (one line) cut to about panelRows rows of width, for a
+// field inside a panel's line.
+func cutField(s string, width int) string {
+	n := panelRows * max(width-4, 6)
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	return truncate(s, n-1) + "…"
 }
 
 // questionPanel is the panel for a question a running call asked.
@@ -1204,23 +1237,25 @@ func (m *Model) questionPanel(q agentturn.Question, i int) string {
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Question") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Questions)) + ")")
 	if c := q.Call; c != nil {
-		b.WriteString(": " + view.Clean(c.Name))
+		b.WriteString(": " + view.CleanLine(c.Name))
 		if len(c.Args) > 0 {
-			b.WriteString(" " + clipLine(view.Clean(string(c.Args)), false))
+			b.WriteString(" " + clipLine(view.CleanLine(string(c.Args)), false))
 		}
 	}
-	// The question, its subject and its address are the tool's.
-	msg, url := view.Clean(q.Elicitation.Message), view.Clean(q.Elicitation.URL)
+	// The question, its subject and its address are the tool's: one
+	// line each, cut to a few rows, as in the permission panel.
+	w := max(m.width, 10)
+	msg, url := view.CleanLine(q.Elicitation.Message), view.CleanLine(q.Elicitation.URL)
 	if msg != "" {
-		b.WriteString("\n  " + msg)
+		b.WriteString(panelField("", msg, w))
 	}
 	if c := q.Call; c != nil && c.Decision != nil {
-		if s := view.Clean(c.Decision.Subject); s != "" && !strings.Contains(msg, s) {
-			b.WriteString("\n  about: " + s)
+		if s := view.CleanLine(c.Decision.Subject); s != "" && !strings.Contains(msg, s) {
+			b.WriteString(panelField("about: ", s, w))
 		}
 	}
 	if url != "" {
-		b.WriteString("\n  " + url)
+		b.WriteString(panelField("", url, w))
 	}
 	switch {
 	case m.refusingQ:
@@ -1276,8 +1311,9 @@ func (m *Model) frame() string {
 		parts = append(parts, p)
 	}
 	if m.err != "" {
-		// An error's text is a provider's, a tool's or a controller's.
-		parts = append(parts, errStyle.Render(truncate(view.Clean(m.err), m.width)))
+		// An error's text is a provider's, a tool's or a controller's, on
+		// the one row relayout gave it.
+		parts = append(parts, errStyle.Render(truncate(view.CleanLine(m.err), m.width)))
 	}
 	// A blank line keeps the run line off what is above it.
 	parts = append(parts, "", runLine(state, runPhase(m.view), runFigures(m.view, state, now), m.spinner.View(), m.width))

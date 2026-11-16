@@ -566,7 +566,7 @@ func calleeText(l view.Link) string {
 // shortID is an ID cut for a line, cleaned (view.Clean): an ID on the
 // record is whatever the writer wrote.
 func shortID(id string) string {
-	id = view.Clean(strings.TrimPrefix(id, "sha256:"))
+	id = view.CleanLine(strings.TrimPrefix(id, "sha256:"))
 	if len(id) > 8 {
 		return id[:8]
 	}
@@ -595,7 +595,7 @@ func (m *Model) renderTree() (string, int, []int) {
 			line = rows
 		}
 		// A branch's label, a peer's address and task are the record's.
-		b.WriteString(cur + view.Clean(it.text) + "\n")
+		b.WriteString(cur + view.CleanLine(it.text) + "\n")
 		lines = append(lines, rows)
 		rows++
 	}

@@ -91,12 +91,18 @@ characters (U+061C, U+200E-F, U+202A-E, U+2066-9). A dropped character
 leaves no mark: an escape sequence shows as the text after its ESC
 (`[2J`, `]0;title`), a carriage return cannot take the cursor back over
 the permission panel, and a right-to-left override cannot make a
-command read as another. A byte that is not UTF-8 shows as U+FFFD. The
+command read as another. A byte that is not UTF-8 shows as U+FFFD.
+Where the client lays text out as one row (a name, an ID, an error, a
+status segment, a tree line, a completion, what a panel asks about),
+newlines and tabs become spaces too, so the text cannot add a line that
+reads as the client's own; a panel's question, subject and address are
+cut to three rows, so the panel leaves the input its place. The
 client's own styles, and the links glamour draws in a rendered message,
 are written as before. This applies to a renderer's spans as well, so a
-`toolview.Renderer` need not clean the text it returns. `view.Clean` is
-the function, exported for an embedder to use on what it writes to the
-terminal itself (a status segment, a printed transcript).
+`toolview.Renderer` need not clean the text it returns. `view.Clean`
+and `view.CleanLine` (its one-row form) are exported for an embedder to
+use on what it writes to the terminal itself (printed output, an ACP
+title).
 
 ## Usage
 

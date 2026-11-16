@@ -201,7 +201,7 @@ func (m *Model) completionLines() []string {
 	// own sanitizer.
 	shown := make([]Completion, len(items))
 	for i, c := range items {
-		shown[i] = Completion{Text: view.Clean(c.Text), Help: view.Clean(c.Help)}
+		shown[i] = Completion{Text: view.CleanLine(c.Text), Help: view.CleanLine(c.Help)}
 	}
 	items = shown
 	width := 0

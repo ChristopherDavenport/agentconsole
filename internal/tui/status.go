@@ -158,7 +158,7 @@ func (c StatusConfig) pieces(in statusIn) []piece {
 		}
 		// The model's name, a model unpriced, and a host segment's text
 		// may come from a provider or the record.
-		if p.text = view.Clean(p.text); p.text != "" {
+		if p.text = view.CleanLine(p.text); p.text != "" {
 			ps = append(ps, p)
 		}
 	}
@@ -453,7 +453,7 @@ func (m *Model) statusRowsUsed() int {
 func (m *Model) drawLine(pre string, ps []piece, post string) string {
 	// The notices carry errors and a viewed session's title, which may
 	// name a peer's address.
-	pre, post = view.Clean(pre), view.Clean(post)
+	pre, post = view.CleanLine(pre), view.CleanLine(post)
 	w := max(m.width, 1)
 	draw := m.drawPlain
 	if m.status.Powerline {

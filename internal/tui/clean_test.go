@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -201,4 +202,62 @@ func TestNewlinesTabsAndUnicodeAreKept(t *testing.T) {
 	if lineWith(s, "second line") == lineWith(s, "first") {
 		t.Errorf("the message's paragraphs are on one line:\n%s", s)
 	}
+}
+
+// fits says the screen is exactly height lines with the input on it: a
+// leaf laid out as one row stays one row, and a panel stays short enough
+// to leave the input its place.
+func fits(t *testing.T, s string, height int) {
+	t.Helper()
+	if n := len(strings.Split(s, "\n")); n != height {
+		t.Errorf("the screen is %d lines, not %d:\n%s", n, height, s)
+	}
+	if lineWith(s, "> ") == "" {
+		t.Errorf("the input is off the screen:\n%s", s)
+	}
+}
+
+// TestANewlineCannotAddAPanelLine (#56): a newline in what the policy
+// asks about, or in its question, cannot add a line that reads as the
+// panel's own ("about: harmless" under the real one), and a long one
+// cannot push the input off the screen.
+func TestANewlineCannotAddAPanelLine(t *testing.T) {
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+		return &agentturn.ToolDecision{Action: agentturn.Defer,
+			Reason:  "ask: upper\n  [y] approve" + strings.Repeat("\nmore of the question", 60),
+			Subject: "rm -rf ~/src\n  about: harmless" + strings.Repeat("\n  about: harmless", 60)}, nil
+	}
+	a := newApp(t, cfg)
+	a.resize(100, 30)
+	a.submit("go")
+	s := a.waitFor("the permission", has("Permission requested", "about:"))
+	var about, approve int
+	for _, l := range strings.Split(s, "\n") {
+		if strings.HasPrefix(l, "  about:") {
+			about++
+		}
+		if strings.HasPrefix(l, "  [y] approve") {
+			approve++
+		}
+	}
+	if about != 1 || approve != 1 {
+		t.Errorf("the panel has %d about lines and %d approve lines, want one each:\n%s", about, approve, s)
+	}
+	if l := lineWith(s, "about:"); !strings.Contains(l, "about: rm -rf ~/src   about: harmless") {
+		t.Errorf("the about line is %q", l)
+	}
+	fits(t, s, 30)
+}
+
+// TestAMultiLineErrorKeepsTheInputOnScreen (#56): a provider's or a
+// controller's error is shown on its one row, its newlines as spaces, so
+// the screen keeps the room it laid out for the input.
+func TestAMultiLineErrorKeepsTheInputOnScreen(t *testing.T) {
+	a := newViewApp(t, &handSource{}, (&intents{}).act)
+	a.resize(80, 20)
+	a.send(tui.IntentDone("abort", errors.New("upstream said:"+strings.Repeat("\nline of the body", 30))))
+	s := a.waitFor("the error", has("abort: upstream said: line of the body"))
+	fits(t, s, 20)
 }

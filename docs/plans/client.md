@@ -1843,6 +1843,21 @@ No RFC holds it; it is this plan's.
   submit and completion lines. The model is not cleaned as a whole:
   the record keeps what was written, a pane or a copy of the transcript
   reads the view's strings, and the view stays the record's projection.
+- **One row, one line: `view.CleanLine`.** Clean keeps newlines and
+  tabs, which a leaf laid out as one row cannot: a `\n` in a policy's
+  subject added an "about: harmless" line under the real one, and a
+  multi-line provider error took rows `relayout` had not given it,
+  pushing the input off the screen. `CleanLine` is Clean with each
+  newline and tab as a space, exported beside it for dax. It is used for
+  names, IDs (`shortID`), labels, the run-end note, a call's reason,
+  `m.err`, the status line's segments and notices, the tree's lines,
+  completions and the queued and submit lines. A panel's question,
+  subject, address and the elicitation's message are one line each,
+  wrapped under a two-column indent with the rows they wrap onto
+  indented four, so no row of theirs reads as the panel's own, and cut
+  to three rows (`panelRows`), so a long one leaves the input its
+  place. Multi-line text keeps its lines where it is shown as a block:
+  messages, reasoning, arguments expanded, outputs.
 - **What the input keeps.** The person's input is the textarea's, whose
   sanitizer removes C0 and C1 controls from typing, a paste and a
   completion put in with Tab, but not bidi controls.

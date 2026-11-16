@@ -57,3 +57,20 @@ func controls(r rune) bool {
 	}
 	return false
 }
+
+// CleanLine is Clean for text drawn on one row: a name, a label, an ID,
+// an error, a status segment, the line a panel asks about. Each newline
+// and tab Clean keeps becomes a space, so the text cannot add a row that
+// reads as the client's own, or take rows the layout did not give it.
+func CleanLine(s string) string {
+	s = Clean(s)
+	if !strings.ContainsAny(s, "\n\t") {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, s)
+}

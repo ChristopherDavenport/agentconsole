@@ -230,13 +230,13 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		if row.Call != nil {
 			return renderCall(*row.Call, o, tools, tag, 0, spin)
 		}
-		return toolStyle.Render("○ "+view.Clean(it.Name)) + tag + " " + view.Clean(it.Arguments)
+		return toolStyle.Render("○ "+view.CleanLine(it.Name)) + tag + " " + view.Clean(it.Arguments)
 	case *openresponses.FunctionCallOutput:
-		return toolStyle.Render("↳ result "+view.Clean(it.CallID)) + tag + "\n" + clip(view.Clean(it.Output.String()), o.output)
+		return toolStyle.Render("↳ result "+view.CleanLine(it.CallID)) + tag + "\n" + clip(view.Clean(it.Output.String()), o.output)
 	case *openresponses.Compaction:
 		return dimStyle.Render("[compaction]") + tag
 	}
-	return dimStyle.Render("["+view.Clean(row.Item.ItemType())+"]") + tag
+	return dimStyle.Render("["+view.CleanLine(row.Item.ItemType())+"]") + tag
 }
 
 // refusals is the text of a message's refusal parts, joined by
@@ -282,7 +282,7 @@ func runEndNote(m view.Model) string {
 		}
 		s += " (" + strings.Join(keys, ", ") + ")"
 	}
-	return warnStyle.Render(view.Clean(s))
+	return warnStyle.Render(view.CleanLine(s))
 }
 
 // lastEnd is how the last run on the viewed line ended, while nothing
@@ -341,8 +341,8 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	// The renderer reads the call as recorded; what the client draws of
 	// it is cleaned (view.Clean), and the renderer's spans in drawLine.
 	raw := c
-	c.Name, c.Args, c.Output, c.Partial = view.Clean(c.Name), view.Clean(c.Args), view.Clean(c.Output), view.Clean(c.Partial)
-	c.Reason, c.Withdrawn, c.Verdict = view.Clean(c.Reason), view.Clean(c.Withdrawn), view.Clean(c.Verdict)
+	c.Name, c.Args, c.Output, c.Partial = view.CleanLine(c.Name), view.Clean(c.Args), view.Clean(c.Output), view.Clean(c.Partial)
+	c.Reason, c.Withdrawn, c.Verdict = view.CleanLine(c.Reason), view.CleanLine(c.Withdrawn), view.CleanLine(c.Verdict)
 	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
 	switch {
 	case moving(c):
@@ -692,9 +692,9 @@ func runPhase(m view.Model) string {
 		if c := row.Call; c != nil {
 			switch c.State {
 			case view.CallRunning:
-				running = append(running, view.Clean(c.Name))
+				running = append(running, view.CleanLine(c.Name))
 			case view.CallOpen:
-				calling = append(calling, view.Clean(c.Name))
+				calling = append(calling, view.CleanLine(c.Name))
 			}
 			continue
 		}
@@ -870,7 +870,7 @@ func trustTag(p *view.Provenance) string {
 	if p == nil || p.Trust == nil || len(p.Trust.Reads) == 0 {
 		return ""
 	}
-	return dimStyle.Render(view.Clean(" (" + strings.Join(p.Trust.Reads, ", ") + ")"))
+	return dimStyle.Render(view.CleanLine(" (" + strings.Join(p.Trust.Reads, ", ") + ")"))
 }
 
 // provenanceText says where a message the host composed came from, and
@@ -897,5 +897,5 @@ func provenanceText(p *view.Provenance) string {
 	if len(parts) == 0 {
 		parts = append(parts, "composed by the host")
 	}
-	return view.Clean(strings.Join(parts, ", ") + ": not your words")
+	return view.CleanLine(strings.Join(parts, ", ") + ": not your words")
 }

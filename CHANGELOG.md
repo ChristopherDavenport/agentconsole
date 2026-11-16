@@ -19,7 +19,13 @@ versions may break the API.
   permission and question panels, run and stream errors, the tree, the
   record panes, the status line, the queued, submit and completion
   lines. Added `view.Clean`, the one cleaner, for an embedder to use
-  too.
+  too, and `view.CleanLine`, which also turns newlines and tabs into
+  spaces: the client uses it where it lays text out as one row (names,
+  IDs, errors, the status line, the tree, completions, a panel's
+  fields), so a newline in a policy's subject can no longer add an
+  "about:" line to the permission panel, and a multi-line error no
+  longer pushes the input off the screen. A panel's question, subject
+  and address are cut to three rows.
 
 ## v0.0.17 - 2026-11-15
 

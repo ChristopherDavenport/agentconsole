@@ -102,7 +102,7 @@ func (m *Model) queuedLines() []string {
 		if q.Hidden {
 			label = "hidden, " + label
 		}
-		lines = append(lines, dimStyle.Render(truncate(view.Clean("  "+label+": "+text), m.width)))
+		lines = append(lines, dimStyle.Render(truncate(view.CleanLine("  "+label+": "+text), m.width)))
 	}
 	return lines
 }

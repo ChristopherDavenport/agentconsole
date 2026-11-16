@@ -29,3 +29,16 @@ func TestClean(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanLine(t *testing.T) {
+	for in, want := range map[string]string{
+		"one line":                     "one line",
+		"rm -rf ~\n  about: ls\tx":     "rm -rf ~   about: ls x",
+		"err:\r\n\x1b[1mbody\x1b[0m\n": "err: [1mbody[0m ",
+		"\u202eabc\n漢字":                "abc 漢字",
+	} {
+		if got := view.CleanLine(in); got != want {
+			t.Errorf("CleanLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
