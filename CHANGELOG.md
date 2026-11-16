@@ -5,7 +5,7 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
-## Unreleased
+## v0.0.18 - 2026-11-16
 
 - Dependencies: agentkit v0.0.20, agentmemory v0.0.14, agentsession
   v0.0.40, agentturn and agentturn/session v0.0.41, openresponses
