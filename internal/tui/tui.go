@@ -453,9 +453,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case paneMsg:
 		if msg.seq == m.panes.seq && msg.key == m.panes.want {
-			m.panes.have, m.panes.lines, m.panes.err = msg.key, msg.lines, ""
+			// The panes show what the record holds: arguments,
+			// outputs, reasons and text the model and tools wrote.
+			lines := make([]string, len(msg.lines))
+			for i, l := range msg.lines {
+				lines[i] = view.Clean(l)
+			}
+			m.panes.have, m.panes.lines, m.panes.err = msg.key, lines, ""
 			if msg.err != nil {
-				m.panes.err = msg.err.Error()
+				m.panes.err = view.Clean(msg.err.Error())
 			}
 			m.relayout()
 		}
@@ -1146,6 +1152,10 @@ func (m *Model) panel() string {
 	if !ok {
 		return ""
 	}
+	// What the panel says of the call is the model's and the policy's:
+	// cleaned, so a carriage return or a sequence in it cannot draw over
+	// the panel's own lines.
+	p.Name, p.Args, p.Question, p.Subject = view.Clean(p.Name), view.Clean(p.Args), view.Clean(p.Question), view.Clean(p.Subject)
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Permission requested") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Permissions)) + "): " + p.Name)
 	if p.Args != "" {
@@ -1163,6 +1173,7 @@ func (m *Model) panel() string {
 		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
 	}
 	o := m.offers[p.CallID]
+	o.Rule = view.Clean(o.Rule)
 	switch {
 	case m.refusing == client.VerdictRefuse:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
@@ -1193,20 +1204,23 @@ func (m *Model) questionPanel(q agentturn.Question, i int) string {
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Question") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Questions)) + ")")
 	if c := q.Call; c != nil {
-		b.WriteString(": " + c.Name)
+		b.WriteString(": " + view.Clean(c.Name))
 		if len(c.Args) > 0 {
-			b.WriteString(" " + clipLine(string(c.Args), false))
+			b.WriteString(" " + clipLine(view.Clean(string(c.Args)), false))
 		}
 	}
-	e := q.Elicitation
-	if e.Message != "" {
-		b.WriteString("\n  " + e.Message)
+	// The question, its subject and its address are the tool's.
+	msg, url := view.Clean(q.Elicitation.Message), view.Clean(q.Elicitation.URL)
+	if msg != "" {
+		b.WriteString("\n  " + msg)
 	}
-	if c := q.Call; c != nil && c.Decision != nil && c.Decision.Subject != "" && !strings.Contains(e.Message, c.Decision.Subject) {
-		b.WriteString("\n  about: " + c.Decision.Subject)
+	if c := q.Call; c != nil && c.Decision != nil {
+		if s := view.Clean(c.Decision.Subject); s != "" && !strings.Contains(msg, s) {
+			b.WriteString("\n  about: " + s)
+		}
 	}
-	if e.URL != "" {
-		b.WriteString("\n  " + e.URL)
+	if url != "" {
+		b.WriteString("\n  " + url)
 	}
 	switch {
 	case m.refusingQ:
@@ -1262,7 +1276,8 @@ func (m *Model) frame() string {
 		parts = append(parts, p)
 	}
 	if m.err != "" {
-		parts = append(parts, errStyle.Render(truncate(m.err, m.width)))
+		// An error's text is a provider's, a tool's or a controller's.
+		parts = append(parts, errStyle.Render(truncate(view.Clean(m.err), m.width)))
 	}
 	// A blank line keeps the run line off what is above it.
 	parts = append(parts, "", runLine(state, runPhase(m.view), runFigures(m.view, state, now), m.spinner.View(), m.width))

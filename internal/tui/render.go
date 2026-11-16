@@ -193,7 +193,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		// The agent writes markdown, and is shown it rendered; what the
 		// user typed is shown as typed.
 		var label string
-		body := it.Text()
+		body := view.Clean(it.Text())
 		switch {
 		case it.Role == openresponses.RoleUser:
 			label = wordsLabel(row.Words, row.Provenance)
@@ -205,7 +205,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		default:
 			label = dimStyle.Render(string(it.Role))
 		}
-		if r := refusals(it); r != "" {
+		if r := view.Clean(refusals(it)); r != "" {
 			if body != "" {
 				body += "\n"
 			}
@@ -217,6 +217,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		if text == "" {
 			text = it.Content.Text()
 		}
+		text = view.Clean(text)
 		if !o.reasoning {
 			n := len([]rune(text))
 			if row.Live && row.Open {
@@ -229,13 +230,13 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		if row.Call != nil {
 			return renderCall(*row.Call, o, tools, tag, 0, spin)
 		}
-		return toolStyle.Render("○ "+it.Name) + tag + " " + it.Arguments
+		return toolStyle.Render("○ "+view.Clean(it.Name)) + tag + " " + view.Clean(it.Arguments)
 	case *openresponses.FunctionCallOutput:
-		return toolStyle.Render("↳ result "+it.CallID) + tag + "\n" + clip(it.Output.String(), o.output)
+		return toolStyle.Render("↳ result "+view.Clean(it.CallID)) + tag + "\n" + clip(view.Clean(it.Output.String()), o.output)
 	case *openresponses.Compaction:
 		return dimStyle.Render("[compaction]") + tag
 	}
-	return dimStyle.Render("["+row.Item.ItemType()+"]") + tag
+	return dimStyle.Render("["+view.Clean(row.Item.ItemType())+"]") + tag
 }
 
 // refusals is the text of a message's refusal parts, joined by
@@ -281,7 +282,7 @@ func runEndNote(m view.Model) string {
 		}
 		s += " (" + strings.Join(keys, ", ") + ")"
 	}
-	return warnStyle.Render(s)
+	return warnStyle.Render(view.Clean(s))
 }
 
 // lastEnd is how the last run on the viewed line ended, while nothing
@@ -337,6 +338,11 @@ func anyMoving(m view.Model) bool {
 // the name, the state and the client's notes are the client's always.
 func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string) string {
 	pad := strings.Repeat("  ", depth)
+	// The renderer reads the call as recorded; what the client draws of
+	// it is cleaned (view.Clean), and the renderer's spans in drawLine.
+	raw := c
+	c.Name, c.Args, c.Output, c.Partial = view.Clean(c.Name), view.Clean(c.Args), view.Clean(c.Output), view.Clean(c.Partial)
+	c.Reason, c.Withdrawn, c.Verdict = view.Clean(c.Reason), view.Clean(c.Withdrawn), view.Clean(c.Verdict)
 	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
 	switch {
 	case moving(c):
@@ -344,9 +350,9 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	case c.State == view.CallDeferred && !c.HeldBeside:
 		name = warnStyle.Render("◆ " + c.Name)
 	}
-	r := tools[c.Name]
-	rhead, custom := toolHead(r, c)
-	body, hasBody := toolBody(r, c, o.output)
+	r := tools[raw.Name]
+	rhead, custom := toolHead(r, raw)
+	body, hasBody := toolBody(r, raw, o.output)
 	var b strings.Builder
 	if o.output {
 		// Expanded: the raw arguments on their own line, and the whole
@@ -489,11 +495,13 @@ func toolBody(r toolview.Renderer, c view.Call, expanded bool) (ls []toolview.Li
 }
 
 // drawLine draws a renderer's line in the client's styles, a newline in
-// a span as a space.
+// a span as a space. A span's text is cleaned (view.Clean): a renderer
+// draws the call's arguments and output, which the model and the tool
+// wrote.
 func drawLine(l toolview.Line) string {
 	var b strings.Builder
 	for _, s := range l {
-		t := strings.ReplaceAll(s.Text, "\n", " ")
+		t := view.Clean(strings.ReplaceAll(s.Text, "\n", " "))
 		switch s.Role {
 		case toolview.Dim:
 			t = dimStyle.Render(t)
@@ -528,7 +536,7 @@ func countHint(n int) string {
 func compactArgs(raw string) string {
 	var m map[string]any
 	if json.Unmarshal([]byte(raw), &m) != nil {
-		return clipLine(raw, false)
+		return clipLine(view.Clean(raw), false)
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -543,7 +551,7 @@ func compactArgs(raw string) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s=%q", k, v))
 	}
-	return strings.Join(parts, " ")
+	return view.Clean(strings.Join(parts, " "))
 }
 
 // lastLines is the last n lines of s, in the order they read, with the
@@ -684,9 +692,9 @@ func runPhase(m view.Model) string {
 		if c := row.Call; c != nil {
 			switch c.State {
 			case view.CallRunning:
-				running = append(running, c.Name)
+				running = append(running, view.Clean(c.Name))
 			case view.CallOpen:
-				calling = append(calling, c.Name)
+				calling = append(calling, view.Clean(c.Name))
 			}
 			continue
 		}
@@ -862,7 +870,7 @@ func trustTag(p *view.Provenance) string {
 	if p == nil || p.Trust == nil || len(p.Trust.Reads) == 0 {
 		return ""
 	}
-	return dimStyle.Render(" (" + strings.Join(p.Trust.Reads, ", ") + ")")
+	return dimStyle.Render(view.Clean(" (" + strings.Join(p.Trust.Reads, ", ") + ")"))
 }
 
 // provenanceText says where a message the host composed came from, and
@@ -889,5 +897,5 @@ func provenanceText(p *view.Provenance) string {
 	if len(parts) == 0 {
 		parts = append(parts, "composed by the host")
 	}
-	return strings.Join(parts, ", ") + ": not your words"
+	return view.Clean(strings.Join(parts, ", ") + ": not your words")
 }

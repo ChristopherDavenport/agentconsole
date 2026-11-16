@@ -156,7 +156,9 @@ func (c StatusConfig) pieces(in statusIn) []piece {
 			text, value, known := c.builtin(name, in)
 			p = piece{name: name, text: text, color: c.color(name, value, known)}
 		}
-		if p.text != "" {
+		// The model's name, a model unpriced, and a host segment's text
+		// may come from a provider or the record.
+		if p.text = view.Clean(p.text); p.text != "" {
 			ps = append(ps, p)
 		}
 	}
@@ -449,6 +451,9 @@ func (m *Model) statusRowsUsed() int {
 // drawLine draws one status row: pre, the pieces and post, cut to the
 // width at a piece and filled to it.
 func (m *Model) drawLine(pre string, ps []piece, post string) string {
+	// The notices carry errors and a viewed session's title, which may
+	// name a peer's address.
+	pre, post = view.Clean(pre), view.Clean(post)
 	w := max(m.width, 1)
 	draw := m.drawPlain
 	if m.status.Powerline {

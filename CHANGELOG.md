@@ -5,6 +5,22 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Security (#56): text the client did not write no longer reaches the
+  terminal with control characters in it. A carriage return or an SGR
+  in a call's policy subject could draw over the permission panel's
+  "about:" line, and an OSC 8 link, a cursor move, a window title or a
+  clipboard write in model or tool text was passed to the terminal's
+  renderer. Every C0 control but newline and tab, DEL, every C1 control
+  and the bidirectional formatting characters are now dropped before
+  styling or Markdown, in the transcript (messages, refusals, reasoning,
+  calls and outputs, a renderer's spans), the run's end note, the
+  permission and question panels, run and stream errors, the tree, the
+  record panes, the status line, the queued, submit and completion
+  lines. Added `view.Clean`, the one cleaner, for an embedder to use
+  too.
+
 ## v0.0.17 - 2026-11-15
 
 - Dependencies: agentkit v0.0.19, agentmemory v0.0.13, agentsession

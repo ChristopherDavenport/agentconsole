@@ -1804,6 +1804,49 @@ no RFC rule.
 - **`client.Copy` copies `RunEnd.Incomplete`.** The details and their
   extension members are the agent's.
 
+## Decided in implementation, control characters in untrusted text
+
+agentconsole#56. The rule, from its vetting: a client MUST NOT write
+text it did not author (model, tool, provider, MCP-server and peer text,
+and what the record holds of it) to a terminal with any C0 control
+except newline and tab, with DEL, with a C1 control, or with a
+bidirectional formatting character (U+061C, U+200E-F, U+202A-E,
+U+2066-9). It removes each one before it styles or renders Markdown.
+No RFC holds it; it is this plan's.
+
+- **Why the renderer is not enough.** Bubble Tea v2's cell renderer
+  (ultraviolet) acts on SGR and OSC 8 in any text, takes `\r` as a
+  return to the row's start, and passes bidi controls through. It drops
+  cursor moves, erases, titles and OSC 52 only because of its own TODO,
+  which a dependency bump could undo. A `\r` in a call's policy subject
+  rewrote the permission panel's "about:" line.
+- **`view.Clean`, exported.** One function, dax's `internal/render.Clean`
+  set, so dax imports it and drops its copy. It lives in `view` because
+  `view` is what a client renders, and the TUI and `console` can both
+  reach it (`console` imports `internal/tui`, so it could not live
+  there). A removed character is dropped, as dax does, not shown as
+  `^[` or a glyph: dropping the ESC alone leaves a sequence's body as
+  inert text, and keeps a sequence cut in two by streaming deltas from
+  working. A byte that is not UTF-8 becomes U+FFFD (a raw 0x9b is CSI to
+  a terminal in 8-bit mode), which dax's copy did not do. A string with
+  nothing to remove is returned as it is.
+- **At each leaf, before styling.** The cleaning is where an untrusted
+  string meets the client's styles: a message's text before glamour
+  (glamour's own OSC 8 links and styles still render), refusals,
+  reasoning, a call's name, arguments, output, progress, reason,
+  verdict and withdrawal (the renderer is handed the call as recorded,
+  and each span it returns is cleaned in `drawLine`), the run's end
+  note, both panels (name, arguments, question, subject, URL, the
+  host's rule), `m.err`, the status line's segments and notices (the
+  feed's error, a viewed session's title), the tree's lines, the record
+  panes' lines (cleaned when they arrive), `shortID`, and the queued,
+  submit and completion lines. The model is not cleaned as a whole:
+  the record keeps what was written, a pane or a copy of the transcript
+  reads the view's strings, and the view stays the record's projection.
+- **What the input keeps.** The person's input is the textarea's, whose
+  sanitizer removes C0 and C1 controls from typing, a paste and a
+  completion put in with Tab, but not bidi controls.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

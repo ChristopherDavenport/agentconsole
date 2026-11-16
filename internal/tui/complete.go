@@ -21,6 +21,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // Completing is the input as the host is asked to complete it.
@@ -194,6 +196,14 @@ func (m *Model) completionLines() []string {
 	if len(items) > completeRows {
 		from = min(max(m.comp.at-completeRows/2, 0), len(items)-completeRows)
 	}
+	// A completion is the host's, and may be a file's name: what is
+	// drawn of it is cleaned; what Tab inserts goes through the input's
+	// own sanitizer.
+	shown := make([]Completion, len(items))
+	for i, c := range items {
+		shown[i] = Completion{Text: view.Clean(c.Text), Help: view.Clean(c.Help)}
+	}
+	items = shown
 	width := 0
 	for _, c := range items[from:min(from+completeRows, len(items))] {
 		width = max(width, lipgloss.Width(c.Text))

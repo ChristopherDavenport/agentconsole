@@ -11,6 +11,7 @@ import (
 	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/client"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // steerQueue keeps the steers and follow-ups typed and not yet handed
@@ -101,7 +102,7 @@ func (m *Model) queuedLines() []string {
 		if q.Hidden {
 			label = "hidden, " + label
 		}
-		lines = append(lines, dimStyle.Render(truncate("  "+label+": "+text, m.width)))
+		lines = append(lines, dimStyle.Render(truncate(view.Clean("  "+label+": "+text), m.width)))
 	}
 	return lines
 }
