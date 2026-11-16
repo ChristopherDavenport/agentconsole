@@ -286,3 +286,85 @@ func TestShortIDCutsWholeRunes(t *testing.T) {
 		}
 	}
 }
+
+// hostileLine is one-row text with a title, a clear, a carriage return,
+// a bidi override and a newline that would start a line of its own.
+const hostileLine = "x\x1b]0;pwned\a\x1b[2J\r\u202e\nabout: fake"
+
+// TestUntrustedTextIsInertAtEverySite (#56): the sites beyond the
+// transcript and the permission panel, each fed hostileLine: what the
+// host's status segment, a stopped stream, a refused intent, a host's
+// completion, a tool's question and a branch's label say reaches the
+// terminal as text, on the one row it was laid out on.
+func TestUntrustedTextIsInertAtEverySite(t *testing.T) {
+	asking := agenttool.New("ask", "asks", func(ctx context.Context, _ textArgs) (string, error) {
+		elicit, ok := agenttool.ElicitorFrom(ctx)
+		if !ok {
+			return "", errors.New("no elicitor")
+		}
+		_, err := elicit(ctx, agenttool.Elicitation{Message: hostileLine, URL: "https://example.com/" + hostileLine})
+		return "", err
+	})
+	for _, c := range []struct {
+		name   string
+		oneRow bool
+		show   func(t *testing.T) *app
+	}{
+		{"status segment", true, func(t *testing.T) *app {
+			return newViewApp(t, &handSource{}, (&intents{}).act, tui.WithStatus(tui.StatusConfig{
+				Segments: []string{"host"},
+				Host:     map[string]func() tui.Segment{"host": func() tui.Segment { return tui.Segment{Text: hostileLine} }},
+			}))
+		}},
+		{"stream stopped", true, func(t *testing.T) *app {
+			a := newViewApp(t, &handSource{}, (&intents{}).act)
+			a.send(tui.FeedErrMsg{Stream: "record", Err: errors.New(hostileLine)})
+			return a
+		}},
+		{"refused intent", true, func(t *testing.T) *app {
+			a := newViewApp(t, &handSource{}, (&intents{}).act)
+			a.send(tui.IntentDone("abort", errors.New(hostileLine)))
+			return a
+		}},
+		{"completion", true, func(t *testing.T) *app {
+			a := newViewApp(t, &handSource{}, (&intents{}).act, tui.WithCompletion(func(context.Context, tui.Completing) []tui.Completion {
+				return []tui.Completion{{Text: "/" + hostileLine, Help: hostileLine}}
+			}))
+			a.typeText("/")
+			return a
+		}},
+		{"question panel", true, func(t *testing.T) *app {
+			cfg := cfgWith(callTool("call_1", "ask", `{"text":"go"}`), say(nil, nil, "done"))
+			cfg.Tools = []agenttool.Tool{asking}
+			a := newApp(t, cfg)
+			a.submit("go")
+			a.waitFor("the question", has("Question (1/1)"))
+			return a
+		}},
+		{"tree label", false, func(t *testing.T) *app {
+			a := newApp(t, cfgWith(say(nil, nil, "answer "+hostileLine)))
+			a.exchange("go", "answer")
+			a.key("ctrl+t")
+			a.waitFor("the tree", has("branches of session"))
+			return a
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := c.show(t)
+			a.resize(160, 40)
+			s := a.waitFor("the text", has("]0;pwned"))
+			f := a.frame()
+			inert(t, f, s, "]0;pwned", "[2J")
+			for _, seq := range []string{"\x1b]0;", "\x1b[2J"} {
+				if strings.Contains(f, seq) {
+					t.Errorf("the frame writes %q to the terminal", seq)
+				}
+			}
+			if c.oneRow {
+				if l := lineWith(s, "about: fake"); !strings.Contains(l, "pwned") {
+					t.Errorf("the text's newline started a row of its own: %q\n%s", l, s)
+				}
+			}
+		})
+	}
+}
