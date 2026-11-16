@@ -80,7 +80,7 @@ func (m *Model) edited(msg editedMsg) {
 		m.err = "editor: " + msg.err.Error()
 	} else {
 		m.err = ""
-		m.in.SetValue(strings.TrimSuffix(strings.TrimSuffix(msg.text, "\n"), "\r"))
+		m.setInput(strings.TrimSuffix(strings.TrimSuffix(msg.text, "\n"), "\r"))
 	}
 	m.relayout()
 }

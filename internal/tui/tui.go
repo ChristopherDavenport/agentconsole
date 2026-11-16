@@ -31,6 +31,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
 
@@ -280,6 +281,9 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 	in.ShowLineNumbers = false
 	in.MaxHeight = inputMaxRows
 	in.KeyMap.InsertNewline.SetEnabled(false)
+	// ctrl+v is the model's (readClipboard), so the clipboard's text
+	// arrives as a tea.PasteMsg and is held to what a paste is.
+	in.KeyMap.Paste.SetEnabled(false)
 	in.CharLimit = 0
 	in.SetStyles(inputStyles(true))
 	in.Focus()
@@ -514,7 +518,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The steer was not queued: give its text back to edit or
 			// send again, unless something else is being typed.
 			if m.in.Value() == "" {
-				m.in.SetValue(msg.text)
+				m.setInput(msg.text)
 			}
 		}
 		m.relayout()
@@ -835,6 +839,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.settling() {
 		return m, m.keyBeforeSettle(msg)
 	}
+	if msg.String() == "ctrl+v" {
+		return m, m.readClipboard()
+	}
 	if q, _, ok := m.question(); ok {
 		return m.questionKey(msg, q)
 	}
@@ -854,6 +861,22 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, m.updateInput(msg)
+}
+
+// readClipboard reads the system clipboard, as the textarea's own ctrl+v
+// did, and hands its text back as a tea.PasteMsg: the read takes a
+// command (xclip, wl-paste, pbpaste), and the person may have left the
+// conversation by the time it answers, so the text goes through paste,
+// which puts it in the input only while the input is on screen. A
+// clipboard that cannot be read pastes nothing, as before.
+func (m *Model) readClipboard() tea.Cmd {
+	return func() tea.Msg {
+		s, err := clipboard.ReadAll()
+		if err != nil || s == "" {
+			return nil
+		}
+		return tea.PasteMsg{Content: s}
+	}
 }
 
 // newline breaks the input's line at the cursor, as a pasted line break
@@ -1373,11 +1396,14 @@ func (m *Model) typing() bool {
 // updateInput edits the input and then lays the screen out again. The
 // textarea is given its full height first, so its own scroll follows the
 // cursor while the key is applied; relayout shrinks the box to what the
-// value actually needs.
+// value actually needs. Whatever the message put in (a typed key, a
+// paste, ctrl+v's read of the clipboard) then loses its bidi controls
+// (dropBidi).
 func (m *Model) updateInput(msg tea.Msg) tea.Cmd {
 	m.in.SetHeight(inputMaxRows)
 	var cmd tea.Cmd
 	m.in, cmd = m.in.Update(msg)
+	m.dropBidi()
 	m.relayout()
 	return tea.Batch(cmd, m.askCompletion())
 }
@@ -1487,7 +1513,7 @@ func (m *Model) beginAnswerText() {
 func (m *Model) endAnswerText() {
 	m.in.Reset()
 	if m.draft != "" {
-		m.in.SetValue(m.draft)
+		m.setInput(m.draft)
 		m.draft = ""
 	}
 }

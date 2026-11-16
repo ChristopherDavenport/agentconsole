@@ -46,16 +46,16 @@ func (m *Model) walkHistory(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			h.draft = m.in.Value()
 		}
 		h.at--
-		m.in.SetValue(h.lines[h.at])
+		m.setInput(h.lines[h.at])
 	case tea.KeyDown:
 		if !m.onLastRow() || h.at == len(h.lines) {
 			return nil, false
 		}
 		h.at++
 		if h.at == len(h.lines) {
-			m.in.SetValue(h.draft)
+			m.setInput(h.draft)
 		} else {
-			m.in.SetValue(h.lines[h.at])
+			m.setInput(h.lines[h.at])
 			m.in.MoveToBegin()
 		}
 	default:

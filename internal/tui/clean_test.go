@@ -1,11 +1,17 @@
 package tui_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -449,4 +455,274 @@ func TestACutPanelFieldIsWholeUnderCtrlO(t *testing.T) {
 		a.key("ctrl+o")
 		a.waitFor("the tool's question whole", has("ELICIT-TAIL", "URL-TAIL"))
 	})
+}
+
+// TestTheInputTakesNoBidiControls: the textarea's own sanitizer drops C0
+// and C1 controls but keeps the bidi formatting characters, so a paste,
+// a host's completion put in with Tab and a line from the host's history
+// could each put a right-to-left override into the input line. None
+// reaches the frame or the prompt sent; ordinary Unicode of any script
+// is kept.
+func TestTheInputTakesNoBidiControls(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	complete := func(_ context.Context, c tui.Completing) []tui.Completion {
+		if strings.HasPrefix(c.Word, "@d") {
+			return []tui.Completion{{Text: "@\u2066doc\u2069\u202e.md"}}
+		}
+		return nil
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithCompletion(complete),
+		tui.WithHistory([]string{"\u200fpast \u061cline"}, func(string) {}))
+	noBidi := func(what, s string) { t.Helper(); noBidiIn(t, what, s) }
+
+	// A paste; an emoji joined with ZWJ is kept whole.
+	a.paste("say \u202eevil\u202c ok \u200e— שלום 日本 héllo " + coder)
+	s := a.waitFor("the paste", has("שלום 日本 héllo"))
+	noBidi("the frame after a paste", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "say evil ok — שלום 日本 héllo "+coder) {
+		t.Errorf("the input is %q, want the paste less its bidi controls", in)
+	}
+	a.key("enter")
+	in, ok := ctl.next(t, 1).(client.Prompt)
+	if !ok || len(in.Items) != 1 {
+		t.Fatalf("intent = %#v, want a prompt", in)
+	}
+	noBidi("the prompt sent", itemJSON(t, in.Items[0]))
+
+	// A completion put in with Tab.
+	a.typeText("open @d")
+	a.waitFor("the completion", has("@doc.md"))
+	a.key("tab")
+	s = a.waitFor("the completion put in", func(s string) bool { return strings.Contains(inputLine(s), "open @doc") })
+	noBidi("the frame after a completion", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "open @doc.md") {
+		t.Errorf("the input is %q, want the completion less its bidi controls", in)
+	}
+
+	// A line from the host's history, older than the prompt sent.
+	for range []rune("open @doc.md") {
+		a.key("backspace")
+	}
+	a.key("up")
+	a.waitFor("the prompt sent", func(s string) bool { return strings.Contains(inputLine(s), "say evil") })
+	a.key("up")
+	s = a.waitFor("the history", func(s string) bool { return strings.Contains(inputLine(s), "line") })
+	noBidi("the frame after the history", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "past line") {
+		t.Errorf("the input is %q, want the history line less its bidi controls", in)
+	}
+}
+
+// TestNoBidiDropsWhatCleanDrops: the input's bidi filter drops a
+// character outside the C0 and C1 controls, which the textarea drops
+// itself, exactly when view.Clean does, so the two sets cannot drift.
+func TestNoBidiDropsWhatCleanDrops(t *testing.T) {
+	for r := rune(0); r <= utf8.MaxRune; r++ {
+		if r < 0x20 || r >= 0x7f && r <= 0x9f || r >= 0xd800 && r <= 0xdfff {
+			continue
+		}
+		s := string(r)
+		if got, want := tui.NoBidi(s) == "", view.Clean(s) == ""; got != want {
+			t.Errorf("U+%04X: the input drops it %v, Clean drops it %v", r, got, want)
+		}
+	}
+}
+
+// coder is an emoji ZWJ sequence, woman and laptop joined by U+200D,
+// which the input keeps whole.
+const coder = "\U0001F469\u200d\U0001F4BB"
+
+// noBidiIn fails t when s holds one of the bidi formatting characters
+// view.Clean removes.
+func noBidiIn(t *testing.T, what, s string) {
+	t.Helper()
+	for _, c := range []string{"\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"} {
+		if strings.Contains(s, c) {
+			t.Errorf("%s holds %q", what, c)
+		}
+	}
+}
+
+// TestTypedBidiNeverReachesTheInput: a key whose text is a bidi control
+// (an RLM key of a Hebrew or Arabic layout, an IME, a paste arriving as
+// keys where the terminal has no bracketed paste) is dropped, and the
+// cursor stays where the person's text puts it: a key typed after it
+// lands next to the text before it.
+func TestTypedBidiNeverReachesTheInput(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	a := newViewApp(t, src, ctl.act)
+	a.typeText("one two")
+	for range len("two") {
+		a.key("left")
+	}
+	a.typeText("\u202eX\u2067Y ")
+	s := a.waitFor("the typed text", func(s string) bool { return strings.Contains(inputLine(s), "XY") })
+	noBidiIn(t, "the frame", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "one XY two") {
+		t.Errorf("the input is %q, want %q", in, "one XY two")
+	}
+	a.key("enter")
+	in, ok := ctl.next(t, 1).(client.Prompt)
+	if !ok || len(in.Items) != 1 {
+		t.Fatalf("intent = %#v, want a prompt", in)
+	}
+	noBidiIn(t, "the prompt sent", itemJSON(t, in.Items[0]))
+}
+
+// inFakeClipboard runs the calling test again in a child process whose
+// clipboard is a fake xclip, first on PATH, printing content, and says
+// whether this is that child. The clipboard library finds its command
+// when the process starts, so a fake must be on PATH before then. In the
+// parent it returns false once the child passed, and fails t otherwise;
+// it skips where the fake cannot run (not Linux, a noexec temp dir).
+func inFakeClipboard(t *testing.T, content string) bool {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("the fake clipboard is xclip's")
+	}
+	if os.Getenv("AGENTCONSOLE_FAKE_CLIPBOARD") == t.Name() {
+		return true
+	}
+	bin := t.TempDir()
+	xclip := filepath.Join(bin, "xclip")
+	if err := os.WriteFile(xclip, []byte("#!/bin/sh\nprintf '%s' \"$AGENTCONSOLE_CLIPBOARD_TEXT\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command(xclip).Run(); err != nil {
+		t.Skipf("the fake clipboard cannot run here: %v", err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), "AGENTCONSOLE_FAKE_CLIPBOARD="+t.Name(), "AGENTCONSOLE_CLIPBOARD_TEXT="+content,
+		"WAYLAND_DISPLAY=", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil || !bytes.Contains(out, []byte("--- PASS: "+t.Name())) {
+		t.Fatalf("the run with the fake clipboard: %v\n%s", err, out)
+	}
+	return false
+}
+
+// TestCtrlVPasteTakesNoBidi: ctrl+v reads the system clipboard into the
+// input; a clipboard holding a bidi override puts none in it.
+func TestCtrlVPasteTakesNoBidi(t *testing.T) {
+	if !inFakeClipboard(t, "say \u202eevil\u202c ok") {
+		return
+	}
+	src := &handSource{}
+	ctl := &intents{}
+	a := newViewApp(t, src, ctl.act)
+	a.key("ctrl+v")
+	s := a.waitFor("the clipboard pasted", func(s string) bool { return strings.Contains(inputLine(s), "ok") })
+	noBidiIn(t, "the frame", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "say evil ok") {
+		t.Errorf("the input is %q, want the clipboard less its bidi controls", in)
+	}
+}
+
+// TestCtrlVPasteWaitsForTheInput: the clipboard is read in a command, so
+// its text arrives after the key. If the person has left the
+// conversation by then (the tree, here), the text is not put in the
+// input the screen hides, as a paste on that screen is not.
+func TestCtrlVPasteWaitsForTheInput(t *testing.T) {
+	if !inFakeClipboard(t, "PASTED-LATE") {
+		return
+	}
+	src := &handSource{}
+	ctl := &intents{}
+	a := newViewApp(t, src, ctl.act)
+	a.mu.Lock()
+	_, cmd := a.m.Update(keyPress(t, "ctrl+v"))
+	a.mu.Unlock()
+	a.key("ctrl+t")
+	a.waitFor("the tree", has("branches of session"))
+	var deliver func(tea.Cmd)
+	deliver = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		switch msg := c().(type) {
+		case nil:
+		case tea.BatchMsg:
+			for _, c := range msg {
+				deliver(c)
+			}
+		default:
+			a.send(msg)
+		}
+	}
+	deliver(cmd)
+	a.key("ctrl+t")
+	s := a.waitFor("the conversation", has("> "))
+	if strings.Contains(s, "PASTED-LATE") {
+		t.Errorf("the clipboard's text landed in the input the tree hid:\n%s", s)
+	}
+}
+
+// TestEditedTextTakesNoBidi: what the editor saved goes into the input
+// less its bidi controls.
+func TestEditedTextTakesNoBidi(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	script := filepath.Join(t.TempDir(), "ed.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'edited \\342\\200\\256evil\\n' >> \"$1\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", script)
+	a := newAppWith(t, cfgWith(say(nil, nil, "hi")), nil, nil, tui.WithExec(runAtOnce))
+	a.typeText("a draft")
+	a.key("ctrl+g")
+	s := a.waitFor("the edited input", has("a draft", "edited"))
+	noBidiIn(t, "the frame", a.frame())
+	if !strings.Contains(s, "edited evil") {
+		t.Errorf("the edited line is not in the input less its bidi control:\n%s", s)
+	}
+}
+
+// TestARefusedLineComesBackWithoutBidi: a bidi control typed into a line
+// the host then refuses was never in the line: the host is not handed
+// it and the line given back holds none.
+func TestARefusedLineComesBackWithoutBidi(t *testing.T) {
+	var seen []tui.Line
+	var mu sync.Mutex
+	a := newAppWith(t, cfgWith(say(nil, nil, "unused")), nil, nil, tui.WithSubmit(harness(&seen, &mu)))
+	a.submit("/fail \u202enow")
+	a.waitFor("the error and the line back in the input", has("submit: no such command", "> /fail now"))
+	noBidiIn(t, "the frame", a.frame())
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 {
+		t.Fatalf("the host was handed %d lines, want 1", len(seen))
+	}
+	noBidiIn(t, "the line the host was handed", seen[0].Text)
+}
+
+// TestADraftComesBackWithoutBidi: the draft kept through a refusal's
+// reason comes back with no bidi control, and so does the reason.
+func TestADraftComesBackWithoutBidi(t *testing.T) {
+	release := make(chan struct{})
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "done"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	cfg.BeforeToolCall = func(ctx context.Context, _ agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "may I?"}, nil
+	}
+	a := newApp(t, cfg)
+	a.submit("go")
+	a.typeText("a \u202edraft " + coder)
+	close(release)
+	a.waitFor("the permission", has("Permission requested"))
+	a.rune('n')
+	a.typeText("not \u2066now")
+	a.waitFor("the reason", func(s string) bool { return strings.Contains(inputLine(s), "not now") })
+	noBidiIn(t, "the frame with the reason", a.frame())
+	a.key("enter")
+	s := a.waitFor("the draft back", func(s string) bool { return strings.Contains(inputLine(s), "draft") })
+	noBidiIn(t, "the frame with the draft back", a.frame())
+	if in := inputLine(s); !strings.Contains(in, "a draft "+coder) {
+		t.Errorf("the input is %q, want the draft less its bidi control", in)
+	}
 }

@@ -109,6 +109,13 @@ and `view.CleanLine` (its one-row form) are exported for an embedder to
 use on what it writes to the terminal itself (printed output, an ACP
 title).
 
+The input line takes no bidi control either. A typed key, a paste
+(bracketed, or ctrl+v's read of the clipboard), a completion put in
+with Tab, a line from the host's history, the editor's text and a line
+given back after a refusal all lose the same bidirectional formatting
+characters, and the input's own sanitizer drops the C0 and C1 controls,
+so what is about to be sent reads as it is.
+
 ## Usage
 
 ```sh

@@ -1871,7 +1871,22 @@ No RFC holds it; it is this plan's.
   messages, reasoning, arguments expanded, outputs.
 - **What the input keeps.** The person's input is the textarea's, whose
   sanitizer removes C0 and C1 controls from typing, a paste and a
-  completion put in with Tab, but not bidi controls.
+  completion put in with Tab, but not bidi controls. So the model takes
+  Clean's bidi set out of the input after every message the textarea
+  takes (`dropBidi`, in `updateInput`), whatever its type: a typed key
+  (an RLM key, an IME, a paste arriving as keys without bracketed
+  paste) and a `tea.PasteMsg`. The cursor stays where the person's
+  text puts it. ctrl+v is the model's, not the textarea's (whose own
+  binding is off): it reads the clipboard in a command and hands the
+  text back as a `tea.PasteMsg`, so it goes through `paste` and its
+  `typing()` check when it arrives, and a clipboard answering after
+  the person left the conversation does not fill the hidden input. What the model
+  puts in itself does not pass through the textarea's Update, so a
+  completion Tab inserts and every value it sets (`setInput`: the
+  host's history, the editor's text, a refused line or steer given
+  back, the draft) are filtered as they go in. A bidi override there
+  would make the line about to be sent read as another. A test holds
+  the filter's set to Clean's.
 
 ## Open questions
 

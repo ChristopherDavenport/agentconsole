@@ -20,3 +20,6 @@ func IntentDone(kind string, err error) tea.Msg { return intentDoneMsg{kind: kin
 
 // ShortID is nav.go's ID cutter, for tests.
 var ShortID = shortID
+
+// NoBidi is input.go's bidi filter, for tests.
+var NoBidi = noBidi

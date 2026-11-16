@@ -109,7 +109,7 @@ func (m *Model) submitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 		// Nothing was sent: give the line back to edit or send again,
 		// unless something else is being typed.
 		if m.in.Value() == "" {
-			m.in.SetValue(msg.text)
+			m.setInput(msg.text)
 		}
 	default:
 		if msg.s.Reply != "" {

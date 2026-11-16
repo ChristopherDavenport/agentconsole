@@ -5,6 +5,23 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+- Security: the input line no longer takes a bidi control. The
+  textarea's own sanitizer drops C0 and C1 controls but kept U+061C,
+  U+200E-F, U+202A-E and U+2066-9, so a typed key, a paste (ctrl+v's
+  read of the clipboard included), a host's completion put in with Tab
+  or a line from the host's history could put a right-to-left override
+  in the line about to be sent. Each now loses the bidi set
+  `view.Clean` removes, as do the editor's text and a line given back
+  after a refusal, and the cursor stays where the text puts it; every
+  other character is kept.
+- Fixed: ctrl+v's paste of the clipboard is the client's, not the
+  textarea's: the clipboard's text, read in a command, arrives as a
+  paste and is put in the input only if the input is still on screen,
+  so switching to the tree or a read-only view before it answers no
+  longer fills the hidden input.
+
 ## v0.0.18 - 2026-11-16
 
 - Dependencies: agentkit v0.0.20, agentmemory v0.0.14, agentsession
