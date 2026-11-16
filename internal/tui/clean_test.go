@@ -89,22 +89,29 @@ func TestAPermissionSubjectCannotRewriteThePanel(t *testing.T) {
 	go func() { _, err := p.Run(); done <- err }()
 
 	pw.Write([]byte("go\r"))
+	// Wait for the about line to read as the whole subject, the part that
+	// differs from a spoofed line: the renderer writes only the cells
+	// that change, so a line seen once may not be finished.
+	const want = "about: rm -rf ~/src  about: [1mls -la[0m"
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(out.Screen(), "Permission requested") || !strings.Contains(out.Screen(), "about:") {
+	for {
+		s := out.Screen()
+		l := lineWith(s, "about:")
+		if strings.Contains(l, want) {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no permission panel; screen:\n%s", out.Screen())
+			t.Fatalf("the panel's about line is %q, not the subject as text; screen:\n%s", l, s)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	// Give the renderer a frame or two past the panel's first.
-	time.Sleep(100 * time.Millisecond)
-	s := out.Screen()
-	if l := lineWith(s, "about:"); !strings.Contains(l, "about: rm -rf ~/src  about: [1mls -la[0m") {
-		t.Errorf("the panel's about line is %q, not the subject as text; screen:\n%s", l, s)
-	}
 
 	pw.Write([]byte("n"))
+	deadline = time.Now().Add(10 * time.Second)
 	for ag.State().Running {
+		if time.Now().After(deadline) {
+			t.Fatal("the run did not end after the refusal")
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	time.Sleep(100 * time.Millisecond)
