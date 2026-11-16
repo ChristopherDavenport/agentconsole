@@ -203,7 +203,8 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 			label = assistantStyle.Render("agent")
 			body = md.render(body, width)
 		default:
-			label = dimStyle.Render(string(it.Role))
+			// A role this client does not know is the record's string.
+			label = dimStyle.Render(view.CleanLine(string(it.Role)))
 		}
 		if r := view.Clean(refusals(it)); r != "" {
 			if body != "" {
