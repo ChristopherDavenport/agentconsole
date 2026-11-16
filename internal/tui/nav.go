@@ -563,12 +563,14 @@ func calleeText(l view.Link) string {
 	return text
 }
 
-// shortID is an ID cut for a line, cleaned (view.Clean): an ID on the
-// record is whatever the writer wrote.
+// shortID is an ID cut to eight runes for a line, cleaned to one line
+// (view.CleanLine): an ID on the record is whatever the writer wrote. It
+// is cut between runes, never inside one, so no stray byte of a rune
+// reaches the terminal.
 func shortID(id string) string {
 	id = view.CleanLine(strings.TrimPrefix(id, "sha256:"))
-	if len(id) > 8 {
-		return id[:8]
+	if r := []rune(id); len(r) > 8 {
+		return string(r[:8])
 	}
 	return id
 }

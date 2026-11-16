@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -260,4 +261,21 @@ func TestAMultiLineErrorKeepsTheInputOnScreen(t *testing.T) {
 	a.send(tui.IntentDone("abort", errors.New("upstream said:"+strings.Repeat("\nline of the body", 30))))
 	s := a.waitFor("the error", has("abort: upstream said: line of the body"))
 	fits(t, s, 20)
+}
+
+// TestShortIDCutsWholeRunes (#56): an ID cut for a line is cut between
+// runes, so the cut never leaves a byte that is not UTF-8 (a bare 0x9b
+// is CSI to a terminal in 8-bit mode), and cleaned to one line.
+func TestShortIDCutsWholeRunes(t *testing.T) {
+	for in, want := range map[string]string{
+		"sha256:0123456789abcdef": "01234567",
+		"abc⛛⛛⛛⛛⛛⛛":               "abc⛛⛛⛛⛛⛛",
+		"a\nb\x1b[1mcdefghij":     "a b[1mcd",
+		"short":                   "short",
+	} {
+		got := tui.ShortID(in)
+		if got != want || !utf8.ValidString(got) {
+			t.Errorf("ShortID(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
