@@ -84,10 +84,10 @@ func (m *Model) clickInput(x, y int) {
 // noBidi is s less the bidirectional formatting characters view.Clean
 // removes (U+061C, U+200E-U+200F, U+202A-U+202E, U+2066-U+2069). Text put
 // in the input goes through the textarea's own sanitizer, which drops the
-// C0 and C1 controls but keeps these, so a paste, a host's completion or
-// a line from the host's history could put a right-to-left override in
-// the input line, where it makes what is about to be sent read as
-// something else. Every other character is kept, of any script.
+// C0 and C1 controls but keeps these, so a key, a paste, a host's
+// completion or a line from the host's history could put a right-to-left
+// override in the input line, where it makes what is about to be sent
+// read as something else. Every other character is kept, of any script.
 // TestNoBidiDropsWhatCleanDrops holds the set to view.Clean's.
 func noBidi(s string) string {
 	if strings.IndexFunc(s, isBidi) < 0 {
@@ -105,6 +105,30 @@ func isBidi(r rune) bool {
 	return r == 0x061c || r == 0x200e || r == 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
 }
 
+// dropBidi takes the bidi controls out of the input after the textarea
+// has changed it, and puts the cursor back where the person's text puts
+// it: on the same line, less the controls that were before it. It is the
+// one place every message the textarea takes (a typed key, a paste, the
+// textarea's own ctrl+v paste of the clipboard) is filtered, whatever
+// the message's type.
+func (m *Model) dropBidi() {
+	v := m.in.Value()
+	if strings.IndexFunc(v, isBidi) < 0 {
+		return
+	}
+	row, col := m.in.Line(), m.in.Column()
+	if lines := strings.Split(v, "\n"); row < len(lines) {
+		line := []rune(lines[row])
+		col -= len(line[:min(col, len(line))]) - len([]rune(noBidi(string(line[:min(col, len(line))]))))
+	}
+	m.in.SetValue(noBidi(v))
+	for m.in.Line() > row {
+		m.in.CursorUp()
+	}
+	m.in.SetCursorColumn(col)
+}
+
 // setInput is the textarea's SetValue less the bidi controls: every value
-// the model sets comes through here.
+// the model sets comes through here, as every message comes through
+// dropBidi.
 func (m *Model) setInput(s string) { m.in.SetValue(noBidi(s)) }

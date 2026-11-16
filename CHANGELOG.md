@@ -9,11 +9,13 @@ versions may break the API.
 
 - Security: the input line no longer takes a bidi control. The
   textarea's own sanitizer drops C0 and C1 controls but kept U+061C,
-  U+200E-F, U+202A-E and U+2066-9, so a paste, a host's completion put
-  in with Tab or a line from the host's history could put a
-  right-to-left override in the line about to be sent. Each now loses
-  the bidi set `view.Clean` removes, as do the editor's text and a
-  line given back after a refusal; every other character is kept.
+  U+200E-F, U+202A-E and U+2066-9, so a typed key, a paste (ctrl+v's
+  read of the clipboard included), a host's completion put in with Tab
+  or a line from the host's history could put a right-to-left override
+  in the line about to be sent. Each now loses the bidi set
+  `view.Clean` removes, as do the editor's text and a line given back
+  after a refusal, and the cursor stays where the text puts it; every
+  other character is kept.
 
 ## v0.0.18 - 2026-11-16
 

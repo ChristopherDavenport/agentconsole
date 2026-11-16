@@ -1373,15 +1373,14 @@ func (m *Model) typing() bool {
 // updateInput edits the input and then lays the screen out again. The
 // textarea is given its full height first, so its own scroll follows the
 // cursor while the key is applied; relayout shrinks the box to what the
-// value actually needs. A paste loses its bidi controls first (noBidi).
+// value actually needs. Whatever the message put in (a typed key, a
+// paste, the textarea's own ctrl+v paste) then loses its bidi controls
+// (dropBidi).
 func (m *Model) updateInput(msg tea.Msg) tea.Cmd {
-	if p, ok := msg.(tea.PasteMsg); ok {
-		p.Content = noBidi(p.Content)
-		msg = p
-	}
 	m.in.SetHeight(inputMaxRows)
 	var cmd tea.Cmd
 	m.in, cmd = m.in.Update(msg)
+	m.dropBidi()
 	m.relayout()
 	return tea.Batch(cmd, m.askCompletion())
 }
