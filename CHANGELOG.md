@@ -38,7 +38,10 @@ versions may break the API.
   fields), so a newline in a policy's subject can no longer add an
   "about:" line to the permission panel, and a multi-line error no
   longer pushes the input off the screen. A panel's question, subject
-  and address are cut to three rows.
+  and address are cut to three rows, ending "… (ctrl+o)", and each
+  run of white space in a panel's fields, its arguments included, is
+  drawn as one space, so padding cannot push a command's tail past the
+  cut.
 
 ## v0.0.17 - 2026-11-15
 

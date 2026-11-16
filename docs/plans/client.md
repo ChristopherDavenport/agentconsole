@@ -1858,7 +1858,10 @@ No RFC holds it; it is this plan's.
   wrapped under a two-column indent with the rows they wrap onto
   indented four, so no row of theirs reads as the panel's own, and cut
   to three rows (`panelRows`), so a long one leaves the input its
-  place. Multi-line text keeps its lines where it is shown as a block:
+  place, ending "… (ctrl+o)": the call's row has the whole of it. A
+  panel draws each run of white space in its fields, the arguments
+  included, as one space (`panelText`), so 500 spaces between `ls` and
+  `&& rm -rf ~/src` cannot push the tail past the cut. Multi-line text keeps its lines where it is shown as a block:
   messages, reasoning, arguments expanded, outputs.
 - **What the input keeps.** The person's input is the textarea's, whose
   sanitizer removes C0 and C1 controls from typing, a paste and a

@@ -95,8 +95,10 @@ command read as another. A byte that is not UTF-8 shows as U+FFFD.
 Where the client lays text out as one row (a name, an ID, an error, a
 status segment, a tree line, a completion, what a panel asks about),
 newlines and tabs become spaces too, so the text cannot add a line that
-reads as the client's own; a panel's question, subject and address are
-cut to three rows, so the panel leaves the input its place. The
+reads as the client's own; in a panel, each run of white space is also
+drawn as one space, so padding cannot push a command's tail out of
+sight, and a question, subject or address is cut to three rows, ending
+"… (ctrl+o)", so the panel leaves the input its place. The
 client's own styles, and the links glamour draws in a rendered message,
 are written as before. This applies to a renderer's spans as well, so a
 `toolview.Renderer` need not clean the text it returns. `view.Clean`

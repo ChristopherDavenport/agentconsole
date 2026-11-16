@@ -1153,11 +1153,11 @@ func (m *Model) panel() string {
 		return ""
 	}
 	// What the panel says of the call is the model's and the policy's:
-	// cleaned to one line each (view.CleanLine), so a carriage return, a
-	// sequence or a newline in it cannot draw over the panel's own lines
-	// or add one that reads as the panel's, and each is cut to a few rows.
+	// one line each (panelText), so a carriage return, a sequence or a
+	// newline in it cannot draw over the panel's own lines or add one
+	// that reads as the panel's, and each is cut to a few rows.
 	w := max(m.width, 10)
-	p.Name, p.Args, p.Question, p.Subject = view.CleanLine(p.Name), view.CleanLine(p.Args), view.CleanLine(p.Question), view.CleanLine(p.Subject)
+	p.Name, p.Args, p.Question, p.Subject = panelText(p.Name), panelText(p.Args), panelText(p.Question), panelText(p.Subject)
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Permission requested") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Permissions)) + "): " + p.Name)
 	if p.Args != "" {
@@ -1175,7 +1175,7 @@ func (m *Model) panel() string {
 		b.WriteString("\n  " + warnStyle.Render("it was started before it was held, and may have run"))
 	}
 	o := m.offers[p.CallID]
-	o.Rule = cutField(view.CleanLine(o.Rule), w)
+	o.Rule = cutField(panelText(o.Rule), w)
 	switch {
 	case m.refusing == client.VerdictRefuse:
 		b.WriteString("\n  Reason for refusing (optional), Enter to refuse, Esc to go back")
@@ -1205,8 +1205,17 @@ func (m *Model) panel() string {
 // is about, an address) takes at most.
 const panelRows = 3
 
+// panelText is a panel's field as drawn: cleaned (view.Clean), and each
+// run of white space, newlines and tabs among it, one space, so a run of
+// spaces cannot push the tail of a command past the panel's cut.
+func panelText(s string) string { return strings.Join(strings.Fields(view.Clean(s)), " ") }
+
+// cutMark ends a field the panel cut: the conversation's row of the
+// call has the whole of it under ctrl+o.
+const cutMark = "… (ctrl+o)"
+
 // panelField is a panel's field on rows of its own: a newline, label
-// and s (one line, from view.CleanLine) wrapped to width under a
+// and s (one line, from panelText) wrapped to width under a
 // two-column indent, the rows it wraps onto indented four, so none
 // reads as a field of the panel's own, and cut to panelRows rows, so
 // the panel leaves the input its place however long the field is.
@@ -1217,7 +1226,7 @@ func panelField(label, s string, width int) string {
 	}
 	if len(ls) > panelRows {
 		ls = ls[:panelRows]
-		ls[panelRows-1] = truncate(ls[panelRows-1], max(width-5, 5)) + "…"
+		ls[panelRows-1] = truncate(ls[panelRows-1], max(width-4-lipgloss.Width(cutMark), 5)) + cutMark
 	}
 	return "\n  " + strings.Join(ls, "\n    ")
 }
@@ -1229,7 +1238,7 @@ func cutField(s string, width int) string {
 	if lipgloss.Width(s) <= n {
 		return s
 	}
-	return truncate(s, n-1) + "…"
+	return truncate(s, n-lipgloss.Width(cutMark)) + cutMark
 }
 
 // questionPanel is the panel for a question a running call asked.
@@ -1237,20 +1246,20 @@ func (m *Model) questionPanel(q agentturn.Question, i int) string {
 	var b strings.Builder
 	b.WriteString(warnStyle.Render("Question") + " (" + itoa(i+1) + "/" + itoa(len(m.view.Questions)) + ")")
 	if c := q.Call; c != nil {
-		b.WriteString(": " + view.CleanLine(c.Name))
+		b.WriteString(": " + panelText(c.Name))
 		if len(c.Args) > 0 {
-			b.WriteString(" " + clipLine(view.CleanLine(string(c.Args)), false))
+			b.WriteString(" " + clipLine(panelText(string(c.Args)), false))
 		}
 	}
 	// The question, its subject and its address are the tool's: one
 	// line each, cut to a few rows, as in the permission panel.
 	w := max(m.width, 10)
-	msg, url := view.CleanLine(q.Elicitation.Message), view.CleanLine(q.Elicitation.URL)
+	msg, url := panelText(q.Elicitation.Message), panelText(q.Elicitation.URL)
 	if msg != "" {
 		b.WriteString(panelField("", msg, w))
 	}
 	if c := q.Call; c != nil && c.Decision != nil {
-		if s := view.CleanLine(c.Decision.Subject); s != "" && !strings.Contains(msg, s) {
+		if s := panelText(c.Decision.Subject); s != "" && !strings.Contains(msg, s) {
 			b.WriteString(panelField("about: ", s, w))
 		}
 	}
