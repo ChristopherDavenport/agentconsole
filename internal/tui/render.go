@@ -341,8 +341,12 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	pad := strings.Repeat("  ", depth)
 	// The renderer reads the call as recorded; what the client draws of
 	// it is cleaned (view.Clean), and the renderer's spans in drawLine.
+	// The arguments, output and progress are cleaned where they are
+	// drawn, and only as much of them as is: the conversation is laid
+	// out on every spinner frame, and a collapsed row draws none of its
+	// output and a running one its last lines.
 	raw := c
-	c.Name, c.Args, c.Output, c.Partial = view.CleanLine(c.Name), view.Clean(c.Args), view.Clean(c.Output), view.Clean(c.Partial)
+	c.Name = view.CleanLine(c.Name)
 	c.Reason, c.Withdrawn, c.Verdict = view.CleanLine(c.Reason), view.CleanLine(c.Withdrawn), view.CleanLine(c.Verdict)
 	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
 	switch {
@@ -370,7 +374,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		}
 		b.WriteString(pad + line)
 		if c.Args != "" {
-			b.WriteString("\n" + pad + "  args: " + c.Args)
+			b.WriteString("\n" + pad + "  args: " + view.Clean(c.Args))
 		}
 	} else {
 		// Collapsed: one line, the name and the arguments compact, the
@@ -419,25 +423,25 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 			}
 			b.WriteString("\n" + pad + "  " + dimStyle.Render("..."))
 			for _, l := range lastLines(c.Partial, n) {
-				l = clipOne(l, o.output)
+				l = clipOne(view.Clean(l), o.output)
 				b.WriteString("\n" + pad + "    " + dimStyle.Render(l))
 			}
 		}
 	case view.CallBlocked:
-		b.WriteString("\n" + pad + "  " + errStyle.Render("blocked: ") + clip(c.Output, o.output))
+		b.WriteString("\n" + pad + "  " + errStyle.Render("blocked: ") + clip(view.Clean(c.Output), o.output))
 	case view.CallCutOff:
 		b.WriteString("\n" + pad + "  " + warnStyle.Render("cut off before it was answered"))
 	case view.CallReturned:
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("ran; its result is recorded and is given to the model when the conversation goes on"))
 		if o.output && c.Output != "" {
-			b.WriteString("\n" + pad + "  ↳ " + indent(clip(c.Output, o.output), pad+"    "))
+			b.WriteString("\n" + pad + "  ↳ " + indent(clip(view.Clean(c.Output), o.output), pad+"    "))
 		}
 	case view.CallEnded:
 		switch {
 		case hasBody:
 			// The renderer's body stands for the output.
 		case o.output:
-			out := c.Output
+			out := view.Clean(c.Output)
 			if !c.Committed {
 				out += dimStyle.Render(" (live)")
 			}
