@@ -98,7 +98,10 @@ newlines and tabs become spaces too, so the text cannot add a line that
 reads as the client's own; in a panel, each run of white space is also
 drawn as one space, so padding cannot push a command's tail out of
 sight, and a question, subject or address is cut to three rows, ending
-"… (ctrl+o)", so the panel leaves the input its place. The
+"… (ctrl+o)", so the panel leaves the input its place. Ctrl-O shows each
+whole on the call's row: the arguments, the question, what it is about,
+the rule the host offers, and a tool's question with the call it asks
+about and its address. The
 client's own styles, and the links glamour draws in a rendered message,
 are written as before. This applies to a renderer's spans as well, so a
 `toolview.Renderer` need not clean the text it returns. `view.Clean`

@@ -13,6 +13,7 @@ import (
 	"github.com/ChristopherDavenport/agentturn"
 	"github.com/ChristopherDavenport/openresponses"
 
+	"github.com/ChristopherDavenport/agentconsole/client"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -97,7 +98,7 @@ const gutter = 2
 // motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -112,7 +113,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		if hidden[i] {
 			continue
 		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]), tools, spin, w, md)
+		b := renderRow(row, o.flipped(flips[row.EntryID]), tools, spin, w, md, ask)
 		if b == "" {
 			continue
 		}
@@ -154,7 +155,70 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, width int, md *markdown) string {
+// asks are what the panels ask about calls, by the call's ID: the
+// permission a call waits on, and the questions a running call asked.
+// A panel cuts each field to a few rows and says ctrl+o shows the whole;
+// the call's expanded row is where it does.
+type asks struct {
+	perms     map[string]view.Permission
+	questions map[string][]agentturn.Question
+	// rules are the rules the host offers to grant, by call
+	// (WithGrantOffer).
+	rules map[string]string
+}
+
+// asksOf is what m's panels ask, with the host's rules offered so far.
+func asksOf(m view.Model, offers map[string]client.GrantOffer) asks {
+	a := asks{perms: map[string]view.Permission{}, questions: map[string][]agentturn.Question{}, rules: map[string]string{}}
+	for id, o := range offers {
+		a.rules[id] = o.Rule
+	}
+	for _, p := range m.Permissions {
+		a.perms[p.CallID] = p
+	}
+	for _, q := range m.Questions {
+		a.questions[q.CallID] = append(a.questions[q.CallID], q)
+	}
+	return a
+}
+
+// asked is what the panels ask about c, whole, for its expanded row:
+// the permission's question when the row does not say it already and
+// its subject, and each question the call asked, with the call it asks
+// about, that call's subject, and its address.
+func (a asks) asked(c view.Call) []string {
+	var ls []string
+	if p, ok := a.perms[c.CallID]; ok {
+		if q := view.CleanLine(p.Question); q != "" && q != c.Reason {
+			ls = append(ls, "question: "+q)
+		}
+		if s := view.CleanLine(p.Subject); s != "" {
+			ls = append(ls, "about: "+s)
+		}
+		if r := view.CleanLine(a.rules[c.CallID]); r != "" {
+			ls = append(ls, "rule offered: "+r)
+		}
+	}
+	for _, q := range a.questions[c.CallID] {
+		if ac := q.Call; ac != nil {
+			ls = append(ls, "asks about: "+view.CleanLine(ac.Name+" "+string(ac.Args)))
+		}
+		if s := view.CleanLine(q.Elicitation.Message); s != "" {
+			ls = append(ls, "question: "+s)
+		}
+		if ac := q.Call; ac != nil && ac.Decision != nil {
+			if s := view.CleanLine(ac.Decision.Subject); s != "" {
+				ls = append(ls, "about: "+s)
+			}
+		}
+		if s := view.CleanLine(q.Elicitation.URL); s != "" {
+			ls = append(ls, "address: "+s)
+		}
+	}
+	return ls
+}
+
+func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, width int, md *markdown, ask asks) string {
 	if f := row.Fold; f != nil {
 		s := fmt.Sprintf("[compaction] context from %s on, summary %d chars", shortID(f.FirstKept), f.SummaryLen)
 		if f.Pinned > 0 {
@@ -229,7 +293,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		return dimStyle.Render("▾ reasoning"+tail) + tag + "\n" + dimStyle.Render(text)
 	case *openresponses.FunctionCall:
 		if row.Call != nil {
-			return renderCall(*row.Call, o, tools, tag, 0, spin)
+			return renderCall(*row.Call, o, tools, tag, 0, spin, ask)
 		}
 		return toolStyle.Render("○ "+view.CleanLine(it.Name)) + tag + " " + view.Clean(it.Arguments)
 	case *openresponses.FunctionCallOutput:
@@ -337,7 +401,7 @@ func anyMoving(m view.Model) bool {
 // has a renderer in tools shows the renderer's head after its name and
 // its body under the line, each where the renderer gives one; the dot,
 // the name, the state and the client's notes are the client's always.
-func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string) string {
+func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, ask asks) string {
 	pad := strings.Repeat("  ", depth)
 	// The renderer reads the call as recorded; what the client draws of
 	// it is cleaned (view.Clean), and the renderer's spans in drawLine.
@@ -451,6 +515,13 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 			b.WriteString("\n" + pad + "  " + dimStyle.Render(countHint(n)))
 		}
 	}
+	if o.output {
+		// Expanded, the whole of what a panel asks about the call: the
+		// panel cuts it, and its "… (ctrl+o)" sends the person here.
+		for _, l := range ask.asked(c) {
+			b.WriteString("\n" + pad + "  " + warnStyle.Render(l))
+		}
+	}
 	if c.Failed && c.State == view.CallEnded {
 		b.WriteString("\n" + pad + "  " + errStyle.Render("failed: the output reports the failure"))
 	}
@@ -461,7 +532,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
 	}
 	for _, ch := range c.Children {
-		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin))
+		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask))
 	}
 	return b.String()
 }

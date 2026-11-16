@@ -405,7 +405,7 @@ func TestARefusalPartFollowsTheMessagesText(t *testing.T) {
 	msg := &openresponses.Message{Role: openresponses.RoleAssistant, Content: openresponses.Contents{
 		&openresponses.OutputText{Text: "Sure,"}, &openresponses.Refusal{Refusal: "I can't help with that."},
 	}}
-	got := ansi.Strip(renderRow(view.Row{Item: msg}, opts{}, nil, "", 60, newMarkdown()))
+	got := ansi.Strip(renderRow(view.Row{Item: msg}, opts{}, nil, "", 60, newMarkdown(), asks{}))
 	if !strings.Contains(got, "Sure,") || !strings.Contains(got, "refusal: I can't help with that.") ||
 		strings.Index(got, "Sure,") > strings.Index(got, "refusal:") {
 		t.Errorf("row:\n%s", got)

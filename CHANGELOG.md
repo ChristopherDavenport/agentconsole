@@ -41,7 +41,10 @@ versions may break the API.
   and address are cut to three rows, ending "… (ctrl+o)", and each
   run of white space in a panel's fields, its arguments included, is
   drawn as one space, so padding cannot push a command's tail past the
-  cut.
+  cut. Expanded with ctrl+o, a call's row shows the whole of what its
+  panel asks: the permission's question and subject, the host's
+  offered rule, and a tool's question, the call it asks about, that
+  call's subject and the question's address.
 
 ## v0.0.17 - 2026-11-15
 

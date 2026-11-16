@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/ChristopherDavenport/agentconsole/internal/termtest"
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
+	"github.com/ChristopherDavenport/agentconsole/view"
 )
 
 // frame is the screen as the model draws it, its styles kept: what the
@@ -395,4 +397,56 @@ func TestARunOfSpacesCannotHideASubjectsTail(t *testing.T) {
 		t.Errorf("the cut question does not say ctrl+o shows it:\n%s", s)
 	}
 	fits(t, s, 30)
+}
+
+// TestACutPanelFieldIsWholeUnderCtrlO (#56): every field a panel cuts
+// ends "… (ctrl+o)", and ctrl+o shows it whole on the call's row: a
+// permission's question, subject, arguments and the host's rule, and a
+// tool's question,
+// its address and what it asks about.
+func TestACutPanelFieldIsWholeUnderCtrlO(t *testing.T) {
+	long := strings.Repeat("word ", 120)
+	t.Run("permission", func(t *testing.T) {
+		cfg := cfgWith(callTool("call_1", "upper", `{"text":"`+long+`ARGS-TAIL"}`), say(nil, nil, "done"))
+		cfg.Tools = []agenttool.Tool{upperTool(nil)}
+		cfg.BeforeToolCall = func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
+			return &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "ask: " + long + "QUESTION-TAIL", Subject: "ls " + long + "SUBJECT-TAIL"}, nil
+		}
+		a := newAppWith(t, cfg, nil, nil, tui.WithGrantOffer(func(context.Context, view.Permission) client.GrantOffer {
+			return client.GrantOffer{Rule: "upper(" + long + "RULE-TAIL)"}
+		}))
+		a.resize(100, 60)
+		a.submit("go")
+		s := a.waitFor("the permission", has("Permission requested", "[a] always", "… (ctrl+o)"))
+		if strings.Contains(lineWith(s, "about:"), "SUBJECT-TAIL") {
+			t.Fatalf("the subject was not cut:\n%s", s)
+		}
+		a.key("ctrl+o")
+		a.waitFor("the whole of each field", has("SUBJECT-TAIL", "QUESTION-TAIL", "ARGS-TAIL", "RULE-TAIL"))
+	})
+	t.Run("question", func(t *testing.T) {
+		asking := agenttool.New("ask", "asks", func(ctx context.Context, _ textArgs) (string, error) {
+			if _, ok := agentturn.Ask(ctx, agentturn.AskedCall{Parent: "call_1", CallID: "child_1", Name: "write",
+				Args:     json.RawMessage(`{"path":"` + long + `CHILD-ARGS-TAIL"}`),
+				Decision: &agentturn.ToolDecision{Action: agentturn.Defer, Reason: "the sub-agent asks: " + long + "MESSAGE-TAIL", Subject: long + "CHILD-SUBJECT-TAIL"}}); !ok {
+				return "", errors.New("not asked")
+			}
+			elicit, _ := agenttool.ElicitorFrom(ctx)
+			_, err := elicit(ctx, agenttool.Elicitation{Message: "a tool asks: " + long + "ELICIT-TAIL", URL: "https://example.com/" + strings.Repeat("p/", 200) + "URL-TAIL"})
+			return "", err
+		})
+		cfg := cfgWith(callTool("call_1", "ask", `{"text":"go"}`), say(nil, nil, "done"))
+		cfg.Tools = []agenttool.Tool{asking}
+		a := newApp(t, cfg)
+		a.resize(100, 60)
+		a.submit("go")
+		a.waitFor("the asked call", has("Question (1/1)", "… (ctrl+o)"))
+		a.key("ctrl+o")
+		a.waitFor("the asked call whole", has("CHILD-ARGS-TAIL", "MESSAGE-TAIL", "CHILD-SUBJECT-TAIL"))
+		a.key("ctrl+o")
+		a.typeText("y")
+		a.waitFor("the tool's question", has("Question (1/1)", "… (ctrl+o)", "a tool asks"))
+		a.key("ctrl+o")
+		a.waitFor("the tool's question whole", has("ELICIT-TAIL", "URL-TAIL"))
+	})
 }

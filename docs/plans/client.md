@@ -1861,7 +1861,13 @@ No RFC holds it; it is this plan's.
   place, ending "… (ctrl+o)": the call's row has the whole of it. A
   panel draws each run of white space in its fields, the arguments
   included, as one space (`panelText`), so 500 spaces between `ls` and
-  `&& rm -rf ~/src` cannot push the tail past the cut. Multi-line text keeps its lines where it is shown as a block:
+  `&& rm -rf ~/src` cannot push the tail past the cut. The hint is
+  true for every field: the call's row, expanded, shows the whole of
+  what its panel asks (`asks`, from the model's permissions and
+  questions and the host's offers): the permission's question when the
+  row's "? reason" does not say it, its subject, the rule offered, and
+  each question the call asked, with the call it asks about, that
+  call's subject and the address. Multi-line text keeps its lines where it is shown as a block:
   messages, reasoning, arguments expanded, outputs.
 - **What the input keeps.** The person's input is the textarea's, whose
   sanitizer removes C0 and C1 controls from typing, a paste and a
