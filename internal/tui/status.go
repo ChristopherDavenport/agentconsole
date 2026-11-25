@@ -328,9 +328,11 @@ const (
 
 // inkOn is the text color that reads on a block of color bg: light on a
 // dark block, dark on a light one. Among the 16 basic colors black, red,
-// blue, magenta and bright black are dark, as in the agnoster look, and
-// bright blue, under the luminance point in xterm's palette (#5c5cff,
-// 0.17); a
+// magenta and bright black are dark, and bright blue, under the
+// luminance point in xterm's palette (#5c5cff, 0.17). Blue (4) is dark in
+// xterm's palette but light in many terminals' own (Solarized, the macOS
+// themes), where agnoster draws black text on it, so it gets dark text
+// too; a
 // color from 16 to 255 and a #rrggbb are judged by relative luminance,
 // with the xterm cube and gray ramp for the former. A color it cannot
 // read gets dark text.
@@ -339,7 +341,7 @@ func inkOn(bg string) string {
 	if !ok {
 		if n, err := strconv.Atoi(bg); err == nil && n >= 0 && n < 16 {
 			switch n {
-			case 0, 1, 4, 5, 8, 12:
+			case 0, 1, 5, 8, 12:
 				return lightInk
 			}
 		}

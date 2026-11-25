@@ -1528,8 +1528,9 @@ bottom.
   shows as its block. Powerline: each segment a block (its color, or
   bright black), U+E0B0 between blocks in the color of the one it
   leaves on the one it enters. A block's text is white on a dark block
-  and black on a light one (#53): of the basic colors 0, 1, 4, 5, 8
-  and 12 are dark, and 16 to 255 and `#rrggbb` are judged by relative
+  and black on a light one (#53): of the basic colors 0, 1, 5, 8
+  and 12 are dark (4, blue, is light in many terminals' palettes and
+  agnoster draws black on it, so it gets black), and 16 to 255 and `#rrggbb` are judged by relative
   luminance. 12 is xterm's #5c5cff, luminance 0.17, under the 0.179
   point where white and black contrast alike; 8 (#7f7f7f, 0.21) is
   over it but stays dark as vetted, so the uncolored block keeps 8

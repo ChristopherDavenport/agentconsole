@@ -326,7 +326,7 @@ func TestPowerlineInkReadsOnItsBlock(t *testing.T) {
 		ink         color.Color
 	}{
 		{"black", "0", light},
-		{"blue", "4", light},
+		{"blue", "4", dark},
 		{"green", "2", dark},
 		{"yellow", "3", dark},
 		{"darkhex", "#202020", light},
@@ -366,12 +366,13 @@ func TestPowerlineInkReadsOnItsBlock(t *testing.T) {
 }
 
 // TestInkOnJudgesTheBlock (#53): the basic colors by the agnoster
-// split, 16 to 255 and #rrggbb by luminance.
+// split (black text on blue, as agnoster draws it), 16 to 255 and #rrggbb by luminance.
 func TestInkOnJudgesTheBlock(t *testing.T) {
 	cases := map[string]string{
-		// 12 is xterm's #5c5cff, luminance 0.17.
-		"0": "15", "1": "15", "4": "15", "5": "15", "8": "15", "12": "15",
-		"2": "0", "3": "0", "6": "0", "7": "0", "9": "0", "13": "0", "15": "0",
+		// 12 is xterm's #5c5cff, luminance 0.17. 4 is light in many
+		// terminals' palettes, and agnoster draws black on it.
+		"0": "15", "1": "15", "5": "15", "8": "15", "12": "15",
+		"2": "0", "3": "0", "4": "0", "6": "0", "7": "0", "9": "0", "13": "0", "15": "0",
 		"16": "15", "21": "15", "231": "0", "46": "0", "232": "15", "255": "0",
 		"#202020": "15", "#f0f0f0": "0", "#0000ff": "15", "#ffff00": "0",
 		"bogus": "0",
