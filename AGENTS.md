@@ -38,8 +38,8 @@ committed, and live events carry only what is not committed yet.
     agentturn's events in, what a client renders out. No goroutines, no
     I/O, no terminal. `Clean` drops the control and bidi characters
     from text the client did not write.
-  - `toolview`: per-tool renderers of calls, which an embedder hands
-    `console.Run`. A renderer reads a `view.Call` (the record's facts
+  - `toolview`: per-tool renderers of calls and summarizers of groups of
+    quiet calls, which an embedder hands `console.Run`. A renderer reads a `view.Call` (the record's facts
     about the call and its tool's schema), never the tool, and returns
     lines with roles; the TUI styles them.
   - `console`: `Run(ctx, record, source, controller, ...Option)`, the program, the feeds,

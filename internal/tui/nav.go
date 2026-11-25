@@ -122,7 +122,7 @@ func (m *Model) toggleGroup(blk view.Block) {
 }
 
 // grouping is how the conversation draws groups now.
-func (m *Model) grouping() grouping { return grouping{open: m.groupsOpen} }
+func (m *Model) grouping() grouping { return grouping{open: m.groupsOpen, sums: m.sums} }
 
 // moveCursor moves the row cursor by delta, starting from the last row
 // when it is not set, and opens the detail pane's data for it.

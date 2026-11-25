@@ -1960,7 +1960,7 @@ collapse.
   leaves groups as they are.
 - **Exported names added:** `view.Outline`, `view.Block`, `view.Group`
   and their kinds (`BlockKind`, `BlockTurn`, `BlockGroup`),
-  `view.ToolCount`, `Group.Turns`, `toolview.Summarizer`, `toolview.Summarizers` and
+  `view.ToolCount`, `Group.Turns`, `toolview.Summarizer` (an interface with `Summarize(calls []view.Call) (Line, bool)`, as `Renderer` is), `toolview.Summarizer`, `toolview.Summarizers` and
   `console.WithToolSummarizers`.
 
 ## Open questions

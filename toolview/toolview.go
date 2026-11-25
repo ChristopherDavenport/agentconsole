@@ -60,6 +60,25 @@ type Renderer interface {
 // renderer is shown as the client shows any tool's.
 type Renderers map[string]Renderer
 
+// Summarizer says what a run of calls of one tool did, in one line: the
+// line a collapsed group of quiet calls shows (see [view.Outline]). It
+// reads the group's calls as [view.Call] values, the name and arguments
+// the record holds and never the tool, and is quick and pure, as a
+// [Renderer] is: it runs whenever the conversation is laid out. A
+// summarizer that panics has declined.
+type Summarizer interface {
+	// Summarize is the line for calls, all of the tool the summarizer is
+	// registered for, in the order they ran. ok is false to show the
+	// client's own line: the counts by tool name and the span of turns.
+	Summarize(calls []view.Call) (line Line, ok bool)
+}
+
+// Summarizers are the summarizers a client uses, by tool name as the
+// model calls it. A group takes its tool's summarizer when every one of
+// its calls is that tool's; a group of several tools has the client's
+// line.
+type Summarizers map[string]Summarizer
+
 // Role is what a span of a line is, which the client draws in its own
 // way.
 type Role int

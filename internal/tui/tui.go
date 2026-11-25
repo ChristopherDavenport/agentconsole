@@ -162,6 +162,8 @@ type Model struct {
 	cost client.Cost
 	// tools are the renderers of the tools' calls, by tool name.
 	tools toolview.Renderers
+	// sums are the summarizers of the groups of quiet calls, by tool name.
+	sums toolview.Summarizers
 
 	// screen is the conversation or the tree; pane the detail under the
 	// conversation; frozen a read-only look at another line, nil when the
@@ -265,6 +267,12 @@ func WithHistory(past []string, record func(line string)) Option {
 		m.hist.at = len(m.hist.lines)
 		m.hist.record = record
 	}
+}
+
+// WithToolSummarizers sets the summarizers of the groups of quiet calls,
+// by tool name.
+func WithToolSummarizers(ss toolview.Summarizers) Option {
+	return func(m *Model) { m.sums = maps.Clone(ss) }
 }
 
 // WithToolRenderers sets the renderers of the tools' calls, by tool

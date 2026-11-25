@@ -20,6 +20,11 @@ versions may break the API.
   second click, collapsed again the same way. The row cursor treats a
   collapsed group as one stop, and copy takes its line. A running or
   waiting call is never inside one.
+- `toolview.Summarizer` and `toolview.Summarizers`, and
+  `console.WithToolSummarizers`: an embedder sums up a group whose calls
+  are all of one tool in a line of its own; the client's counts by tool
+  name are the fallback when the summarizer declines or panics, and for a
+  group of several tools.
 
 ## v0.0.19 - 2026-11-16
 

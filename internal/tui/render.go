@@ -154,7 +154,7 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		}
 		key := groupKey(m, blk)
 		open := gp.expanded(m, blk)
-		add(groupLine(m, blk, open), key)
+		add(groupLine(m, blk, open, gp.sums), key)
 		if !open {
 			continue
 		}
@@ -186,6 +186,8 @@ type grouping struct {
 	open map[string]bool
 	// all expands every group, for asking which entries are in the line.
 	all bool
+	// sums are the embedder's summarizers, by tool name.
+	sums toolview.Summarizers
 }
 
 // groupKey is the entry that stands for a group, its first member's:
@@ -207,17 +209,28 @@ func (g grouping) expanded(m view.Model, b view.Block) bool {
 
 // groupLine is a group's line: the dot, what ran and over how many
 // turns, and the key that opens it, or closes it when it is open.
-func groupLine(m view.Model, b view.Block, open bool) string {
-	text := groupSummary(m, b)
+func groupLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers) string {
+	text := groupSummary(m, b, sums)
 	if open {
 		return dimStyle.Render("▾ ") + text + dimStyle.Render(" (ctrl+o to collapse)")
 	}
 	return toolStyle.Render("○ ") + text + dimStyle.Render(" (ctrl+o to expand)")
 }
 
-// groupSummary is what a group ran: the counts by tool name in first-use order with the span of turns.
-func groupSummary(m view.Model, b view.Block) string {
+// groupSummary is what a group ran: its tool's summarizer's line when
+// every call is of one tool that has one and gives a line, otherwise the
+// counts by tool name in first-use order with the span of turns.
+func groupSummary(m view.Model, b view.Block, sums toolview.Summarizers) string {
 	g := b.Group
+	if len(g.Tools) == 1 {
+		calls := make([]view.Call, len(g.Calls))
+		for k, i := range g.Calls {
+			calls[k] = *m.Rows[i].Call
+		}
+		if l, ok := summarize(sums[g.Tools[0].Name], calls); ok {
+			return drawLine(l)
+		}
+	}
 	parts := make([]string, len(g.Tools))
 	for k, t := range g.Tools {
 		parts[k] = fmt.Sprintf("%d %s", t.N, view.CleanLine(t.Name))
@@ -227,6 +240,21 @@ func groupSummary(m view.Model, b view.Block) string {
 		s += fmt.Sprintf(" · %d turns", n)
 	}
 	return s
+}
+
+// summarize is s's line for calls, and whether it gave one. It gave none
+// when s is nil, declined, returned an empty line or panicked.
+func summarize(s toolview.Summarizer, calls []view.Call) (l toolview.Line, ok bool) {
+	if s == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			l, ok = nil, false
+		}
+	}()
+	l, ok = s.Summarize(calls)
+	return l, ok && len(l) > 0
 }
 
 func wrap(s string, width int) string {
