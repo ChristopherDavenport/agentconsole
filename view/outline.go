@@ -115,7 +115,7 @@ func (b Block) quietThrough() bool {
 // and the order is kept. A call is quiet when it has ended, its output is
 // on the record, it did not fail, its output is short (at most 5 lines and 400 runes after trimming), and
 // nothing about it needs the person (no question, hold, withdrawal,
-// cut-off or verdict but proceed). A live row is never quiet, so a running
+// cut-off or verdict but proceed, whatever reason that verdict carries). A live row is never quiet, so a running
 // call is never in a run. Two or more consecutive turns whose every item
 // is a quiet run are a run of turns.
 func Outline(m Model) []Block {
@@ -262,13 +262,17 @@ func tools(m Model, calls []int) []ToolCount {
 	return out
 }
 
-// quiet reports whether a call row says nothing and needs nothing.
+// quiet reports whether a call row says nothing and needs nothing. The
+// call's Reason does not count: it is the last decision's whatever its
+// verdict, and a rule that allows a call records one ("allowed by
+// read"). A held or deferred call is loud by its verdict, HeldBeside or
+// a pending question, never by its reason alone.
 func quiet(row Row, asked map[string]bool) bool {
 	c := row.Call
 	if c == nil || row.Live || row.Hidden || row.Fold != nil {
 		return false
 	}
-	if c.State != CallEnded || !c.Committed || c.Failed || c.HeldBeside || c.Withdrawn != "" || c.Reason != "" || len(c.Children) > 0 {
+	if c.State != CallEnded || !c.Committed || c.Failed || c.HeldBeside || c.Withdrawn != "" || len(c.Children) > 0 {
 		return false
 	}
 	if c.Verdict != "" && c.Verdict != "proceed" {

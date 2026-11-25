@@ -5,6 +5,16 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Fixed
+
+- A call the policy allowed with a reason (dax's "allowed by read") now
+  folds as quiet. `view.Outline` took any `Call.Reason` as loud, and a
+  rule that allows a call records one, so in a real session no call was
+  quiet and nothing folded. Only a verdict other than proceed, a hold, a
+  withdrawal, a cut-off or a question makes a call loud.
+
 ## v0.0.20 - 2026-11-25
 
 ### Added
