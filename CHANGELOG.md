@@ -5,6 +5,17 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Added
+
+- `view.Outline(Model) []Block`: a pure projection of a model's rows into
+  turn blocks (one model response, with the outputs sent back for its
+  calls) and group blocks (a run of two or more quiet calls: ended,
+  committed, empty output, not failed, nothing asked of the person,
+  reasoning between them included, across turns). `Model.Rows` is
+  unchanged.
+
 ## v0.0.19 - 2026-11-16
 
 - Security: the input line no longer takes a bidi control. The

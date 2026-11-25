@@ -1935,8 +1935,21 @@ collapse.
   otherwise: the counts by tool name in first-use order ("ran 4 bash, 2
   read") with the group's turn span. `console.WithToolSummarizers` hands
   them in, beside `WithToolRenderers`. The client ships none.
+- **Blocks are a partition of the rows.** The blocks cut `Model.Rows` into
+  contiguous stretches, every row in exactly one. A turn block is a
+  stretch of non-group rows sharing a `ResponseID`, an output (which
+  carries none) joining the block of the call it answers; its `Turn` is
+  the response's position among the model's responses counted from 1 in
+  row order (0 for a row with no response). A turn that a group cuts
+  into appears as two blocks. A group's member rows are its calls, the
+  reasoning between them and the outputs of its calls; `Group.Calls`
+  names the call rows, `Group.Tools` the names with counts in first-use
+  order, `FirstTurn`/`LastTurn` the span. A row that is live, hidden or
+  a fold never joins, nor does a call with children, a left-out call, or
+  one a panel or the cut-off list names.
 - **Exported names added:** `view.Outline`, `view.Block`, `view.Group`
-  and their kinds, `toolview.Summarizer`, `toolview.Summarizers` and
+  and their kinds (`BlockKind`, `BlockTurn`, `BlockGroup`),
+  `view.ToolCount`, `Group.Turns`, `toolview.Summarizer`, `toolview.Summarizers` and
   `console.WithToolSummarizers`.
 
 ## Open questions
