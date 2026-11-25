@@ -1959,7 +1959,7 @@ collapse.
   The global ctrl+o (no cursor) flips every call's output as before and
   leaves groups as they are.
 - **A header on every response.** The user's decision: the TUI draws a
-  one-line header above the rows of each response: its text in bold,
+  one-line header above the rows of each response: its text dim (the failed count in the error colour),
   `turn 3 · 2 calls → 2 outputs · 1 failed` (the failed count in the error
   colour), and `turn 4 · answer` for a response with no calls, then a
   space and a thin dim rule to the right edge, the only indicator, with

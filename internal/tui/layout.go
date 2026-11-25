@@ -230,7 +230,7 @@ func turnText(t int, ti *turnInfo) (text, failed string) {
 }
 
 // turnLine is a turn's header, one line that never wraps: the turn's
-// text in bold, a folded turn's marker and hint, and, when there is room
+// text dim, a folded turn's marker and hint, and, when there is room
 // for three or more, a thin dim rule to the right edge. Narrow, the rule
 // goes first, then the end of the text.
 func turnLine(t int, ti *turnInfo, width int) string {
@@ -243,11 +243,11 @@ func turnLine(t int, ti *turnInfo, width int) string {
 	}
 	full := text + failed + hint
 	if lipgloss.Width(full) > width {
-		return emphStyle.Render(truncate(full, width))
+		return dimStyle.Render(truncate(full, width))
 	}
-	line := emphStyle.Render(text)
+	line := dimStyle.Render(text)
 	if failed != "" {
-		line += errStyle.Bold(true).Render(failed)
+		line += errStyle.Render(failed)
 	}
 	if hint != "" {
 		line += dimStyle.Render(hint)
