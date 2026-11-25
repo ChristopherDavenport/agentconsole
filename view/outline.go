@@ -57,6 +57,10 @@ type Block struct {
 	// belongs to, counted from 1 in the order the responses first appear
 	// in the rows, 0 for a block with no response.
 	Turn int
+	// RowTurns is the turn of each row of Rows, parallel to it, numbered
+	// as Turn is: a call's output has its call's turn, and a row with no
+	// response 0.
+	RowTurns []int
 	// Group is set on a group block.
 	Group *Group
 }
@@ -84,8 +88,12 @@ func Outline(m Model) []Block {
 		}
 		return turns[row.ResponseID]
 	}
+	answers := map[string]string{} // call ID -> response of its call row
 	for _, row := range m.Rows {
 		turnOf(row)
+		if row.Call != nil {
+			answers[row.Call.CallID] = row.ResponseID
+		}
 	}
 	asked := map[string]bool{}
 	for _, p := range m.Permissions {
@@ -100,22 +108,19 @@ func Outline(m Model) []Block {
 	var out []Block
 	// emit adds rows as turn blocks: contiguous rows of one response
 	// together, an output with the block of the call it answers.
-	answers := map[string]string{} // call ID -> response of its call row
 	emit := func(idx ...int) {
 		for _, i := range idx {
 			row := m.Rows[i]
-			if row.Call != nil {
-				answers[row.Call.CallID] = row.ResponseID
-			}
 			resp := row.ResponseID
 			if o, ok := row.Item.(*openresponses.FunctionCallOutput); ok && resp == "" {
 				resp = answers[o.CallID]
 			}
 			if n := len(out); n > 0 && out[n-1].Kind == BlockTurn && resp != "" && out[n-1].ResponseID == resp {
 				out[n-1].Rows = append(out[n-1].Rows, i)
+				out[n-1].RowTurns = append(out[n-1].RowTurns, turns[resp])
 				continue
 			}
-			out = append(out, Block{Kind: BlockTurn, Rows: []int{i}, ResponseID: resp, Turn: turns[resp]})
+			out = append(out, Block{Kind: BlockTurn, Rows: []int{i}, RowTurns: []int{turns[resp]}, ResponseID: resp, Turn: turns[resp]})
 		}
 	}
 	var run, pending, calls []int
@@ -133,7 +138,16 @@ func Outline(m Model) []Block {
 				at[name] = len(g.Tools)
 				g.Tools = append(g.Tools, ToolCount{Name: name, N: 1})
 			}
-			out = append(out, Block{Kind: BlockGroup, Rows: run, Group: g})
+			rt := make([]int, len(run))
+			for k, i := range run {
+				row := m.Rows[i]
+				if o, ok := row.Item.(*openresponses.FunctionCallOutput); ok && row.ResponseID == "" {
+					rt[k] = turns[answers[o.CallID]]
+				} else {
+					rt[k] = turns[row.ResponseID]
+				}
+			}
+			out = append(out, Block{Kind: BlockGroup, Rows: run, RowTurns: rt, Group: g})
 		} else {
 			emit(run...)
 		}

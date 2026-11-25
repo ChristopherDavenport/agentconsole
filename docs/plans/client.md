@@ -1958,7 +1958,33 @@ collapse.
   cursor on a row a collapsed group took in moves to the group's stop.
   The global ctrl+o (no cursor) flips every call's output as before and
   leaves groups as they are.
-- **Exported names added:** `view.Outline`, `view.Block`, `view.Group`
+- **A header on every response.** The user's decision: the TUI draws a
+  thin dim rule above the rows of each response, `turn 3 · 2 calls → 2
+  outputs · 1 failed`, and `turn 4 · answer` for a response with no
+  calls. The counts read the turn's rows through the outline (calls, the
+  calls that have an output, the calls that failed), the whole turn
+  even when a group cuts it into two blocks, which draw one header, at
+  the turn's first block. A row with no response has no header. The
+  model holds usage only for the whole line and for its last call
+  (`Model.Usage`, `Model.LastCall`), not per response, so the header
+  shows counts only and invents no tokens or time. `Block.RowTurns`
+  gives the turn of each row of a block, parallel to `Rows`, so a client
+  can place a header between the members of an expanded group.
+- **Folding a turn.** Ctrl-O or a second click on a header folds the turn
+  to its header (`▸ turn 3 · … (ctrl+o to expand)`), which is one stop
+  of the row cursor (`turn:<response ID>`; the detail pane and the head
+  move read the turn's first committed row). The folded set is by
+  response ID, which outlives a turn that grows, where an entry would
+  not. A turn with a live row, a call in motion or waiting, or a
+  permission or question on one of its calls is never folded: the set
+  keeps the person's choice and the turn stays drawn until it settles.
+  Copy of a folded turn is its header.
+- **Groups and headers.** A collapsed group spans turns and stands for
+  the headers of every turn it spans (first to last), as it says `N
+  turns`; its line is drawn unless every turn it spans is folded. An
+  expanded group draws the headers back between its members, each at the
+  first row of its turn.
+- **Exported names added:** `Block.RowTurns`, `view.Outline`, `view.Block`, `view.Group`
   and their kinds (`BlockKind`, `BlockTurn`, `BlockGroup`),
   `view.ToolCount`, `Group.Turns`, `toolview.Summarizer` (an interface with
   `Summarize(calls []view.Call) (Line, bool)`, as `Renderer` is),

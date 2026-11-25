@@ -71,6 +71,12 @@ func TestAChainOfQuietCallsAcrossResponsesIsOneGroup(t *testing.T) {
 	if !reflect.DeepEqual(g.Calls, []int{1, 3, 5, 7}) {
 		t.Errorf("calls = %v", g.Calls)
 	}
+	if want := []int{1, 1, 2, 2, 3, 3, 3, 3}; !reflect.DeepEqual(g2turns(bs[1]), want) {
+		t.Errorf("row turns = %v, want %v", bs[1].RowTurns, want)
+	}
+	if bs[0].Turn != 0 || !reflect.DeepEqual(bs[0].RowTurns, []int{0}) {
+		t.Errorf("the prompt's turn: %+v", bs[0])
+	}
 	if again := Outline(m); !reflect.DeepEqual(bs, again) {
 		t.Errorf("Outline is not the same twice: %+v vs %+v", bs, again)
 	}
@@ -178,5 +184,26 @@ func TestAnOutputWithoutItsCallRowIsItsOwnBlock(t *testing.T) {
 	bs := Outline(l.v.Model())
 	if got, want := shape(bs), "T[0]"; got != want || bs[0].Turn != 0 {
 		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
+func g2turns(b Block) []int { return b.RowTurns }
+
+// A turn a group cuts into is two blocks of one turn number, which a
+// client gives one header.
+func TestATurnACutByAGroupKeepsItsNumber(t *testing.T) {
+	l := newRecordsLog(t)
+	l.append(itemEntry(msg("m1", "assistant", "starting"), "r1"))
+	l.call("r1", "c1", "bash", str(""))
+	l.call("r1", "c2", "bash", str(""))
+	l.call("r2", "c3", "bash", str(""))
+	l.append(itemEntry(msg("m2", "assistant", "done"), "r2"))
+	bs := Outline(l.v.Model())
+	// 0 message, 1 c1, 2 o1, 3 c2, 4 o2 | r2: 5 c3, 6 o3, 7 message
+	if got, want := shape(bs), "T[0] G[1,2,3,4,5,6] T[7]"; got != want {
+		t.Fatalf("outline = %s, want %s", got, want)
+	}
+	if bs[0].Turn != 1 || bs[2].Turn != 2 || bs[1].Group.FirstTurn != 1 || bs[1].Group.LastTurn != 2 {
+		t.Errorf("turns: %d %d, group %+v", bs[0].Turn, bs[2].Turn, bs[1].Group)
 	}
 }
