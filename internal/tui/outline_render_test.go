@@ -102,4 +102,18 @@ func TestATurnHeaderIsOneLineWithNoGapUnderIt(t *testing.T) {
 			t.Errorf("span %+v does not start on its block: %q", sp, lines[sp.start])
 		}
 	}
+
+	// A folded header has nothing under it: the next header is a block
+	// of its own, a blank line below.
+	m = view.Model{Rows: []view.Row{assistantRow("m1", "r1", "hello"), assistantRow("m2", "r2", "bye")}}
+	out, spans = renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, grouping{folded: map[string]bool{"r1": true}})
+	lines = strings.Split(plain(out), "\n")
+	if !strings.HasPrefix(lines[0], "▸ turn 1") || strings.TrimSpace(lines[1]) != "" || !strings.HasPrefix(lines[2], "turn 2") {
+		t.Errorf("folded then header:\n%q", lines)
+	}
+	for _, sp := range spans {
+		if sp.entry == "turn:r2" && sp.start != 2 {
+			t.Errorf("turn 2's span starts at %d, want 2", sp.start)
+		}
+	}
 }

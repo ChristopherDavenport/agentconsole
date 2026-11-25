@@ -114,6 +114,11 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	// add lays one drawn block out: wrapped, with the gutter's marker
 	// when it is the selected one, and a span for entry if it has one.
 	add := func(b, entry string, headerOf bool) {
+		if headerOf && gap == "\n" {
+			// A header with nothing under it (a folded turn) is followed by
+			// a header: a blank line between them, as between any blocks.
+			gap, at = "\n\n", at+1
+		}
 		b = wrap(b, w)
 		if sel != "" {
 			mark := "  "
