@@ -1888,6 +1888,57 @@ No RFC holds it; it is this plan's.
   would make the line about to be sent read as another. A test holds
   the filter's set to Clean's.
 
+## Decided in implementation, the outline
+
+A coding session is long chains of calls whose outputs are empty: a
+`mkdir`, a `cd`, a `git add`. Each takes a row and says nothing. The
+user's decisions: group them, keep every call reachable, and summarize
+the group by what ran. A mix of tools is one group; only quiet runs
+collapse.
+
+- **A layer above the rows, not a change to them.** `view.Model.Rows`
+  stays one row per item, in the record's order, so the Open Responses
+  view is as it was and every rule about the overlay and the record
+  holds. `view.Outline(Model) []Block` is a pure projection of a model:
+  no state, no I/O, same input and same output. The TUI renders blocks;
+  an embedder that wants the turn structure calls it too.
+- **A turn is one model response.** `Block` of kind turn holds the rows
+  that share a `ResponseID` (reasoning, message, calls), the outputs the
+  harness sent back for its calls following them, and its position in
+  the run. That is the loop's structure: response, calls, outputs, next
+  response. A row with no response (a live row not named yet, a user
+  message) is its own block.
+- **A group is a run of quiet calls.** A call is quiet when it has
+  ended, its output is on the record, it did not fail, its output is
+  empty after trimming, and nothing about it needs the person (no
+  question, no hold, no withdrawal, no cut-off, no policy verdict other
+  than allow). Reasoning between quiet calls joins the run. Anything
+  else ends it: a message, a call with output, a failed, running or
+  waiting call. A run of two or more is a group; one quiet call stays a
+  row. The run crosses turns, so `mkdir; cd; git add` over three
+  responses is one group, and the group lists the turns it spans.
+- **Nothing is lost.** A group holds its member rows by index into
+  `Model.Rows`; expanding it (Ctrl-O on the group or a click) shows the
+  member rows as they are drawn now. A live call joins a group only once
+  it has ended and is committed, so a running call is never hidden and a
+  group never changes under a call the person is reading. A call that
+  fails after joining cannot happen (it has ended); a call that later
+  needs the person was never quiet.
+- **Selection and copy see the rows.** Copy of a collapsed group copies
+  the summary line; expanded, the rows. The row cursor steps over a
+  group as one stop.
+- **Summaries are the embedder's, with a fallback.**
+  `toolview.Summarizer` reads the group's `[]view.Call` (the tool's name
+  and arguments, never the tool) and returns a line with roles, or
+  declines. `Summarizers` is by tool name; a group takes the summarizer
+  of its tool when every call is that tool's, and the client's own line
+  otherwise: the counts by tool name in first-use order ("ran 4 bash, 2
+  read") with the group's turn span. `console.WithToolSummarizers` hands
+  them in, beside `WithToolRenderers`. The client ships none.
+- **Exported names added:** `view.Outline`, `view.Block`, `view.Group`
+  and their kinds, `toolview.Summarizer`, `toolview.Summarizers` and
+  `console.WithToolSummarizers`.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject
