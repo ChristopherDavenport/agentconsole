@@ -65,16 +65,13 @@ func TestATurnCutByAGroupHasOneHeader(t *testing.T) {
 	}
 }
 
-// A header is one line with the rule to its right, no blank line under
-// it, and never wraps: narrow, the rule goes first and then the text's end.
+// A header is one line of text with no rule, no blank line under it,
+// and never wraps: narrow, the text's end goes.
 func TestATurnHeaderIsOneLineWithNoGapUnderIt(t *testing.T) {
 	ti := &turnInfo{calls: 2, outputs: 2, failed: 1}
 	line := plain(turnLine(3, ti, 60))
-	if !strings.HasPrefix(line, "turn 3 · 2 calls → 2 outputs · 1 failed ─") || strings.Contains(line, "\n") || strings.HasPrefix(line, "─") {
+	if line != "turn 3 · 2 calls → 2 outputs · 1 failed" {
 		t.Errorf("header = %q", line)
-	}
-	if w := len([]rune(line)); w != 60 {
-		t.Errorf("the rule does not fill to the edge: %d wide", w)
 	}
 	for _, w := range []int{40, 30, 12, 8} {
 		l := plain(turnLine(3, ti, w))
@@ -82,18 +79,15 @@ func TestATurnHeaderIsOneLineWithNoGapUnderIt(t *testing.T) {
 			t.Errorf("width %d: %q wraps or overflows", w, l)
 		}
 	}
-	if l := plain(turnLine(3, ti, 40)); strings.Contains(l, "─") {
-		t.Errorf("no room for a rule, yet drawn: %q", l)
-	}
 	ti.folded = true
-	if l := plain(turnLine(3, ti, 80)); !strings.HasPrefix(l, "▸ turn 3 · 2 calls → 2 outputs · 1 failed (ctrl+o to expand) ─") {
+	if l := plain(turnLine(3, ti, 80)); l != "▸ turn 3 · 2 calls → 2 outputs · 1 failed (ctrl+o to expand)" {
 		t.Errorf("folded = %q", l)
 	}
 
 	m := view.Model{Rows: []view.Row{assistantRow("m1", "r1", "hello"), assistantRow("m2", "r2", "bye")}}
 	out, spans := renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, grouping{})
 	lines := strings.Split(plain(out), "\n")
-	if !strings.HasPrefix(lines[0], "turn 1 · answer ─") || !strings.HasPrefix(lines[1], "agent") {
+	if lines[0] != "turn 1 · answer" || !strings.HasPrefix(lines[1], "agent") {
 		t.Errorf("a gap under the header:\n%q", lines)
 	}
 	// The spans stay where the blocks are.

@@ -20,7 +20,7 @@ versions may break the API.
   second click, collapsed again the same way. The row cursor treats a
   collapsed group as one stop, and copy takes its line. A running or
   waiting call is never inside one.
-- Every response in the conversation has a one-line dim header above it, a thin dim rule to its right (`turn 3
+- Every response in the conversation has a one-line dim header above it, text only, no rule (`turn 3
   · 2 calls → 2 outputs · 1 failed`, `turn 4 · answer`), counts only: the
   model holds usage per line, not per response. Ctrl-O or a second click
   on a header folds the turn to it; a turn with a running or waiting

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/lipgloss/v2"
 
@@ -230,9 +229,8 @@ func turnText(t int, ti *turnInfo) (text, failed string) {
 }
 
 // turnLine is a turn's header, one line that never wraps: the turn's
-// text dim, a folded turn's marker and hint, and, when there is room
-// for three or more, a thin dim rule to the right edge. Narrow, the rule
-// goes first, then the end of the text.
+// text dim, a folded turn's marker and hint. No rule: the text alone
+// marks the turn. Narrow, the end of the text goes.
 func turnLine(t int, ti *turnInfo, width int) string {
 	text, failed := turnText(t, ti)
 	text, failed = view.CleanLine(text), view.CleanLine(failed)
@@ -251,9 +249,6 @@ func turnLine(t int, ti *turnInfo, width int) string {
 	}
 	if hint != "" {
 		line += dimStyle.Render(hint)
-	}
-	if fill := width - lipgloss.Width(full) - 1; fill >= 3 {
-		line += " " + dimStyle.Render(strings.Repeat("─", fill))
 	}
 	return line
 }
