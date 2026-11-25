@@ -1947,6 +1947,17 @@ collapse.
   order, `FirstTurn`/`LastTurn` the span. A row that is live, hidden or
   a fold never joins, nor does a call with children, a left-out call, or
   one a panel or the cut-off list names.
+- **The TUI's group line and stops.** A collapsed group is one line, a dot,
+  the summary and `(ctrl+o to expand)`; its stop is its first member's
+  entry, so the detail pane and the head move read that call. Ctrl-O or
+  a second click on the stop expands it: the line stays, as `▾` with
+  `(ctrl+o to collapse)`, and the member rows follow it, each a stop but
+  the first, whose stop the line is (so ctrl+o on the line collapses, not
+  flips the first call's output). A group is expanded while any member's
+  entry is in the TUI's open set, so one that grows keeps its state; a
+  cursor on a row a collapsed group took in moves to the group's stop.
+  The global ctrl+o (no cursor) flips every call's output as before and
+  leaves groups as they are.
 - **Exported names added:** `view.Outline`, `view.Block`, `view.Group`
   and their kinds (`BlockKind`, `BlockTurn`, `BlockGroup`),
   `view.ToolCount`, `Group.Turns`, `toolview.Summarizer`, `toolview.Summarizers` and

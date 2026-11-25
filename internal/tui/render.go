@@ -98,7 +98,7 @@ const gutter = 2
 // motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks, gp grouping) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -109,18 +109,13 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	}
 	var blocks []string
 	at := 0
-	for i, row := range m.Rows {
-		if hidden[i] {
-			continue
-		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]), tools, spin, w, md, ask)
-		if b == "" {
-			continue
-		}
+	// add lays one drawn block out: wrapped, with the gutter's marker
+	// when it is the selected one, and a span for entry if it has one.
+	add := func(b, entry string) {
 		b = wrap(b, w)
 		if sel != "" {
 			mark := "  "
-			if row.EntryID == sel {
+			if entry != "" && entry == sel {
 				mark = warnStyle.Render("▶") + " "
 			}
 			ls := strings.Split(b, "\n")
@@ -134,11 +129,42 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 			b = strings.Join(ls, "\n")
 		}
 		h := lipgloss.Height(b)
-		if row.EntryID != "" {
-			spans = append(spans, rowSpan{entry: row.EntryID, start: at, height: h})
+		if entry != "" {
+			spans = append(spans, rowSpan{entry: entry, start: at, height: h})
 		}
 		blocks = append(blocks, b)
 		at += h + 1
+	}
+	row := func(i int, entry string) {
+		if hidden[i] {
+			return
+		}
+		r := m.Rows[i]
+		b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask)
+		if b != "" {
+			add(b, entry)
+		}
+	}
+	for _, blk := range view.Outline(m) {
+		if blk.Kind != view.BlockGroup {
+			for _, i := range blk.Rows {
+				row(i, m.Rows[i].EntryID)
+			}
+			continue
+		}
+		key := groupKey(m, blk)
+		open := gp.expanded(m, blk)
+		add(groupLine(m, blk, open), key)
+		if !open {
+			continue
+		}
+		for j, i := range blk.Rows {
+			e := m.Rows[i].EntryID
+			if j == 0 {
+				e = "" // the group's line is the stop of the first member
+			}
+			row(i, e)
+		}
 	}
 	if note := runEndNote(m); note != "" {
 		b := wrap(note, w)
@@ -149,6 +175,58 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	}
 	md.sweep()
 	return strings.Join(blocks, "\n\n"), spans
+}
+
+// grouping is how the conversation draws the outline's groups: which
+// are expanded.
+type grouping struct {
+	// open holds the entries of the members of the groups the person
+	// expanded: a group is expanded when any of its members is in it, so
+	// a group that grows keeps its state.
+	open map[string]bool
+	// all expands every group, for asking which entries are in the line.
+	all bool
+}
+
+// groupKey is the entry that stands for a group, its first member's:
+// the row cursor's stop and the span of its line.
+func groupKey(m view.Model, b view.Block) string { return m.Rows[b.Rows[0]].EntryID }
+
+// expanded reports whether the person expanded the group.
+func (g grouping) expanded(m view.Model, b view.Block) bool {
+	if g.all {
+		return true
+	}
+	for _, i := range b.Rows {
+		if g.open[m.Rows[i].EntryID] {
+			return true
+		}
+	}
+	return false
+}
+
+// groupLine is a group's line: the dot, what ran and over how many
+// turns, and the key that opens it, or closes it when it is open.
+func groupLine(m view.Model, b view.Block, open bool) string {
+	text := groupSummary(m, b)
+	if open {
+		return dimStyle.Render("▾ ") + text + dimStyle.Render(" (ctrl+o to collapse)")
+	}
+	return toolStyle.Render("○ ") + text + dimStyle.Render(" (ctrl+o to expand)")
+}
+
+// groupSummary is what a group ran: the counts by tool name in first-use order with the span of turns.
+func groupSummary(m view.Model, b view.Block) string {
+	g := b.Group
+	parts := make([]string, len(g.Tools))
+	for k, t := range g.Tools {
+		parts[k] = fmt.Sprintf("%d %s", t.N, view.CleanLine(t.Name))
+	}
+	s := "ran " + strings.Join(parts, ", ")
+	if n := g.Turns(); n > 1 {
+		s += fmt.Sprintf(" · %d turns", n)
+	}
+	return s
 }
 
 func wrap(s string, width int) string {

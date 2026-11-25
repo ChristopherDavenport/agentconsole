@@ -15,6 +15,11 @@ versions may break the API.
   committed, empty output, not failed, nothing asked of the person,
   reasoning between them included, across turns). `Model.Rows` is
   unchanged.
+- The conversation shows a group of quiet calls as one line (`ran 4
+  bash, 2 read · 3 turns`), expanded to its member rows with ctrl+o or a
+  second click, collapsed again the same way. The row cursor treats a
+  collapsed group as one stop, and copy takes its line. A running or
+  waiting call is never inside one.
 
 ## v0.0.19 - 2026-11-16
 

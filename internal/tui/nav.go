@@ -73,23 +73,61 @@ func (m *Model) shown() view.Model {
 }
 
 // selectable are the entries of the shown rows a cursor can rest on, in
-// order: the committed rows that render.
-func selectable(m view.Model) []string {
+// order: the committed rows that render. A collapsed group is one stop,
+// its first member's entry; an expanded one is that stop, its line, and
+// then its members but the first.
+func selectable(m view.Model, gp grouping) []string {
 	hidden := hiddenOutputs(m)
 	var out []string
-	for i, row := range m.Rows {
-		if row.EntryID == "" || hidden[i] {
-			continue
+	for _, blk := range view.Outline(m) {
+		if blk.Kind == view.BlockGroup {
+			out = append(out, groupKey(m, blk))
+			if !gp.expanded(m, blk) {
+				continue
+			}
 		}
-		out = append(out, row.EntryID)
+		for j, i := range blk.Rows {
+			row := m.Rows[i]
+			if row.EntryID == "" || hidden[i] || (blk.Kind == view.BlockGroup && j == 0) {
+				continue
+			}
+			out = append(out, row.EntryID)
+		}
 	}
 	return out
 }
 
+// groupAt is the group block whose stop is entry.
+func groupAt(m view.Model, entry string) (view.Block, bool) {
+	for _, blk := range view.Outline(m) {
+		if blk.Kind == view.BlockGroup && groupKey(m, blk) == entry {
+			return blk, true
+		}
+	}
+	return view.Block{}, false
+}
+
+// toggleGroup expands the group a stop stands for, or collapses it.
+func (m *Model) toggleGroup(blk view.Block) {
+	sh := m.shown()
+	if m.grouping().expanded(sh, blk) {
+		for _, i := range blk.Rows {
+			delete(m.groupsOpen, sh.Rows[i].EntryID)
+		}
+	} else {
+		m.groupsOpen[groupKey(sh, blk)] = true
+	}
+	m.reveal = true
+	m.relayout()
+}
+
+// grouping is how the conversation draws groups now.
+func (m *Model) grouping() grouping { return grouping{open: m.groupsOpen} }
+
 // moveCursor moves the row cursor by delta, starting from the last row
 // when it is not set, and opens the detail pane's data for it.
 func (m *Model) moveCursor(delta int) tea.Cmd {
-	ids := selectable(m.shown())
+	ids := selectable(m.shown(), m.grouping())
 	if len(ids) == 0 {
 		return nil
 	}
@@ -115,6 +153,10 @@ func (m *Model) moveCursor(delta int) tea.Cmd {
 // own flips of it.
 func (m *Model) toggle(sw opts) {
 	if m.screen == screenConversation && m.curEntry != "" {
+		if blk, ok := groupAt(m.shown(), m.curEntry); ok && sw.output {
+			m.toggleGroup(blk)
+			return
+		}
 		m.flipRow(m.curEntry, sw)
 		return
 	}
@@ -184,6 +226,10 @@ func (m *Model) clickRow(line int) tea.Cmd {
 			m.relayout()
 			return m.wantPane()
 		}
+		if blk, ok := groupAt(m.shown(), sp.entry); ok {
+			m.toggleGroup(blk)
+			return nil
+		}
 		sw := opts{output: true}
 		for _, row := range m.shown().Rows {
 			if _, ok := row.Item.(*openresponses.ReasoningItem); ok && row.EntryID == sp.entry {
@@ -217,9 +263,21 @@ func (m *Model) keepCursor() {
 	if m.curEntry == "" {
 		return
 	}
-	for _, id := range selectable(m.shown()) {
-		if id == m.curEntry {
-			return
+	sh := m.shown()
+	if slices.Contains(selectable(sh, m.grouping()), m.curEntry) {
+		return
+	}
+	// A row a collapsed group took in is still there, in the group's
+	// stop.
+	for _, blk := range view.Outline(sh) {
+		if blk.Kind != view.BlockGroup {
+			continue
+		}
+		for _, i := range blk.Rows {
+			if sh.Rows[i].EntryID == m.curEntry {
+				m.curEntry = groupKey(sh, blk)
+				return
+			}
 		}
 	}
 	m.curEntry = ""
@@ -318,7 +376,7 @@ func (m *Model) cyclePane() tea.Cmd {
 	case paneNone:
 		m.pane = paneDetail
 		if m.curEntry == "" {
-			if ids := selectable(m.shown()); len(ids) > 0 {
+			if ids := selectable(m.shown(), m.grouping()); len(ids) > 0 {
 				m.curEntry = ids[len(ids)-1]
 				m.reveal = true
 			}
@@ -387,7 +445,7 @@ func (m *Model) open(title, sessionID, leaf, mark string) tea.Cmd {
 		mod := view.At(s, leaf)
 		sel := ""
 		if mark != "" {
-			if slices.Contains(selectable(mod), mark) {
+			if slices.Contains(selectable(mod, grouping{all: true}), mark) {
 				sel = mark
 			} else if _, ok := s.Entry(mark); ok {
 				mod = view.At(s, mark)

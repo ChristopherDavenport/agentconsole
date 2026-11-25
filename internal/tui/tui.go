@@ -88,6 +88,9 @@ type Model struct {
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
 	flips map[string]opts
+	// groupsOpen holds the entries of the members of the outline's groups
+	// the person expanded (see grouping).
+	groupsOpen map[string]bool
 	// spans are where the rows sit in the viewport's content, from the
 	// last layout, for a click to find the row under it.
 	spans []rowSpan
@@ -288,24 +291,25 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 	in.SetStyles(inputStyles(true))
 	in.Focus()
 	m := &Model{
-		ctx:      ctx,
-		src:      src,
-		act:      act,
-		verified: rec.Verified(),
-		rec:      rec,
-		vp:       viewport.New(),
-		in:       in,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		md:       newMarkdown(),
-		flips:    map[string]opts{},
-		decided:  map[string]client.CallAnswer{},
-		offers:   map[string]client.GrantOffer{},
-		offering: map[string]bool{},
-		replied:  map[string]bool{},
-		steers:   &steerQueue{},
-		inputY:   -1,
-		exec:     tea.ExecProcess,
-		now:      time.Now,
+		ctx:        ctx,
+		src:        src,
+		act:        act,
+		verified:   rec.Verified(),
+		rec:        rec,
+		vp:         viewport.New(),
+		in:         in,
+		spinner:    spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		md:         newMarkdown(),
+		flips:      map[string]opts{},
+		groupsOpen: map[string]bool{},
+		decided:    map[string]client.CallAnswer{},
+		offers:     map[string]client.GrantOffer{},
+		offering:   map[string]bool{},
+		replied:    map[string]bool{},
+		steers:     &steerQueue{},
+		inputY:     -1,
+		exec:       tea.ExecProcess,
+		now:        time.Now,
 
 		panelSettle: defaultPanelSettle,
 	}
@@ -1114,7 +1118,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers))
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers), m.grouping())
 	m.setContent(content)
 	m.spans = spans
 	switch {
