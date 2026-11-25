@@ -1981,9 +1981,15 @@ collapse.
   Copy of a folded turn is its header.
 - **Groups and headers.** A collapsed group spans turns and stands for
   the headers of every turn it spans (first to last), as it says `N
-  turns`; its line is drawn unless every turn it spans is folded. An
-  expanded group draws the headers back between its members, each at the
-  first row of its turn.
+  turns`; its line is drawn unless every turn it spans is folded, when
+  their headers stand instead. A turn the group swallows gets a header
+  again only where rows of its own go on after the group (a final
+  message after a quiet call), drawn then, once, with the whole turn's
+  counts. An expanded group draws the headers back between its members,
+  each at the first row of its turn.
+- **Headers are stops.** Every header is a stop of the row cursor, folded
+  or not, so ctrl+p and ctrl+n step over them and the keyboard can fold
+  any turn; that adds a stop per response to the counts the tests press.
 - **Exported names added:** `Block.RowTurns`, `view.Outline`, `view.Block`, `view.Group`
   and their kinds (`BlockKind`, `BlockTurn`, `BlockGroup`),
   `view.ToolCount`, `Group.Turns`, `toolview.Summarizer` (an interface with

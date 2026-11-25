@@ -20,6 +20,14 @@ versions may break the API.
   second click, collapsed again the same way. The row cursor treats a
   collapsed group as one stop, and copy takes its line. A running or
   waiting call is never inside one.
+- Every response in the conversation has a thin header above it (`turn 3
+  · 2 calls → 2 outputs · 1 failed`, `turn 4 · answer`), counts only: the
+  model holds usage per line, not per response. Ctrl-O or a second click
+  on a header folds the turn to it; a turn with a running or waiting
+  call, or a live row, is never folded. A collapsed group of quiet calls
+  stands for the headers of the turns it spans, and expanded they come
+  back between its members. Headers are stops of the row cursor.
+- `view.Block.RowTurns`: the turn of each row of a block.
 - `toolview.Summarizer` and `toolview.Summarizers`, and
   `console.WithToolSummarizers`: an embedder sums up a group whose calls
   are all of one tool in a line of its own; the client's counts by tool

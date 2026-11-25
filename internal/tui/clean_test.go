@@ -158,7 +158,7 @@ func TestModelAndToolTextCannotWriteControlSequences(t *testing.T) {
 	s := a.waitFor("everything expanded", has("thought", "output", "said"))
 	f := a.frame()
 	inert(t, f, s, "]8;;x-evil:payload", "[2J", "]0;pwned", "]52;c;ZXZpbA==")
-	for _, who := range []string{"thought", "output", "said"} {
+	for _, who := range []string{"thought", "↳ output", "said"} {
 		if l := lineWith(s, who); !strings.Contains(l, "]0;pwned") {
 			t.Errorf("the %s line keeps a sequence: %q", who, l)
 		}

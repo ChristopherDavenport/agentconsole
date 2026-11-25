@@ -91,6 +91,9 @@ type Model struct {
 	// groupsOpen holds the entries of the members of the outline's groups
 	// the person expanded (see grouping).
 	groupsOpen map[string]bool
+	// turnsFolded holds the responses whose turns the person folded to
+	// their headers.
+	turnsFolded map[string]bool
 	// spans are where the rows sit in the viewport's content, from the
 	// last layout, for a click to find the row under it.
 	spans []rowSpan
@@ -299,25 +302,26 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 	in.SetStyles(inputStyles(true))
 	in.Focus()
 	m := &Model{
-		ctx:        ctx,
-		src:        src,
-		act:        act,
-		verified:   rec.Verified(),
-		rec:        rec,
-		vp:         viewport.New(),
-		in:         in,
-		spinner:    spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		md:         newMarkdown(),
-		flips:      map[string]opts{},
-		groupsOpen: map[string]bool{},
-		decided:    map[string]client.CallAnswer{},
-		offers:     map[string]client.GrantOffer{},
-		offering:   map[string]bool{},
-		replied:    map[string]bool{},
-		steers:     &steerQueue{},
-		inputY:     -1,
-		exec:       tea.ExecProcess,
-		now:        time.Now,
+		ctx:         ctx,
+		src:         src,
+		act:         act,
+		verified:    rec.Verified(),
+		rec:         rec,
+		vp:          viewport.New(),
+		in:          in,
+		spinner:     spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		md:          newMarkdown(),
+		flips:       map[string]opts{},
+		groupsOpen:  map[string]bool{},
+		turnsFolded: map[string]bool{},
+		decided:     map[string]client.CallAnswer{},
+		offers:      map[string]client.GrantOffer{},
+		offering:    map[string]bool{},
+		replied:     map[string]bool{},
+		steers:      &steerQueue{},
+		inputY:      -1,
+		exec:        tea.ExecProcess,
+		now:         time.Now,
 
 		panelSettle: defaultPanelSettle,
 	}
@@ -824,7 +828,7 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+n":
 		return m, m.moveCursor(1)
 	case "ctrl+b":
-		return m, m.continueFrom(m.curEntry)
+		return m, m.continueFrom(m.cursorEntry())
 	}
 	if m.frozen != nil {
 		switch msg.String() {
@@ -834,7 +838,7 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.wantPane()
 		case "c":
 			if m.curEntry != "" {
-				return m, m.continueFrom(m.curEntry)
+				return m, m.continueFrom(m.cursorEntry())
 			}
 			return m, m.continueFrom(m.frozen.model.Leaf)
 		}

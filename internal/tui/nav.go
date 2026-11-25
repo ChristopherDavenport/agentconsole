@@ -73,25 +73,14 @@ func (m *Model) shown() view.Model {
 }
 
 // selectable are the entries of the shown rows a cursor can rest on, in
-// order: the committed rows that render. A collapsed group is one stop,
-// its first member's entry; an expanded one is that stop, its line, and
-// then its members but the first.
+// order: the committed rows that render, the turns' headers and the
+// groups' lines. A collapsed group is one stop, its first member's
+// entry, and a folded turn is its header.
 func selectable(m view.Model, gp grouping) []string {
-	hidden := hiddenOutputs(m)
 	var out []string
-	for _, blk := range view.Outline(m) {
-		if blk.Kind == view.BlockGroup {
-			out = append(out, groupKey(m, blk))
-			if !gp.expanded(m, blk) {
-				continue
-			}
-		}
-		for j, i := range blk.Rows {
-			row := m.Rows[i]
-			if row.EntryID == "" || hidden[i] || (blk.Kind == view.BlockGroup && j == 0) {
-				continue
-			}
-			out = append(out, row.EntryID)
+	for _, it := range layout(m, gp) {
+		if it.stop != "" {
+			out = append(out, it.stop)
 		}
 	}
 	return out
@@ -121,8 +110,45 @@ func (m *Model) toggleGroup(blk view.Block) {
 	m.relayout()
 }
 
+// toggleTurn folds the turn of response resp to its header, or unfolds it.
+// A turn with something live or waiting is not folded: the choice is
+// kept only for a turn that has settled.
+func (m *Model) toggleTurn(resp string) {
+	if m.turnsFolded[resp] {
+		delete(m.turnsFolded, resp)
+	} else {
+		sh, gp := m.shown(), m.grouping()
+		for _, it := range layout(sh, gp) {
+			if it.kind == itemTurn && it.resp == resp && it.ti != nil && it.ti.busy {
+				m.setNote("this turn is still going")
+				return
+			}
+		}
+		m.turnsFolded[resp] = true
+	}
+	m.reveal = true
+	m.relayout()
+}
+
+// cursorEntry is the entry of the row the cursor stands for: its own, or
+// for a turn's header the turn's first committed row.
+func (m *Model) cursorEntry() string {
+	resp, ok := strings.CutPrefix(m.curEntry, turnStop)
+	if !ok {
+		return m.curEntry
+	}
+	for _, row := range m.shown().Rows {
+		if row.ResponseID == resp && row.EntryID != "" {
+			return row.EntryID
+		}
+	}
+	return ""
+}
+
 // grouping is how the conversation draws groups now.
-func (m *Model) grouping() grouping { return grouping{open: m.groupsOpen, sums: m.sums} }
+func (m *Model) grouping() grouping {
+	return grouping{open: m.groupsOpen, folded: m.turnsFolded, sums: m.sums}
+}
 
 // moveCursor moves the row cursor by delta, starting from the last row
 // when it is not set, and opens the detail pane's data for it.
@@ -153,6 +179,12 @@ func (m *Model) moveCursor(delta int) tea.Cmd {
 // own flips of it.
 func (m *Model) toggle(sw opts) {
 	if m.screen == screenConversation && m.curEntry != "" {
+		if resp, ok := strings.CutPrefix(m.curEntry, turnStop); ok {
+			if sw.output {
+				m.toggleTurn(resp)
+			}
+			return
+		}
 		if blk, ok := groupAt(m.shown(), m.curEntry); ok && sw.output {
 			m.toggleGroup(blk)
 			return
@@ -226,6 +258,10 @@ func (m *Model) clickRow(line int) tea.Cmd {
 			m.relayout()
 			return m.wantPane()
 		}
+		if resp, ok := strings.CutPrefix(sp.entry, turnStop); ok {
+			m.toggleTurn(resp)
+			return nil
+		}
 		if blk, ok := groupAt(m.shown(), sp.entry); ok {
 			m.toggleGroup(blk)
 			return nil
@@ -267,15 +303,20 @@ func (m *Model) keepCursor() {
 	if slices.Contains(selectable(sh, m.grouping()), m.curEntry) {
 		return
 	}
-	// A row a collapsed group took in is still there, in the group's
-	// stop.
+	// A row a collapsed group or a folded turn took in is still there,
+	// in the group's stop or the turn's header.
+	stops := selectable(sh, m.grouping())
 	for _, blk := range view.Outline(sh) {
-		if blk.Kind != view.BlockGroup {
-			continue
-		}
 		for _, i := range blk.Rows {
-			if sh.Rows[i].EntryID == m.curEntry {
+			if sh.Rows[i].EntryID != m.curEntry {
+				continue
+			}
+			if blk.Kind == view.BlockGroup && slices.Contains(stops, groupKey(sh, blk)) {
 				m.curEntry = groupKey(sh, blk)
+				return
+			}
+			if t := turnStop + sh.Rows[i].ResponseID; sh.Rows[i].ResponseID != "" && slices.Contains(stops, t) {
+				m.curEntry = t
 				return
 			}
 		}
@@ -311,12 +352,13 @@ func (m *Model) paneKey() string {
 	sh := m.shown()
 	switch m.pane {
 	case paneDetail:
-		if m.curEntry == "" {
+		entry := m.cursorEntry()
+		if entry == "" {
 			return ""
 		}
-		key := sh.Session + "|" + sh.Tail + "|" + m.curEntry
+		key := sh.Session + "|" + sh.Tail + "|" + entry
 		for _, row := range sh.Rows {
-			if row.EntryID == m.curEntry && row.Call != nil && !row.Call.Committed {
+			if row.EntryID == entry && row.Call != nil && !row.Call.Committed {
 				key += fmt.Sprintf("|%d", sh.Entries)
 			}
 		}
@@ -349,7 +391,7 @@ func (m *Model) wantPane() tea.Cmd {
 	}
 	m.panes.want = key
 	m.panes.seq++
-	seq, sh, entry, pn, ctx, insp := m.panes.seq, m.shown(), m.curEntry, m.pane, m.ctx, m.insp
+	seq, sh, entry, pn, ctx, insp := m.panes.seq, m.shown(), m.cursorEntry(), m.pane, m.ctx, m.insp
 	return func() tea.Msg {
 		var lines []string
 		var err error

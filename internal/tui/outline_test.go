@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func TestAChainOfQuietCallsIsOneLine(t *testing.T) {
 
 func TestCtrlOExpandsAGroupAndCollapsesIt(t *testing.T) {
 	a := quietApp(t)
-	a.press("ctrl+p", "ctrl+p") // the answer, then the group: one stop
+	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, then the group: one stop
 	if l := lineWith(a.screen(), "ran 2 mkdir"); !strings.Contains(l, "▶") {
 		t.Fatalf("the cursor is not on the group:\n%s", a.screen())
 	}
@@ -65,12 +66,16 @@ func TestCtrlOExpandsAGroupAndCollapsesIt(t *testing.T) {
 			t.Errorf("expanded: missing %q:\n%s", want, s)
 		}
 	}
-	// Expanded, the members are stops after the group's line.
-	a.key("ctrl+n")
+	// Expanded, the turns' headers are back between the members, and the
+	// members are stops after the group's line.
+	if s := a.screen(); !strings.Contains(s, "turn 1 · 1 call") || !strings.Contains(s, "turn 3 · 1 call") {
+		t.Errorf("no headers between the members:\n%s", s)
+	}
+	a.press("ctrl+n", "ctrl+n", "ctrl+n") // turn 1's header, turn 2's, the second member
 	if l := lineWith(a.screen(), `mkdir text="b"`); !strings.Contains(l, "▶") {
 		t.Errorf("the cursor did not step to the second member:\n%s", a.screen())
 	}
-	a.key("ctrl+p")
+	a.press("ctrl+p", "ctrl+p", "ctrl+p")
 	a.key("ctrl+o")
 	if s := a.screen(); strings.Contains(s, `mkdir text="a"`) || !strings.Contains(s, "ctrl+o to expand") {
 		t.Errorf("not collapsed again:\n%s", s)
@@ -88,9 +93,9 @@ func TestClickingAGroupExpandsIt(t *testing.T) {
 
 func TestOneStopForACollapsedGroup(t *testing.T) {
 	a := quietApp(t)
-	// answer, group, the user's prompt: three stops, and no member of the
-	// group between them.
-	a.press("ctrl+p", "ctrl+p", "ctrl+p")
+	// answer, its header, group, the user's prompt: four stops, and no
+	// member of the group between them.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
 	if l := lineWith(a.screen(), "user (unclaimed)"); !strings.Contains(l, "▶") {
 		t.Errorf("the third stop up is not the prompt:\n%s", a.screen())
 	}
@@ -155,5 +160,118 @@ func TestADecliningOrPanickingSummarizerFallsBack(t *testing.T) {
 		if s := a.screen(); !strings.Contains(s, "ran 3 mkdir · 3 turns") || strings.Contains(s, "not drawn") {
 			t.Errorf("%s: no fallback line:\n%s", name, s)
 		}
+	}
+}
+
+// outputApp is an app whose model calls upper twice, in two responses,
+// and answers: three turns with outputs, so no group.
+func outputApp(t *testing.T, g *gates) *app {
+	t.Helper()
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), callTool("call_2", "upper", `{"text":"def"}`), say(nil, nil, "all done"))
+	cfg.Tools = []agenttool.Tool{upperTool(g)}
+	a := newApp(t, cfg)
+	a.resize(110, 50)
+	a.submit("go")
+	return a
+}
+
+func TestEveryResponseHasAHeader(t *testing.T) {
+	a := outputApp(t, nil)
+	s := a.waitFor("the answer", all(has("all done", "idle"), lacks("(streaming)", "(not committed yet)")))
+	for _, want := range []string{"turn 1 · 1 call → 1 output", "turn 2 · 1 call → 1 output", "turn 3 · answer"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "turn 0") {
+		t.Errorf("the prompt has a header:\n%s", s)
+	}
+}
+
+func TestAFailedCallIsCountedInItsHeader(t *testing.T) {
+	cfg := cfgWith(callTool("call_1", "boom", `{"text":"a"}`), say(nil, nil, "sorry"))
+	cfg.Tools = []agenttool.Tool{agenttool.New("boom", "fails", func(context.Context, textArgs) (string, error) {
+		return "", errors.New("it broke")
+	})}
+	a := newApp(t, cfg)
+	a.resize(110, 50)
+	a.submit("go")
+	s := a.waitFor("the answer", all(has("sorry", "idle"), lacks("(streaming)", "(not committed yet)")))
+	if !strings.Contains(s, "turn 1 · 1 call → 1 output · 1 failed") {
+		t.Errorf("no failed count:\n%s", s)
+	}
+}
+
+func TestFoldingATurnToItsHeader(t *testing.T) {
+	a := outputApp(t, nil)
+	a.waitFor("the answer", all(has("all done", "idle"), lacks("(streaming)", "(not committed yet)")))
+	// Stops from the end: answer, its header, call 2, its header.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
+	if l := lineWith(a.screen(), "turn 2 ·"); !strings.Contains(l, "▶") {
+		t.Fatalf("the cursor is not on turn 2's header:\n%s", a.screen())
+	}
+	a.key("ctrl+o")
+	s := a.screen()
+	if !strings.Contains(s, "▸ turn 2 · 1 call → 1 output (ctrl+o to expand)") || strings.Contains(s, `upper text="def"`) {
+		t.Fatalf("turn 2 is not folded to its header:\n%s", s)
+	}
+	if !strings.Contains(s, `upper text="abc"`) || !strings.Contains(s, "all done") {
+		t.Errorf("the other turns are folded too:\n%s", s)
+	}
+	// Folded, the turn is one stop: up goes past it to the call before.
+	a.key("ctrl+p")
+	if l := lineWith(a.screen(), `upper text="abc"`); !strings.Contains(l, "▶") {
+		t.Errorf("the cursor did not step over the folded turn:\n%s", a.screen())
+	}
+	a.key("ctrl+n")
+	a.key("ctrl+o")
+	if s := a.screen(); !strings.Contains(s, `upper text="def"`) || strings.Contains(s, "ctrl+o to expand") {
+		t.Errorf("not unfolded:\n%s", s)
+	}
+	// The header is selected, so a click on it folds it too.
+	a.clickOn("turn 2 ·")
+	if s := a.screen(); !strings.Contains(s, "▸ turn 2") {
+		t.Errorf("a second click did not fold:\n%s", s)
+	}
+}
+
+func TestACopiedFoldedTurnIsItsHeader(t *testing.T) {
+	a := outputApp(t, nil)
+	a.waitFor("the answer", all(has("all done", "idle"), lacks("(streaming)", "(not committed yet)")))
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+o")
+	a.drag("▸ turn 2", 0, 60)
+	a.key("ctrl+c")
+	if got := a.copied(); len(got) != 1 || !strings.Contains(got[0], "turn 2 · 1 call → 1 output") || strings.Contains(got[0], "def") {
+		t.Errorf("copied %q", got)
+	}
+}
+
+func TestATurnWithARunningCallIsNeverFolded(t *testing.T) {
+	g := newGates()
+	a := outputApp(t, g)
+	t.Cleanup(func() { g.release("tool") })
+	g.arrive(t, "tool")
+	a.waitFor("running", has("[running]", "turn 1"))
+	a.press("ctrl+p", "ctrl+p") // the call, then the live turn's header
+	a.key("ctrl+o")
+	s := a.screen()
+	if !strings.Contains(s, "[running]") || strings.Contains(s, "▸ turn 1") {
+		t.Errorf("a turn with a running call was folded:\n%s", s)
+	}
+	if !strings.Contains(s, "still going") {
+		t.Errorf("no note:\n%s", s)
+	}
+}
+
+func TestACollapsedGroupStandsForTheHeadersItSwallows(t *testing.T) {
+	a := quietApp(t)
+	s := a.screen()
+	for _, gone := range []string{"turn 1 ·", "turn 2 ·", "turn 3 ·"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("a collapsed group leaves %q:\n%s", gone, s)
+		}
+	}
+	if !strings.Contains(s, "turn 4 · answer") {
+		t.Errorf("the answer has no header:\n%s", s)
 	}
 }

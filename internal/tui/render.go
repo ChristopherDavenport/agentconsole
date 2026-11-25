@@ -102,7 +102,6 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	if width < 10 {
 		width = 10
 	}
-	hidden := hiddenOutputs(m)
 	w := width
 	if sel != "" {
 		w = max(width-gutter, 8)
@@ -135,35 +134,17 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		blocks = append(blocks, b)
 		at += h + 1
 	}
-	row := func(i int, entry string) {
-		if hidden[i] {
-			return
-		}
-		r := m.Rows[i]
-		b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask)
-		if b != "" {
-			add(b, entry)
-		}
-	}
-	for _, blk := range view.Outline(m) {
-		if blk.Kind != view.BlockGroup {
-			for _, i := range blk.Rows {
-				row(i, m.Rows[i].EntryID)
+	for _, it := range layout(m, gp) {
+		switch it.kind {
+		case itemTurn:
+			add(turnLine(it.turn, it.ti, w), it.stop)
+		case itemGroup:
+			add(groupLine(m, it.blk, gp.expanded(m, it.blk), gp.sums), it.stop)
+		default:
+			r := m.Rows[it.row]
+			if b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask); b != "" {
+				add(b, it.stop)
 			}
-			continue
-		}
-		key := groupKey(m, blk)
-		open := gp.expanded(m, blk)
-		add(groupLine(m, blk, open, gp.sums), key)
-		if !open {
-			continue
-		}
-		for j, i := range blk.Rows {
-			e := m.Rows[i].EntryID
-			if j == 0 {
-				e = "" // the group's line is the stop of the first member
-			}
-			row(i, e)
 		}
 	}
 	if note := runEndNote(m); note != "" {
@@ -186,6 +167,8 @@ type grouping struct {
 	open map[string]bool
 	// all expands every group, for asking which entries are in the line.
 	all bool
+	// folded are the responses whose turns the person folded, by ID.
+	folded map[string]bool
 	// sums are the embedder's summarizers, by tool name.
 	sums toolview.Summarizers
 }
