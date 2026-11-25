@@ -244,7 +244,7 @@ func TestACopiedFoldedTurnIsItsHeader(t *testing.T) {
 	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+o")
 	a.drag("▸ turn 2", 0, 60)
 	a.key("ctrl+c")
-	if got := a.copied(); len(got) != 1 || !strings.Contains(got[0], "turn 2 · 1 call → 1 output") || strings.Contains(got[0], "def") {
+	if got := a.copied(); len(got) != 1 || !strings.Contains(got[0], "turn 2 · 1 call → 1 output") || strings.Contains(got[0], "def") || strings.Contains(got[0], "─") {
 		t.Errorf("copied %q", got)
 	}
 }

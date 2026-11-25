@@ -106,11 +106,14 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	if sel != "" {
 		w = max(width-gutter, 8)
 	}
-	var blocks []string
+	var out strings.Builder
 	at := 0
+	// gap is what goes before the next block: a blank line between
+	// blocks, but none between a turn's header and what is under it.
+	gap := ""
 	// add lays one drawn block out: wrapped, with the gutter's marker
 	// when it is the selected one, and a span for entry if it has one.
-	add := func(b, entry string) {
+	add := func(b, entry string, headerOf bool) {
 		b = wrap(b, w)
 		if sel != "" {
 			mark := "  "
@@ -131,19 +134,23 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		if entry != "" {
 			spans = append(spans, rowSpan{entry: entry, start: at, height: h})
 		}
-		blocks = append(blocks, b)
-		at += h + 1
+		out.WriteString(gap + b)
+		if headerOf {
+			gap, at = "\n", at+h
+		} else {
+			gap, at = "\n\n", at+h+1
+		}
 	}
 	for _, it := range layout(m, gp) {
 		switch it.kind {
 		case itemTurn:
-			add(turnLine(it.turn, it.ti, w), it.stop)
+			add(turnLine(it.turn, it.ti, w), it.stop, true)
 		case itemGroup:
-			add(groupLine(m, it.blk, gp.expanded(m, it.blk), gp.sums), it.stop)
+			add(groupLine(m, it.blk, gp.expanded(m, it.blk), gp.sums), it.stop, false)
 		default:
 			r := m.Rows[it.row]
 			if b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask); b != "" {
-				add(b, it.stop)
+				add(b, it.stop, false)
 			}
 		}
 	}
@@ -152,10 +159,10 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		if sel != "" {
 			b = "  " + strings.ReplaceAll(b, "\n", "\n  ")
 		}
-		blocks = append(blocks, b)
+		out.WriteString(gap + b)
 	}
 	md.sweep()
-	return strings.Join(blocks, "\n\n"), spans
+	return out.String(), spans
 }
 
 // grouping is how the conversation draws the outline's groups: which

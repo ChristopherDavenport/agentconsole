@@ -207,35 +207,53 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// turnText is what a header says: the turn's number and what it holds.
-func turnText(t int, ti *turnInfo) string {
-	s := fmt.Sprintf("turn %d", t)
+// turnText is what a header says: the turn's number and what it holds,
+// and apart from it what failed, which is drawn as an error.
+func turnText(t int, ti *turnInfo) (text, failed string) {
+	text = fmt.Sprintf("turn %d", t)
 	switch {
 	case ti == nil:
 	case ti.calls > 0:
-		s += " · " + plural(ti.calls, "call")
+		text += " · " + plural(ti.calls, "call")
 		if ti.outputs > 0 {
-			s += " → " + plural(ti.outputs, "output")
+			text += " → " + plural(ti.outputs, "output")
 		}
 		if ti.failed > 0 {
-			s += fmt.Sprintf(" · %d failed", ti.failed)
+			failed = fmt.Sprintf(" · %d failed", ti.failed)
 		}
 	case ti.answer:
-		s += " · answer"
+		text += " · answer"
 	case ti.thinking:
-		s += " · thinking"
+		text += " · thinking"
 	}
-	return s
+	return text, failed
 }
 
-// turnLine is a turn's header: a thin dim rule with the turn's text in
-// it, folded or not, filled to width.
+// turnLine is a turn's header, one line that never wraps: the turn's
+// text in bold, a folded turn's marker and hint, and, when there is room
+// for three or more, a thin dim rule to the right edge. Narrow, the rule
+// goes first, then the end of the text.
 func turnLine(t int, ti *turnInfo, width int) string {
-	text := turnText(t, ti)
+	text, failed := turnText(t, ti)
+	text, failed = view.CleanLine(text), view.CleanLine(failed)
+	hint := ""
 	if ti != nil && ti.folded {
-		text = "▸ " + text + " (ctrl+o to expand)"
+		text = "▸ " + text
+		hint = " (ctrl+o to expand)"
 	}
-	text = view.CleanLine(text)
-	fill := max(width-lipgloss.Width(text)-4, 3)
-	return dimStyle.Render("── " + text + " " + strings.Repeat("─", fill))
+	full := text + failed + hint
+	if lipgloss.Width(full) > width {
+		return emphStyle.Render(truncate(full, width))
+	}
+	line := emphStyle.Render(text)
+	if failed != "" {
+		line += errStyle.Bold(true).Render(failed)
+	}
+	if hint != "" {
+		line += dimStyle.Render(hint)
+	}
+	if fill := width - lipgloss.Width(full) - 1; fill >= 3 {
+		line += " " + dimStyle.Render(strings.Repeat("─", fill))
+	}
+	return line
 }

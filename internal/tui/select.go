@@ -32,6 +32,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -170,7 +171,7 @@ func (m *Model) selectedText() string {
 	var rows []string
 	for _, r := range region(x0, y0, x1, y1, 0, len(lines)-1) {
 		_, mid, _ := cutLine(lines[r.line], r.from, r.to)
-		rows = append(rows, strings.TrimRight(ansi.Strip(mid), " "))
+		rows = append(rows, trimRule(strings.TrimRight(ansi.Strip(mid), " ")))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -299,4 +300,17 @@ func seqEnd(s string, i int) int {
 	default: // a two-byte escape, esc 7 and the like
 		return i + 2
 	}
+}
+
+// turnHeader is the start of a turn's header line, as it reads once
+// the styles are stripped, with the gutter's marker if it has one.
+var turnHeader = regexp.MustCompile(`^\s*(▶\s+)?(▸ )?turn \d+\b`)
+
+// trimRule drops the thin rule a turn's header ends in, which is
+// decoration: a copy of the header is its text.
+func trimRule(line string) string {
+	if !turnHeader.MatchString(line) {
+		return line
+	}
+	return strings.TrimRight(strings.TrimRight(line, "─"), " ")
 }

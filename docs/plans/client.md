@@ -1959,9 +1959,16 @@ collapse.
   The global ctrl+o (no cursor) flips every call's output as before and
   leaves groups as they are.
 - **A header on every response.** The user's decision: the TUI draws a
-  thin dim rule above the rows of each response, `turn 3 · 2 calls → 2
-  outputs · 1 failed`, and `turn 4 · answer` for a response with no
-  calls. The counts read the turn's rows through the outline (calls, the
+  one-line header above the rows of each response: its text in bold,
+  `turn 3 · 2 calls → 2 outputs · 1 failed` (the failed count in the error
+  colour), and `turn 4 · answer` for a response with no calls, then a
+  space and a thin dim rule to the right edge, the only indicator, with
+  no rule to its left. Nothing but the line: no blank row under it (the
+  rows follow at once; the blank line between blocks is above it), and
+  it never wraps: narrow, the rule goes first, then the end of the text
+  is cut. A folded header keeps its marker and hint before the rule,
+  `▸ turn 3 · … (ctrl+o to expand) ────`. Copying a header copies its
+  text without the rule. The counts read the turn's rows through the outline (calls, the
   calls that have an output, the calls that failed), the whole turn
   even when a group cuts it into two blocks, which draw one header, at
   the turn's first block. A row with no response has no header. The
