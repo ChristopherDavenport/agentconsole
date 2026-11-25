@@ -282,7 +282,9 @@ func TestATurnWithARunningCallIsNeverFolded(t *testing.T) {
 	a := outputApp(t, g)
 	t.Cleanup(func() { g.release("tool") })
 	g.arrive(t, "tool")
-	a.waitFor("running", has("[running]", "turn 1"))
+	// The header itself, not "turn 1": the status line says that before the
+	// live row has its response, and the header is a stop the presses count.
+	a.waitFor("running", has("[running]", "turn 1 · 1 call"))
 	a.press("ctrl+p", "ctrl+p") // the call, then the live turn's header
 	a.key("ctrl+o")
 	s := a.screen()

@@ -302,3 +302,55 @@ func TestACallWithNoIDIsLoud(t *testing.T) {
 		t.Errorf("outline = %s, want %s", got, want)
 	}
 }
+
+func TestACallThePolicyAllowedWithAReasonIsQuiet(t *testing.T) {
+	l := newRecordsLog(t)
+	for _, id := range []string{"c1", "c2"} {
+		e := l.append(itemEntry(&openresponses.FunctionCall{ID: "fc_" + id, CallID: id, Name: "read", Arguments: `{}`}, "r1"))
+		d := agentsession.NewDecision(id, e, agentsession.VerdictProceed, "policy")
+		d.Reason = "allowed by read"
+		l.append(d)
+		l.append(agentsession.NewDispatch(id, e))
+		l.append(itemEntry(openresponses.NewFunctionCallOutput(id, "ok"), ""))
+	}
+	m := l.v.Model()
+	if c := m.Rows[0].Call; c.Verdict != "proceed" || c.Reason != "allowed by read" {
+		t.Fatalf("call = %+v, want verdict proceed with the reason", c)
+	}
+	if got, want := shape(Outline(m)), "T1(q0.1.2.3)"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
+// A reason makes a call loud only through its verdict: a call with no
+// verdict is read as proceed.
+func TestAReasonWithoutAVerdictDoesNotMakeACallLoud(t *testing.T) {
+	c := func() *Call {
+		return &Call{CallID: "c", State: CallEnded, Committed: true, Output: "ok", Reason: "allowed by read"}
+	}
+	for _, tc := range []struct {
+		name  string
+		edit  func(*Call)
+		asked bool
+		quiet bool
+	}{
+		{"no verdict", func(*Call) {}, false, true},
+		{"proceed", func(c *Call) { c.Verdict = "proceed" }, false, true},
+		{"hold", func(c *Call) { c.Verdict = "hold" }, false, false},
+		{"reject", func(c *Call) { c.Verdict = "reject" }, false, false},
+		{"answer", func(c *Call) { c.Verdict = "answer" }, false, false},
+		{"held beside", func(c *Call) { c.Verdict = "proceed"; c.HeldBeside = true }, false, false},
+		{"answered deferred call, hold on record", func(c *Call) { c.Verdict = "hold"; c.HeldBeside = true }, true, false},
+		{"permission entry for it", func(c *Call) { c.Verdict = "proceed" }, true, false},
+	} {
+		call := c()
+		tc.edit(call)
+		asked := map[string]bool{}
+		if tc.asked {
+			asked["c"] = true
+		}
+		if got := quiet(Row{Call: call}, asked); got != tc.quiet {
+			t.Errorf("%s: quiet = %v, want %v", tc.name, got, tc.quiet)
+		}
+	}
+}

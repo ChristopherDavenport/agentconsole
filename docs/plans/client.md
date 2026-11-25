@@ -1940,7 +1940,9 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   constants with no option. A longer output is loud and shown in full as
   before, and so is a failed call whatever its output. Nothing about it
   may need the person: no question, no hold, no withdrawal, no cut-off,
-  no policy verdict other than proceed, no left-out mark. A row that is live,
+  no policy verdict but proceed, whatever reason it carries (a rule that
+  allows a call records one, "allowed by read"; a call with a reason and
+  no verdict is read as proceed), no left-out mark. A row that is live,
   hidden or a fold is never quiet, so a running or waiting call is
   never hidden.
 - **A quiet run** (`QuietRun`) is each maximal stretch inside a turn of
