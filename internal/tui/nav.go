@@ -109,7 +109,7 @@ func (m *Model) toggleLine(stop string) bool {
 		m.toggleTurn(it.resp)
 		return true
 	case itemQuiet:
-		flip(m.quietOpen, stop)
+		flip(m.quietOpen, quietKey(m.shown(), it.quiet))
 	case itemRun:
 		flip(m.runsOpen, runKey(it.block))
 	}
@@ -153,6 +153,9 @@ func (m *Model) cursorEntry() string {
 	resp, ok := strings.CutPrefix(m.curEntry, turnStop)
 	if r, isRun := strings.CutPrefix(m.curEntry, runStop); isRun {
 		resp, ok = r, true
+	}
+	if e, isQuiet := strings.CutPrefix(m.curEntry, quietStop); isQuiet {
+		return e
 	}
 	if !ok {
 		return m.curEntry
@@ -344,7 +347,7 @@ func coverers(m view.Model) map[string][]string {
 				}
 				var cs []string
 				if it.Quiet != nil {
-					cs = append(cs, quietKey(m, it.Quiet))
+					cs = append(cs, quietStop+quietKey(m, it.Quiet))
 				}
 				if run != "" {
 					cs = append(cs, run)

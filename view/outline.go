@@ -2,6 +2,7 @@ package view
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ChristopherDavenport/openresponses"
 )
@@ -111,7 +112,7 @@ func (b Block) quietThrough() bool {
 // maximal stretch of quiet calls, their outputs and the reasoning around
 // them is a quiet run, even for one call; every other row is a loud row,
 // and the order is kept. A call is quiet when it has ended, its output is
-// on the record, it did not fail, its output is empty after trimming, and
+// on the record, it did not fail, its output is short (at most 5 lines and 400 runes after trimming), and
 // nothing about it needs the person (no question, hold, withdrawal,
 // cut-off or verdict but proceed). A live row is never quiet, so a running
 // call is never in a run. Two or more consecutive turns whose every item
@@ -267,5 +268,19 @@ func quiet(row Row, asked map[string]bool) bool {
 	if asked[c.CallID] || row.LeftOut != "" {
 		return false
 	}
-	return strings.TrimSpace(c.Output) == ""
+	return short(c.Output)
+}
+
+// What a quiet call's output may hold: a few lines of the kind the model
+// needs and the person only when they look (an ls, a git status).
+const (
+	quietLines = 5
+	quietRunes = 400
+)
+
+// short reports whether an output is at most quietLines lines and
+// quietRunes runes, after trimming; an empty one is.
+func short(out string) bool {
+	out = strings.TrimSpace(out)
+	return utf8.RuneCountInString(out) <= quietRunes && strings.Count(out, "\n") < quietLines
 }

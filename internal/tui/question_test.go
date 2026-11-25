@@ -25,9 +25,9 @@ func delegate(call bool) agenttool.Tool {
 			case !ok:
 				return "", errors.New("not asked")
 			case d.Action == agentturn.Block:
-				return "SUBAGENT REFUSED " + d.Reason, nil
+				return "SUBAGENT REFUSED " + d.Reason + loudPad, nil
 			}
-			return "SUBAGENT WROTE " + d.Note, nil
+			return "SUBAGENT WROTE " + d.Note + loudPad, nil
 		}
 		elicit, ok := agenttool.ElicitorFrom(ctx)
 		if !ok {
@@ -37,7 +37,7 @@ func delegate(call bool) agenttool.Tool {
 		if err != nil {
 			return "", err
 		}
-		return "TOOL HEARD " + string(ans.Action) + " " + ans.Note, nil
+		return "TOOL HEARD " + string(ans.Action) + " " + ans.Note + loudPad, nil
 	})
 }
 

@@ -15,14 +15,15 @@ versions may break the API.
   calls, their outputs and the reasoning around them, even one call), and
   runs of turns (two or more consecutive turns that are quiet through and
   through). A call is quiet when it ended, its output is on the record,
-  empty, not failed, and nothing is asked of the person. `Model.Rows` is
+  short (at most 5 lines and 400 characters), not failed, and nothing is
+  asked of the person. `Model.Rows` is
   unchanged. Replaces nothing released.
 - The conversation shows the outline. Every response has a one-line dim
   header (`turn 3 · 2 calls → 2 outputs · 1 failed`, `turn 4 · answer`),
   counts only: the model holds usage per line, not per response. Inside a
-  turn a quiet run is one line (`ran 2 bash, 1 read`), in order with the
-  rows around it; a run of quiet turns is one line (`turns 2–3 · ran 2
-  bash`) in place of their headers, and expands to the turns as they are
+  turn a quiet run is one line (`ran 2 bash, 1 read · 6 lines out`, with
+  the lines of output it folded), in order with the rows around it; a run
+  of quiet turns is one line (`turns 2–3 · ran 2 bash · 3 lines out`) in place of their headers, and expands to the turns as they are
   drawn elsewhere. Ctrl-O or a second click expands a line, or folds a
   turn to its header; a turn with a running or waiting call, or a live
   row, is never folded, and a running call is never inside a summary.

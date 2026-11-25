@@ -25,6 +25,15 @@ func (l *log) call(resp, id, name string, out *string) {
 
 func str(s string) *string { return &s }
 
+// lines is n lines of output.
+func lines(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	return b.String()
+}
+
 // shape is the outline as a test reads it: a turn is T<n>(items), a loud
 // row r<i>, a quiet run q<rows>, a run of turns R<first>-<last>(turns).
 func shape(bs []Block) string {
@@ -112,7 +121,7 @@ func TestOutlineLeavesTheRowsAloneAndPartitionsThem(t *testing.T) {
 func TestALoneQuietTurnIsATurnWithOneQuietRun(t *testing.T) {
 	l := newRecordsLog(t)
 	l.call("r1", "c1", "bash", str(""))
-	l.call("r2", "c2", "bash", str("hello"))
+	l.call("r2", "c2", "bash", str(lines(6)))
 	if got, want := shape(Outline(l.v.Model())), "T1(q0.1) T2(r2 r3)"; got != want {
 		t.Errorf("outline = %s, want %s", got, want)
 	}
@@ -121,7 +130,7 @@ func TestALoneQuietTurnIsATurnWithOneQuietRun(t *testing.T) {
 func TestQuietLoudQuietKeepsItsOrder(t *testing.T) {
 	l := newRecordsLog(t)
 	l.call("r1", "ca", "bash", str(""))
-	l.call("r1", "cb", "bash", str("hello"))
+	l.call("r1", "cb", "bash", str(lines(6)))
 	l.call("r1", "cc", "read", str(""))
 	m := l.v.Model()
 	// 0 ca, 1 out, 2 cb, 3 out, 4 cc, 5 out
@@ -200,6 +209,57 @@ func TestAnOutputWithoutItsCallRowIsItsOwnBlock(t *testing.T) {
 	l := newRecordsLog(t)
 	l.append(itemEntry(openresponses.NewFunctionCallOutput("gone", ""), ""))
 	if got, want := shape(Outline(l.v.Model())), "T0(r0)"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
+// A call is quiet by the size of its output: at most 5 lines and 400
+// runes after trimming, whatever it says.
+func TestAShortOutputIsQuietAndALongOneIsLoud(t *testing.T) {
+	for _, tc := range []struct {
+		name, out string
+		quiet     bool
+	}{
+		{"empty", "", true},
+		{"blank", " \n\n", true},
+		{"one line", "a.txt", true},
+		{"five lines", lines(5), true}, // a trailing newline is not a line
+		{"five lines, no trailing newline", strings.TrimSuffix(lines(5), "\n"), true},
+		{"six lines", lines(6), false},
+		{"400 runes", strings.Repeat("x", 400), true},
+		{"401 runes", strings.Repeat("x", 401), false},
+		{"400 multi-byte runes", strings.Repeat("é", 400), true},
+		{"401 multi-byte runes", strings.Repeat("é", 401), false},
+		{"400 runes and a newline", strings.Repeat("x", 400) + "\n", true},
+	} {
+		l := newRecordsLog(t)
+		l.call("r1", "c1", "bash", str(tc.out))
+		bs := Outline(l.v.Model())
+		if got := len(bs) == 1 && len(bs[0].Items) == 1 && bs[0].Items[0].Quiet != nil; got != tc.quiet {
+			t.Errorf("%s: quiet = %v, want %v (%s)", tc.name, got, tc.quiet, shape(bs))
+		}
+	}
+}
+
+func TestAShortOutputJoinsAQuietRunAndALongOneEndsIt(t *testing.T) {
+	l := newRecordsLog(t)
+	l.call("r1", "c1", "bash", str(""))
+	l.call("r1", "c2", "bash", str("a.txt\nb.txt"))
+	l.call("r1", "c3", "bash", str(lines(6)))
+	l.call("r1", "c4", "bash", str("ok"))
+	if got, want := shape(Outline(l.v.Model())), "T1(q0.1.2.3 r4 r5 q6.7)"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
+func TestAFailedCallWithAShortOutputIsStillLoud(t *testing.T) {
+	l := newRecordsLog(t)
+	e := l.append(itemEntry(&openresponses.FunctionCall{ID: "fc_f", CallID: "cf", Name: "bash", Arguments: `{}`}, "r1"))
+	l.append(agentsession.NewDispatch("cf", e))
+	out := itemEntry(openresponses.NewFunctionCallOutput("cf", "exit 1"), "")
+	out.Failed = true
+	l.append(out)
+	if got, want := shape(Outline(l.v.Model())), "T1(r0 r1)"; got != want {
 		t.Errorf("outline = %s, want %s", got, want)
 	}
 }

@@ -228,13 +228,13 @@ func TestToolCallShowsItsStates(t *testing.T) {
 
 func TestLongToolOutputCollapsesUntilToggled(t *testing.T) {
 	long := agenttool.New("lines", "many lines", func(_ context.Context, _ textArgs) (string, error) {
-		return "l1\nl2\nl3\nl4\nl5", nil
+		return "l1\nl2\nl3\nl4\nl5\nl6", nil
 	})
 	cfg := cfgWith(callTool("c", "lines", `{"text":"x"}`), say(nil, nil, "ok"))
 	cfg.Tools = []agenttool.Tool{long}
 	a := newApp(t, cfg)
 	a.submit("go")
-	s := a.waitFor("the call ended", all(has(`lines text="x"`, `5 lines (ctrl+o)`, "idle", "ok")))
+	s := a.waitFor("the call ended", all(has(`lines text="x"`, `6 lines (ctrl+o)`, "idle", "ok")))
 	if strings.Contains(s, "l1") {
 		t.Errorf("output not collapsed:\n%s", s)
 	}
@@ -263,7 +263,7 @@ func TestALongArgumentIsClippedOnTheRowLine(t *testing.T) {
 func twoCallsApp(t *testing.T, opts ...tui.Option) *app {
 	t.Helper()
 	long := agenttool.New("lines", "many lines", func(_ context.Context, a textArgs) (string, error) {
-		return a.Text + "1\n" + a.Text + "2\n" + a.Text + "3\n" + a.Text + "4\n" + a.Text + "5", nil
+		return a.Text + "1\n" + a.Text + "2\n" + a.Text + "3\n" + a.Text + "4\n" + a.Text + "5\n" + a.Text + "6", nil
 	})
 	cfg := cfgWith(callTool("c1", "lines", `{"text":"p"}`), callTool("c2", "lines", `{"text":"q"}`), say(nil, nil, "ok"))
 	cfg.Tools = []agenttool.Tool{long}

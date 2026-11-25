@@ -1902,6 +1902,12 @@ went missing behind a group. The design below replaced it: levels
 nested one in another, the same shape at every depth, nothing slicing
 across.
 
+The user first said a call is quiet when its output is empty. Short
+outputs (an `ls`, a `git status -s`) then broke the structure, though the
+model needs them and the person only when they look. So quiet is by
+size: a short output is quiet and is counted in the summary, a long one
+is loud and shown in full. The cutoff is 5 lines and 400 characters.
+
 - **A layer above the rows, not a change to them.** `view.Model.Rows`
   stays one row per item, in the record's order, so the Open Responses
   view is as it was and every rule about the overlay and the record
@@ -1917,8 +1923,11 @@ across.
   numbered 0, with no header. `Turn` counts the responses from 1 in the
   order they first appear.
 - **A quiet call** has ended, its output is on the record, it did not
-  fail, its output is empty after trimming, and nothing about it needs
-  the person (no question, no hold, no withdrawal, no cut-off, no policy
+  fail, its output is short, and nothing about it needs the person. Short
+  is at most 5 lines and at most 400 runes, after trimming whitespace
+  (a trailing newline is not a line; an empty output is short), fixed
+  constants with no option. A longer output is loud and shown in full as
+  before, and so is a failed call whatever its output (no question, no hold, no withdrawal, no cut-off, no policy
   verdict other than proceed, no left-out mark). A row that is live,
   hidden or a fold is never quiet, so a running or waiting call is
   never hidden.
@@ -1926,13 +1935,15 @@ across.
   quiet calls, their outputs and the reasoning around them, with at
   least one call, even for a single call. Order is kept: quiet, loud,
   quiet is a summary, a row, a summary. A run is shown as one line by
-  default, the counts by tool name in first-use order (`ran 2 bash, 1
-  read`), or its tool's summarizer's line when every call is that
-  tool's. Expanded it shows its rows as they are drawn outside a run.
+  default, the counts by tool name in first-use order and the lines of
+  output it folded (`ran 3 bash · 6 lines out`, the part left out when
+  there are none), or its tool's summarizer's line when every call is
+  that tool's; the summarizer reads the calls with their `Output`, which
+  on a quiet call is short, so it may show a first line. Expanded it shows its rows as they are drawn outside a run.
 - **A run of turns** (`BlockRun`) is two or more consecutive turns that
   are quiet through and through: every item a quiet run, so no message,
   no loud row, no live row, nothing asked. It is one line, `turns 2–3 ·
-  ran 2 bash, 1 read`, with the same summary rules over all its calls.
+  ran 2 bash, 1 read · 6 lines out`, with the same summary rules over all its calls.
   Expanded it shows its turns exactly as a turn is drawn outside a
   run: header, then its quiet summary line, itself expandable. One
   quiet turn alone is not a run: its header and its summary line. A
@@ -1956,12 +1967,12 @@ across.
   motion or waiting, or a permission or question on one of its calls is
   never folded: the choice is kept, and the turn stays drawn until it
   settles. The cursor's stops are the run's line, a turn's header, a
-  quiet run's line and the loud rows; an expanded run's first call has
-  no stop of its own, its line is the stop, so ctrl+o on the line
-  collapses it. A stop is a real entry where it can be (a quiet run: its
-  first call's; the detail pane and the head move read it), and a
-  synthetic `turn:<response ID>` or `run:<first response ID>` otherwise,
-  the pane and the head move reading the turn's first committed row. What
+  quiet run's line and the rows, expanded quiet runs' calls included, so
+  a call's output is one ctrl+o away on its row as ever. A row's stop is
+  its entry; a line's is synthetic, `turn:<response ID>`,
+  `run:<first response ID>` or `quiet:<first call's entry>`, the pane
+  and the head move reading the entry (the first call's, the turn's
+  first committed row). What
   the person expanded is kept by key so it survives growth: a turn's fold
   and a run of turns by the first response ID, a quiet run by its first
   call's entry. A cursor on a row a collapsed line took in moves to that

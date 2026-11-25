@@ -226,7 +226,18 @@ func summaryOf(m view.Model, calls []int, tools []view.ToolCount, sums toolview.
 	for k, t := range tools {
 		parts[k] = fmt.Sprintf("%d %s", t.N, view.CleanLine(t.Name))
 	}
-	return "ran " + strings.Join(parts, ", ")
+	line := "ran " + strings.Join(parts, ", ")
+	// What was folded away: the short outputs the person has not looked at.
+	n := 0
+	for _, i := range calls {
+		if out := strings.TrimSpace(m.Rows[i].Call.Output); out != "" {
+			n += strings.Count(out, "\n") + 1
+		}
+	}
+	if n > 0 {
+		line += " · " + plural(n, "line") + " out"
+	}
+	return line
 }
 
 // summarize is s's line for calls, and whether it gave one. It gave none

@@ -11,10 +11,11 @@ import (
 )
 
 // The prefixes of the cursor's stops that are not an entry: a turn's
-// header, and a run of turns; the rest is a response's ID.
+// header, a quiet run's line and a run of turns; the rest is a response's ID.
 const (
-	turnStop = "turn:"
-	runStop  = "run:"
+	turnStop  = "turn:"
+	runStop   = "run:"
+	quietStop = "quiet:" // and the first call's entry
 )
 
 // itemKind is what one drawn block of the conversation is.
@@ -57,8 +58,7 @@ type turnInfo struct {
 }
 
 // quietKey is the entry that stands for a quiet run, its first call's:
-// the row cursor's stop, the key of its expansion and the span of its
-// line.
+// the key of its expansion (its stop is quietStop and the key).
 func quietKey(m view.Model, q *view.QuietRun) string { return m.Rows[q.Calls[0]].EntryID }
 
 // runKey is the response that stands for a run of turns, its first
@@ -92,16 +92,12 @@ func layout(m view.Model, gp grouping) []item {
 				continue
 			}
 			open := gp.quietExpanded(m, q)
-			items = append(items, item{kind: itemQuiet, quiet: q, open: open, stop: quietKey(m, q)})
+			items = append(items, item{kind: itemQuiet, quiet: q, open: open, stop: quietStop + quietKey(m, q)})
 			if !open {
 				continue
 			}
 			for _, i := range q.Rows {
-				stop := m.Rows[i].EntryID
-				if i == q.Calls[0] {
-					stop = "" // the line is the stop of the first call
-				}
-				row(i, stop)
+				row(i, m.Rows[i].EntryID)
 			}
 		}
 	}

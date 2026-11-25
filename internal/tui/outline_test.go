@@ -410,3 +410,59 @@ func TestADecliningOrPanickingSummarizerFallsBack(t *testing.T) {
 		}
 	}
 }
+
+// shortOut is a tool whose calls print a few lines: quiet by size, so the
+// summary says how many lines it folded.
+func shortOut(name, out string) agenttool.Tool {
+	return agenttool.New(name, "prints", func(context.Context, textArgs) (string, error) { return out, nil })
+}
+
+func TestASummaryCountsTheLinesItFolded(t *testing.T) {
+	cfg := cfgWith(
+		callTool("call_1", "ls", `{"text":"a"}`),
+		callTool("call_2", "status", `{"text":"b"}`),
+		say(nil, nil, "all done"),
+	)
+	cfg.Tools = []agenttool.Tool{shortOut("ls", "a.txt\nb.txt"), shortOut("status", "M x.go")}
+	a := newApp(t, cfg)
+	a.resize(110, 50)
+	a.submit("go")
+	s := settled(a, "all done")
+	if !strings.Contains(s, "turns 1–2 · ran 1 ls, 1 status · 3 lines out") || strings.Contains(s, "a.txt") {
+		t.Fatalf("no run line with the folded lines:\n%s", s)
+	}
+	// Expanded, a turn's summary says its own, and expanding that shows
+	// the call as a row, its output behind the row's own hint.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the run
+	a.key("ctrl+o")
+	a.press("ctrl+n", "ctrl+n") // turn 1's header, its summary
+	if s := a.screen(); !strings.Contains(s, "ran 1 ls · 2 lines out") {
+		t.Fatalf("no summary under turn 1:\n%s", s)
+	}
+	a.key("ctrl+o")
+	s = a.screen()
+	if !strings.Contains(s, `ls text="a"`) || !strings.Contains(s, "2 lines (ctrl+o)") {
+		t.Errorf("the call is not a row with its output hint:\n%s", s)
+	}
+	a.key("ctrl+n") // the call's row; its output is behind ctrl+o as ever
+	a.key("ctrl+o")
+	if s := a.screen(); !strings.Contains(s, "a.txt") || !strings.Contains(s, "b.txt") {
+		t.Errorf("the output is not shown expanded:\n%s", s)
+	}
+}
+
+func TestALongOutputIsALoudRowAmongQuietOnes(t *testing.T) {
+	cfg := cfgWith(
+		twice(callTool("call_1", "ls", `{"text":"a"}`), twice(callTool("call_2", "cat", `{"text":"b"}`), callTool("call_3", "ls", `{"text":"c"}`))),
+		say(nil, nil, "all done"),
+	)
+	cfg.Tools = []agenttool.Tool{shortOut("ls", "a.txt"), shortOut("cat", "1\n2\n3\n4\n5\n6")}
+	a := newApp(t, cfg)
+	a.resize(110, 50)
+	a.submit("go")
+	s := settled(a, "all done")
+	i, j, k := strings.Index(s, "ran 1 ls · 1 line out"), strings.Index(s, `cat text="b"`), strings.LastIndex(s, "ran 1 ls · 1 line out")
+	if i < 0 || j < 0 || !(i < j && j < k) || !strings.Contains(s, "6 lines (ctrl+o)") {
+		t.Errorf("summary, loud cat, summary expected (%d %d %d):\n%s", i, j, k, s)
+	}
+}

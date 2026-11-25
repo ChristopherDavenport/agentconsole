@@ -60,11 +60,11 @@ func callRow(id string, c view.Call) view.Row {
 func TestARendererDrawsItsToolsCalls(t *testing.T) {
 	tools := toolview.Renderers{"read": fileRenderer{}, "bad": panicky{}, "grep": sloppy{}}
 	m := view.Model{Rows: []view.Row{
-		callRow("e1", view.Call{CallID: "c1", Name: "read", Args: `{"path":"a.go"}`, State: view.CallEnded, Output: "x\ny", Committed: true}),
+		callRow("e1", view.Call{CallID: "c1", Name: "read", Args: `{"path":"a.go"}`, State: view.CallEnded, Output: "x\ny", Committed: true, Verdict: "ask"}),
 		callRow("e2", view.Call{CallID: "c2", Name: "read", Args: `{"pa`, State: view.CallOpen}),
-		callRow("e3", view.Call{CallID: "c3", Name: "bad", Args: `{"k":"v"}`, State: view.CallEnded, Output: "out", Committed: true}),
+		callRow("e3", view.Call{CallID: "c3", Name: "bad", Args: `{"k":"v"}`, State: view.CallEnded, Output: "out", Committed: true, Verdict: "ask"}),
 		callRow("e4", view.Call{CallID: "c4", Name: "read", Args: `{"path":"b.go"}`, State: view.CallDeferred, Reason: "may I?"}),
-		callRow("e5", view.Call{CallID: "c5", Name: "grep", Args: `{"pattern":"p"}`, State: view.CallEnded, Output: "hit", Committed: true,
+		callRow("e5", view.Call{CallID: "c5", Name: "grep", Args: `{"pattern":"p"}`, State: view.CallEnded, Output: "hit", Committed: true, Verdict: "ask",
 			Children: []view.Call{{CallID: "c6", Name: "read", Args: `{"path":"c.go"}`, State: view.CallRunning, Partial: "going"}}}),
 		callRow("e7", view.Call{CallID: "c7", Name: "read", Args: `{"path":"d.go"}`, State: view.CallEnded, Output: "z"}),
 	}}
