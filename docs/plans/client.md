@@ -1979,9 +1979,12 @@ collapse.
   permission or question on one of its calls is never folded: the set
   keeps the person's choice and the turn stays drawn until it settles.
   Copy of a folded turn is its header.
-- **Groups and headers.** A collapsed group spans turns and stands for
-  the headers of every turn it spans (first to last), as it says `N
-  turns`; its line is drawn unless every turn it spans is folded, when
+- **Groups and headers.** A collapsed group that spans several turns
+  stands for their headers (first to last) and names the range in its
+  own line, `turns 2–3`, so every turn number from 1 to the last is on
+  the screen as a header or inside a group's range, in any collapse
+  state. A group inside one turn keeps that turn's header above it and
+  names no turn; its line is drawn unless every turn it spans is folded, when
   their headers stand instead. A turn the group swallows gets a header
   again only where rows of its own go on after the group (a final
   message after a quiet call), drawn then, once, with the whole turn's

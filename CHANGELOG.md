@@ -16,7 +16,7 @@ versions may break the API.
   reasoning between them included, across turns). `Model.Rows` is
   unchanged.
 - The conversation shows a group of quiet calls as one line (`ran 4
-  bash, 2 read · 3 turns`), expanded to its member rows with ctrl+o or a
+  bash, 2 read · turns 1–3`), expanded to its member rows with ctrl+o or a
   second click, collapsed again the same way. The row cursor treats a
   collapsed group as one stop, and copy takes its line. A running or
   waiting call is never inside one.
@@ -25,7 +25,8 @@ versions may break the API.
   model holds usage per line, not per response. Ctrl-O or a second click
   on a header folds the turn to it; a turn with a running or waiting
   call, or a live row, is never folded. A collapsed group of quiet calls
-  stands for the headers of the turns it spans, and expanded they come
+  spanning turns stands for their headers and names the range (`turns
+  2–3`); one inside a turn sits under that turn's header. Expanded, the headers come
   back between its members. Headers are stops of the row cursor.
 - `view.Block.RowTurns`: the turn of each row of a block.
 - `toolview.Summarizer` and `toolview.Summarizers`, and

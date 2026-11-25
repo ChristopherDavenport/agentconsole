@@ -107,11 +107,18 @@ func layout(m view.Model, gp grouping) []item {
 				}
 				continue
 			}
+			if g.FirstTurn == g.LastTurn {
+				// A group inside one turn keeps the turn's header.
+				header(g.FirstTurn, true)
+			}
 			for t := g.FirstTurn; t <= g.LastTurn; t++ {
 				swallowed[t] = true // the group's line stands for them
 			}
 			items = append(items, item{kind: itemGroup, blk: blk, stop: groupKey(m, blk)})
 			continue
+		}
+		if g.FirstTurn == g.LastTurn {
+			header(g.FirstTurn, true)
 		}
 		items = append(items, item{kind: itemGroup, blk: blk, stop: groupKey(m, blk)})
 		for j, i := range blk.Rows {

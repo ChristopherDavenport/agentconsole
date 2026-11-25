@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/ChristopherDavenport/agenttool"
+	"github.com/ChristopherDavenport/openresponses"
 
 	"github.com/ChristopherDavenport/agentconsole/internal/tui"
 	"github.com/ChristopherDavenport/agentconsole/toolview"
@@ -45,7 +48,7 @@ func quietAppOf(t *testing.T, third string, opts ...tui.Option) *app {
 func TestAChainOfQuietCallsIsOneLine(t *testing.T) {
 	a := quietApp(t)
 	s := a.screen()
-	if !strings.Contains(s, "ran 2 mkdir, 1 touch · 3 turns") {
+	if !strings.Contains(s, "ran 2 mkdir, 1 touch · turns 1–3") {
 		t.Fatalf("no summary line:\n%s", s)
 	}
 	if strings.Contains(s, `mkdir text=`) || strings.Contains(s, "touch text=") {
@@ -61,7 +64,7 @@ func TestCtrlOExpandsAGroupAndCollapsesIt(t *testing.T) {
 	}
 	a.key("ctrl+o")
 	s := a.screen()
-	for _, want := range []string{`mkdir text="a"`, `mkdir text="b"`, `touch text="c"`, "ran 2 mkdir, 1 touch · 3 turns", "ctrl+o to collapse"} {
+	for _, want := range []string{`mkdir text="a"`, `mkdir text="b"`, `touch text="c"`, "ran 2 mkdir, 1 touch · turns 1–3", "ctrl+o to collapse"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("expanded: missing %q:\n%s", want, s)
 		}
@@ -106,7 +109,7 @@ func TestCopyingACollapsedGroupCopiesItsLine(t *testing.T) {
 	a.drag("ran 2 mkdir", 0, 40)
 	a.key("ctrl+c")
 	got := a.copied()
-	if len(got) != 1 || !strings.Contains(got[0], "ran 2 mkdir, 1 touch · 3 turns") || strings.Contains(got[0], "text=") {
+	if len(got) != 1 || !strings.Contains(got[0], "ran 2 mkdir, 1 touch · turns 1–3") || strings.Contains(got[0], "text=") {
 		t.Errorf("copied %q", got)
 	}
 }
@@ -149,7 +152,7 @@ func TestAGroupOfOneToolTakesItsSummarizer(t *testing.T) {
 
 func TestAMixedGroupHasTheClientsLine(t *testing.T) {
 	a := quietApp(t, tui.WithToolSummarizers(toolview.Summarizers{"mkdir": dirs{}}))
-	if s := a.screen(); !strings.Contains(s, "ran 2 mkdir, 1 touch · 3 turns") || strings.Contains(s, "made") {
+	if s := a.screen(); !strings.Contains(s, "ran 2 mkdir, 1 touch · turns 1–3") || strings.Contains(s, "made") {
 		t.Errorf("a group of two tools used one's summarizer:\n%s", s)
 	}
 }
@@ -157,7 +160,7 @@ func TestAMixedGroupHasTheClientsLine(t *testing.T) {
 func TestADecliningOrPanickingSummarizerFallsBack(t *testing.T) {
 	for name, sum := range map[string]toolview.Summarizer{"declines": declines{}, "panics": panics{}} {
 		a := quietAppOf(t, "mkdir", tui.WithToolSummarizers(toolview.Summarizers{"mkdir": sum}))
-		if s := a.screen(); !strings.Contains(s, "ran 3 mkdir · 3 turns") || strings.Contains(s, "not drawn") {
+		if s := a.screen(); !strings.Contains(s, "ran 3 mkdir · turns 1–3") || strings.Contains(s, "not drawn") {
 			t.Errorf("%s: no fallback line:\n%s", name, s)
 		}
 	}
@@ -273,5 +276,80 @@ func TestACollapsedGroupStandsForTheHeadersItSwallows(t *testing.T) {
 	}
 	if !strings.Contains(s, "turn 4 · answer") {
 		t.Errorf("the answer has no header:\n%s", s)
+	}
+}
+
+// covered is the turn numbers a screen accounts for: a header names one,
+// a group's line names a range.
+func covered(screen string) map[int]bool {
+	got := map[int]bool{}
+	for _, m := range regexp.MustCompile(`turn (\d+) ·`).FindAllStringSubmatch(screen, -1) {
+		n, _ := strconv.Atoi(m[1])
+		got[n] = true
+	}
+	for _, m := range regexp.MustCompile(`turns (\d+)–(\d+)`).FindAllStringSubmatch(screen, -1) {
+		a, _ := strconv.Atoi(m[1])
+		b, _ := strconv.Atoi(m[2])
+		for n := a; n <= b; n++ {
+			got[n] = true
+		}
+	}
+	return got
+}
+
+// twice plays two calls in one response.
+func twice(a, b step) step {
+	return func(ctx context.Context, em *openresponses.Emitter) error {
+		if err := a(ctx, em); err != nil {
+			return err
+		}
+		return b(ctx, em)
+	}
+}
+
+// A quiet chain across turns, a group inside one turn, a call with
+// output, a failed call and an answer: no turn number goes unexplained
+// however the groups and turns are folded.
+func TestNoTurnNumberIsMissingFromTheScreen(t *testing.T) {
+	cfg := cfgWith(
+		callTool("c1", "mkdir", `{"text":"a"}`),
+		callTool("c2", "mkdir", `{"text":"b"}`),
+		callTool("c3", "touch", `{"text":"c"}`),
+		callTool("c4", "upper", `{"text":"abc"}`),
+		twice(callTool("c5", "mkdir", `{"text":"d"}`), callTool("c6", "touch", `{"text":"e"}`)),
+		callTool("c7", "boom", `{"text":"f"}`),
+		say(nil, nil, "all done"),
+	)
+	cfg.Tools = []agenttool.Tool{quietTool("mkdir"), quietTool("touch"), upperTool(nil),
+		agenttool.New("boom", "fails", func(context.Context, textArgs) (string, error) { return "", errors.New("it broke") })}
+	a := newApp(t, cfg)
+	a.resize(110, 70)
+	a.submit("go")
+	a.waitFor("the answer", all(has("all done", "idle"), lacks("(streaming)", "(not committed yet)")))
+	check := func(when string) {
+		t.Helper()
+		s := a.screen()
+		got := covered(s)
+		for n := 1; n <= 7; n++ {
+			if !got[n] {
+				t.Errorf("%s: turn %d is not on the screen:\n%s", when, n, s)
+			}
+		}
+	}
+	check("collapsed")
+	if s := a.screen(); !strings.Contains(s, "turns 1–3") || !strings.Contains(s, "turn 5 · 2 calls → 2 outputs") {
+		t.Errorf("the groups are not named by their turns:\n%s", s)
+	}
+	// Fold turn 4 (the call with output), then expand the groups.
+	a.clickOn("turn 4 ·")
+	a.clickOn("turn 4 ·")
+	check("turn 4 folded")
+	for _, g := range []string{"ran 2 mkdir, 1 touch", "ran 1 mkdir, 1 touch"} {
+		a.clickOn(g)
+		a.clickOn(g)
+	}
+	check("expanded")
+	if s := a.screen(); !strings.Contains(s, `mkdir text="a"`) || !strings.Contains(s, `touch text="e"`) {
+		t.Errorf("the groups did not expand:\n%s", s)
 	}
 }

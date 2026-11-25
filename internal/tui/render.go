@@ -219,8 +219,8 @@ func groupSummary(m view.Model, b view.Block, sums toolview.Summarizers) string 
 		parts[k] = fmt.Sprintf("%d %s", t.N, view.CleanLine(t.Name))
 	}
 	s := "ran " + strings.Join(parts, ", ")
-	if n := g.Turns(); n > 1 {
-		s += fmt.Sprintf(" · %d turns", n)
+	if g.FirstTurn != g.LastTurn {
+		s += fmt.Sprintf(" · turns %d–%d", g.FirstTurn, g.LastTurn)
 	}
 	return s
 }

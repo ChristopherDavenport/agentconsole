@@ -22,7 +22,7 @@ func TestARunningCallStaysOutOfTheGroupLine(t *testing.T) {
 	m := view.Model{Rows: []view.Row{quietRow("c1", "bash"), quietRow("c2", "bash"), running}}
 	out, _ := renderRows(m, opts{}, nil, nil, 80, "", "", newMarkdown(), asks{}, grouping{})
 	got := plain(out)
-	if !strings.Contains(got, "ran 2 bash · 2 turns") || !strings.Contains(got, "bash command=") || !strings.Contains(got, "[running]") {
+	if !strings.Contains(got, "ran 2 bash · turns 1–2") || !strings.Contains(got, "bash command=") || !strings.Contains(got, "[running]") {
 		t.Errorf("the running call is not drawn beside the group:\n%s", got)
 	}
 	// Expanded, the members are drawn as rows.
