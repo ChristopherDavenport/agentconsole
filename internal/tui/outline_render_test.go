@@ -29,7 +29,7 @@ func TestARunningCallIsNotSummarized(t *testing.T) {
 	running := callRow("e_3", view.Call{CallID: "c3", Name: "bash", Args: `{"command":"sleep 9"}`, State: view.CallRunning})
 	running.ResponseID = "r3"
 	m := view.Model{Rows: []view.Row{quietRow("c1", "bash", "r1"), quietRow("c2", "bash", "r2"), running}}
-	out, _ := renderRows(m, opts{}, nil, nil, 80, "", "", newMarkdown(), asks{}, grouping{})
+	out, _ := renderRows(m, opts{}, nil, nil, 80, "", "", newMarkdown(), asks{}, outlineState{})
 	got := plain(out)
 	for _, want := range []string{"turns 1–2 · ran 2 bash", "turn 3 · 1 call", "bash command=", "[running]"} {
 		if !strings.Contains(got, want) {
@@ -37,7 +37,7 @@ func TestARunningCallIsNotSummarized(t *testing.T) {
 		}
 	}
 	// Expanded, the run shows its turns, each a header and its summary.
-	out, _ = renderRows(m, opts{}, nil, nil, 80, "", "", newMarkdown(), asks{}, grouping{runs: map[string]bool{"r1": true}})
+	out, _ = renderRows(m, opts{}, nil, nil, 80, "", "", newMarkdown(), asks{}, outlineState{runs: map[string]bool{"r1": true}})
 	got = plain(out)
 	if strings.Count(got, "ran 1 bash") != 2 || !strings.Contains(got, "turn 1 · 1 call") || !strings.Contains(got, "turn 2 · 1 call") {
 		t.Errorf("expanded:\n%s", got)
@@ -62,7 +62,7 @@ func TestATurnHeaderIsOneLineWithNoGapUnderIt(t *testing.T) {
 	}
 
 	m := view.Model{Rows: []view.Row{assistantRow("m1", "r1", "hello"), assistantRow("m2", "r2", "bye")}}
-	out, spans := renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, grouping{})
+	out, spans := renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, outlineState{})
 	lines := strings.Split(plain(out), "\n")
 	if !strings.HasPrefix(lines[0], "turn 1 · answer") || !strings.HasPrefix(lines[1], "agent") {
 		t.Errorf("a gap under the header:\n%q", lines)
@@ -74,7 +74,7 @@ func TestATurnHeaderIsOneLineWithNoGapUnderIt(t *testing.T) {
 	}
 	// A folded header has nothing under it: the next header is a block of
 	// its own, a blank line below.
-	out, spans = renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, grouping{folded: map[string]bool{"r1": true}})
+	out, spans = renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, outlineState{folded: map[string]bool{"r1": true}})
 	lines = strings.Split(plain(out), "\n")
 	if !strings.HasPrefix(lines[0], "▸ turn 1") || strings.TrimSpace(lines[1]) != "" || !strings.HasPrefix(lines[2], "turn 2") {
 		t.Errorf("folded then header:\n%q", lines)

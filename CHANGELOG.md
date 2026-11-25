@@ -15,9 +15,9 @@ versions may break the API.
   calls, their outputs and the reasoning around them, even one call), and
   runs of turns (two or more consecutive turns that are quiet through and
   through). A call is quiet when it ended, its output is on the record,
-  short (at most 5 lines and 400 characters), not failed, and nothing is
+  short (at most 5 lines and 400 runes), not failed, and nothing is
   asked of the person. `Model.Rows` is
-  unchanged. Replaces nothing released.
+  unchanged.
 - The conversation shows the outline. Every response has a one-line dim
   header (`turn 3 · 2 calls → 2 outputs · 1 failed`, `turn 4 · answer`),
   counts only: the model holds usage per line, not per response. Inside a

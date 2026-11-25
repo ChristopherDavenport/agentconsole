@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
@@ -72,15 +73,14 @@ type rowSpan struct {
 // hiddenOutputs are the rows whose call's row carries their output, by
 // index.
 func hiddenOutputs(m view.Model) map[int]bool {
-	answered := map[string]bool{}
-	for _, row := range m.Rows {
-		if row.Call != nil {
-			answered[row.Call.CallID] = true
-		}
-	}
+	seen := map[string]bool{}
 	hidden := map[int]bool{}
 	for i, row := range m.Rows {
-		if out, ok := row.Item.(*openresponses.FunctionCallOutput); ok && answered[out.CallID] {
+		if row.Call != nil && row.Call.CallID != "" {
+			seen[row.Call.CallID] = true
+		}
+		// An output follows its call's row, which carries it.
+		if out, ok := row.Item.(*openresponses.FunctionCallOutput); ok && out.CallID != "" && seen[out.CallID] {
 			hidden[i] = true
 		}
 	}
@@ -98,7 +98,7 @@ const gutter = 2
 // motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks, gp grouping) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks, gp outlineState) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
@@ -151,9 +151,9 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		case itemTurn:
 			add(turnLine(it.turn, it.ti, w), it.stop, true)
 		case itemQuiet:
-			add(quietLine(m, it.quiet, it.open, gp.sums), it.stop, false)
+			add(quietLine(m, it.quiet, it.open, gp.sums, w), it.stop, false)
 		case itemRun:
-			add(turnsLine(m, it.block, it.open, gp.sums), it.stop, false)
+			add(turnsLine(m, it.block, it.open, gp.sums, w), it.stop, false)
 		default:
 			r := m.Rows[it.row]
 			if b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask); b != "" {
@@ -172,9 +172,9 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	return out.String(), spans
 }
 
-// grouping is how the conversation draws the outline: which of its
+// outlineState is how the conversation draws the outline: which of its
 // lines the person expanded or folded.
-type grouping struct {
+type outlineState struct {
 	// quiet holds the quiet runs the person expanded, by their first
 	// call's entry.
 	quiet map[string]bool
@@ -192,21 +192,28 @@ type grouping struct {
 
 // quietLine is a quiet run's line: the dot, what ran, and the key that
 // opens it, or closes it when it is open.
-func quietLine(m view.Model, q *view.QuietRun, open bool, sums toolview.Summarizers) string {
-	return foldLine(summaryOf(m, q.Calls, q.Tools, sums), open)
+func quietLine(m view.Model, q *view.QuietRun, open bool, sums toolview.Summarizers, width int) string {
+	return foldLine(summaryOf(m, q.Calls, q.Tools, sums), open, width)
 }
 
 // turnsLine is a run of turns' line: the turns it covers and what ran in
 // them.
-func turnsLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers) string {
-	return foldLine(fmt.Sprintf("turns %d–%d · ", b.FirstTurn, b.LastTurn)+summaryOf(m, b.Calls, b.Tools, sums), open)
+func turnsLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers, width int) string {
+	return foldLine(fmt.Sprintf("turns %d–%d · ", b.FirstTurn, b.LastTurn)+summaryOf(m, b.Calls, b.Tools, sums), open, width)
 }
 
-func foldLine(text string, open bool) string {
+// foldLine is the line of a quiet run or a run of turns: one line, cut
+// to width, so a long summary never wraps.
+func foldLine(text string, open bool, width int) string {
+	text = strings.ReplaceAll(text, "\n", " ")
+	hint, mark := " (ctrl+o to expand)", toolStyle.Render("○ ")
 	if open {
-		return dimStyle.Render("▾ ") + text + dimStyle.Render(" (ctrl+o to collapse)")
+		hint, mark = " (ctrl+o to collapse)", dimStyle.Render("▾ ")
 	}
-	return toolStyle.Render("○ ") + text + dimStyle.Render(" (ctrl+o to expand)")
+	// The text gives way, not the hint; a screen too narrow for the hint
+	// cuts the whole line.
+	text = ansi.Truncate(text, max(width-2-lipgloss.Width(hint), 8), "…")
+	return ansi.Truncate(mark+text+dimStyle.Render(hint), width, "")
 }
 
 // summaryOf is what calls ran: their tool's summarizer's line when every
@@ -675,7 +682,7 @@ func toolHead(r toolview.Renderer, c view.Call) (l toolview.Line, ok bool) {
 		}
 	}()
 	l, ok = r.Head(c)
-	return l, ok && len(l) > 0
+	return l, ok && strings.TrimSpace(view.Clean(l.String())) != ""
 }
 
 // toolBody is r's body for c, and whether r gave one. It gave none when

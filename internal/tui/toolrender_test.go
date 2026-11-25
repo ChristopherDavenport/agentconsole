@@ -68,7 +68,7 @@ func TestARendererDrawsItsToolsCalls(t *testing.T) {
 			Children: []view.Call{{CallID: "c6", Name: "read", Args: `{"path":"c.go"}`, State: view.CallRunning, Partial: "going"}}}),
 		callRow("e7", view.Call{CallID: "c7", Name: "read", Args: `{"path":"d.go"}`, State: view.CallEnded, Output: "z"}),
 	}}
-	out, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown(), asks{}, grouping{})
+	out, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown(), asks{}, outlineState{})
 	got := plain(out)
 	for _, want := range []string{
 		"○ read a.go\n  read it",    // the head for the arguments, the body for the output
@@ -92,7 +92,7 @@ func TestARendererDrawsItsToolsCalls(t *testing.T) {
 
 	// Expanded, the raw arguments are shown above the renderer's body,
 	// always: what a call does is read from what it was given.
-	out, _ = renderRows(m, opts{output: true}, nil, tools, 80, "", "", newMarkdown(), asks{}, grouping{})
+	out, _ = renderRows(m, opts{output: true}, nil, tools, 80, "", "", newMarkdown(), asks{}, outlineState{})
 	got = plain(out)
 	if !strings.Contains(got, "○ read a.go [ended]\n  args: {\"path\":\"a.go\"}\n  file: x\n  y") {
 		t.Errorf("the expanded call is not the head, the arguments and the body:\n%s", got)
@@ -139,7 +139,7 @@ func TestABareRendererStandsInForTheName(t *testing.T) {
 			Children: []view.Call{{CallID: "c8", Name: "bash", Args: `{"command":"ps"}`, State: view.CallRunning}}}),
 	}}
 	got := plain(func() string {
-		s, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown(), asks{}, grouping{})
+		s, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown(), asks{}, outlineState{})
 		return s
 	}())
 	for _, want := range []string{
@@ -160,7 +160,7 @@ func TestABareRendererStandsInForTheName(t *testing.T) {
 		t.Errorf("the name is drawn before a bare head:\n%s", got)
 	}
 	// Expanded, the name is drawn: the raw view says which tool it is.
-	out, _ := renderRows(m, opts{output: true}, nil, tools, 80, "", "", newMarkdown(), asks{}, grouping{})
+	out, _ := renderRows(m, opts{output: true}, nil, tools, 80, "", "", newMarkdown(), asks{}, outlineState{})
 	if got := plain(out); !strings.Contains(got, "○ bash $ ls -l [ended]\n  args: {\"command\":\"ls -l\"}") {
 		t.Errorf("the expanded call does not keep its name:\n%s", got)
 	}

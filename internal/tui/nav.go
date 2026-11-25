@@ -74,9 +74,9 @@ func (m *Model) shown() view.Model {
 
 // selectable are the entries of the shown rows a cursor can rest on, in
 // order: the committed rows that render, the turns' headers and the
-// groups' lines. A collapsed group is one stop, its first member's
-// entry, and a folded turn is its header.
-func selectable(m view.Model, gp grouping) []string {
+// quiet runs' and runs of turns' lines. A collapsed quiet run is one stop,
+// `quiet:<entry>`, and a folded turn is its header.
+func selectable(m view.Model, gp outlineState) []string {
 	var out []string
 	for _, it := range layout(m, gp) {
 		if it.stop != "" {
@@ -89,7 +89,7 @@ func selectable(m view.Model, gp grouping) []string {
 // stopItem is the drawn line a stop stands for: a turn's header, a quiet
 // run's line or a run of turns' line, and whether the stop is one.
 func (m *Model) stopItem(stop string) (item, bool) {
-	for _, it := range layout(m.shown(), m.grouping()) {
+	for _, it := range layout(m.shown(), m.outlineState()) {
 		if it.stop == stop && it.kind != itemRow {
 			return it, true
 		}
@@ -109,13 +109,28 @@ func (m *Model) toggleLine(stop string) bool {
 		m.toggleTurn(it.resp)
 		return true
 	case itemQuiet:
-		flip(m.quietOpen, quietKey(m.shown(), it.quiet))
+		m.toggleQuiet(it)
 	case itemRun:
 		flip(m.runsOpen, runKey(it.block))
 	}
 	m.reveal = true
 	m.relayout()
 	return true
+}
+
+// toggleQuiet expands a quiet run, or collapses it: a run is open when any
+// of its calls is in the set, so one that grows at its front (a call
+// earlier in the response ends and joins it) stays as the person left it,
+// and collapsing takes them all out.
+func (m *Model) toggleQuiet(it item) {
+	sh := m.shown()
+	if it.open {
+		for _, i := range it.quiet.Calls {
+			delete(m.quietOpen, sh.Rows[i].EntryID)
+		}
+		return
+	}
+	m.quietOpen[quietKey(sh, it.quiet)] = true
 }
 
 // flip toggles key in set.
@@ -128,21 +143,18 @@ func flip(set map[string]bool, key string) {
 }
 
 // toggleTurn folds the turn of response resp to its header, or unfolds it.
-// A turn with something live or waiting is not folded: the choice is
-// kept only for a turn that has settled.
+// A turn with something live or waiting is never folded, and the press
+// says so, whether or not a fold was stored: the stored choice is kept, so
+// the turn folds when it settles, which is what the person asked for.
 func (m *Model) toggleTurn(resp string) {
-	if m.turnsFolded[resp] {
-		delete(m.turnsFolded, resp)
-	} else {
-		sh, gp := m.shown(), m.grouping()
-		for _, it := range layout(sh, gp) {
-			if it.kind == itemTurn && it.resp == resp && it.ti != nil && it.ti.busy {
-				m.setNote("this turn is still going")
-				return
-			}
+	sh, gp := m.shown(), m.outlineState()
+	for _, it := range layout(sh, gp) {
+		if it.kind == itemTurn && it.resp == resp && it.ti != nil && it.ti.busy {
+			m.setNote("this turn is still going")
+			return
 		}
-		m.turnsFolded[resp] = true
 	}
+	flip(m.turnsFolded, resp)
 	m.reveal = true
 	m.relayout()
 }
@@ -168,15 +180,16 @@ func (m *Model) cursorEntry() string {
 	return ""
 }
 
-// grouping is how the conversation draws groups now.
-func (m *Model) grouping() grouping {
-	return grouping{quiet: m.quietOpen, runs: m.runsOpen, folded: m.turnsFolded, sums: m.sums}
+// outlineState is how the conversation draws the outline now: what the
+// person expanded and folded, and the embedder's summarizers.
+func (m *Model) outlineState() outlineState {
+	return outlineState{quiet: m.quietOpen, runs: m.runsOpen, folded: m.turnsFolded, sums: m.sums}
 }
 
 // moveCursor moves the row cursor by delta, starting from the last row
 // when it is not set, and opens the detail pane's data for it.
 func (m *Model) moveCursor(delta int) tea.Cmd {
-	ids := selectable(m.shown(), m.grouping())
+	ids := selectable(m.shown(), m.outlineState())
 	if len(ids) == 0 {
 		return nil
 	}
@@ -308,18 +321,19 @@ func (m *Model) clickTree(line int) tea.Cmd {
 	return nil
 }
 
-// keepCursor drops a cursor whose row is gone from the shown line.
+// keepCursor keeps the cursor on a stop of the drawn view: the one it is
+// on, or when that is not drawn any more (a row or a line a collapsed line
+// or a folded turn took in, or one that went into a run), the nearest line
+// that stands for it. It drops a cursor that nothing stands for.
 func (m *Model) keepCursor() {
 	if m.curEntry == "" {
 		return
 	}
 	sh := m.shown()
-	if slices.Contains(selectable(sh, m.grouping()), m.curEntry) {
+	stops := selectable(sh, m.outlineState())
+	if slices.Contains(stops, m.curEntry) {
 		return
 	}
-	// A row a collapsed line or a folded turn took in is still there, in
-	// the line: the quiet run's, the run of turns' or the turn's header.
-	stops := selectable(sh, m.grouping())
 	for _, c := range coverers(sh)[m.curEntry] {
 		if slices.Contains(stops, c) {
 			m.curEntry = c
@@ -332,29 +346,33 @@ func (m *Model) keepCursor() {
 	}
 }
 
-// coverers are the stops that stand for a row when it is not drawn, by
-// its entry, the nearest first: its quiet run, the run of turns it is
-// in, its turn.
+// coverers are the stops that stand for a row or a line when it is not
+// drawn, by its entry or its stop, the nearest first: a row's quiet run, the
+// run of turns it is in, its turn; a quiet run's line stands in the run of
+// turns, then its turn; a turn's header in its run of turns.
 func coverers(m view.Model) map[string][]string {
 	out := map[string][]string{}
 	turn := func(b view.Block, run string) {
+		var parents []string
+		if run != "" {
+			parents = append(parents, run)
+		}
+		if b.Turn > 0 {
+			parents = append(parents, turnStop+b.ResponseID)
+			out[turnStop+b.ResponseID] = parents[:len(parents)-1]
+		}
 		for _, it := range b.Items {
+			var cs []string
+			if it.Quiet != nil {
+				q := quietStop + quietKey(m, it.Quiet)
+				out[q] = parents
+				cs = append(cs, q)
+			}
+			cs = append(cs, parents...)
 			for _, i := range it.Rows() {
-				id := m.Rows[i].EntryID
-				if id == "" {
-					continue
+				if id := m.Rows[i].EntryID; id != "" {
+					out[id] = cs
 				}
-				var cs []string
-				if it.Quiet != nil {
-					cs = append(cs, quietStop+quietKey(m, it.Quiet))
-				}
-				if run != "" {
-					cs = append(cs, run)
-				}
-				if b.Turn > 0 {
-					cs = append(cs, turnStop+b.ResponseID)
-				}
-				out[id] = cs
 			}
 		}
 	}
@@ -461,7 +479,7 @@ func (m *Model) cyclePane() tea.Cmd {
 	case paneNone:
 		m.pane = paneDetail
 		if m.curEntry == "" {
-			if ids := selectable(m.shown(), m.grouping()); len(ids) > 0 {
+			if ids := selectable(m.shown(), m.outlineState()); len(ids) > 0 {
 				m.curEntry = ids[len(ids)-1]
 				m.reveal = true
 			}
@@ -530,7 +548,7 @@ func (m *Model) open(title, sessionID, leaf, mark string) tea.Cmd {
 		mod := view.At(s, leaf)
 		sel := ""
 		if mark != "" {
-			if slices.Contains(selectable(mod, grouping{all: true}), mark) {
+			if slices.Contains(selectable(mod, outlineState{all: true}), mark) {
 				sel = mark
 			} else if _, ok := s.Entry(mark); ok {
 				mod = view.At(s, mark)

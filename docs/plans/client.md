@@ -1938,8 +1938,9 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   is at most 5 lines and at most 400 runes, after trimming whitespace
   (a trailing newline is not a line; an empty output is short), fixed
   constants with no option. A longer output is loud and shown in full as
-  before, and so is a failed call whatever its output (no question, no hold, no withdrawal, no cut-off, no policy
-  verdict other than proceed, no left-out mark). A row that is live,
+  before, and so is a failed call whatever its output. Nothing about it
+  may need the person: no question, no hold, no withdrawal, no cut-off,
+  no policy verdict other than proceed, no left-out mark. A row that is live,
   hidden or a fold is never quiet, so a running or waiting call is
   never hidden.
 - **A quiet run** (`QuietRun`) is each maximal stretch inside a turn of
@@ -1960,6 +1961,18 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   quiet turn alone is not a run: its header and its summary line. A
   turn with a message is never in one, so an intro text and a `mkdir`
   keep the header, the message and a `ran 1 bash` line.
+- **Quietness is a row's.** A call row is quiet by its own state, never
+  by its call ID: an ID may be reused (a provider's, a copied context) or
+  empty. An output belongs to the nearest call row before it with its ID,
+  in that row's turn, and an output with no such row, or a call with no
+  ID, is loud.
+- **Summaries are one line.** A quiet run's line and a run of turns' line
+  are cut to the width, the text giving way to the hint, and never wrap.
+- **A bare renderer's head and a pending call.** `toolview.Bare` drops the
+  name from a call's collapsed line, so a call waiting for permission
+  reads `◆ $ rm -rf x`. That is by design: the line is the call's own,
+  and the permission panel, where the decision is made, always names the
+  tool and shows the arguments as given; no renderer changes it.
 - **Nothing is lost, no number goes missing.** Every row is in exactly
   one block, and expanding reaches every call. A run of turns stands for
   the headers of the turns it covers by naming the range, so every turn
@@ -1977,7 +1990,11 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   (`▸ turn 3 · … (ctrl+o to expand)`); a turn with a live row, a call in
   motion or waiting, or a permission or question on one of its calls is
   never folded: the choice is kept, and the turn stays drawn until it
-  settles. The cursor's stops are the run's line, a turn's header, a
+  settles, and a press on it says "this turn is still going" whether or
+  not a fold was stored. A turn the record cut off (a call a run left
+  unanswered) counts as waiting. A response whose rows are not
+  contiguous (an output after a user message) has one header, at its
+  first block, and counts over the whole response. The cursor's stops are the run's line, a turn's header, a
   quiet run's line and the rows, expanded quiet runs' calls included, so
   a call's output is one ctrl+o away on its row as ever. A row's stop is
   its entry; a line's is synthetic, `turn:<response ID>`,
@@ -1985,9 +2002,17 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   and the head move reading the entry (the first call's, the turn's
   first committed row). What
   the person expanded is kept by key so it survives growth: a turn's fold
-  and a run of turns by the first response ID, a quiet run by its first
-  call's entry. A cursor on a row a collapsed line took in moves to that
-  line. Copy of a collapsed run or line is that line, and of a header its
+  and a run of turns by the first response ID, and a quiet run by its
+  calls: it is open when any of its calls' entries is in the set, so a
+  run that grows at its front (an earlier parallel call ends and joins
+  it) stays as the person left it, and one that splits or merges keeps
+  the state of the calls it still holds; collapsing takes all of them
+  out. The sets only grow, keyed by IDs a session does not reuse. A
+  cursor on a row or a line that a collapsed line, a folded turn or a run
+  of turns now stands for (a row, a quiet run's line, a turn's header)
+  moves to the nearest stop that does, nearest first (quiet run, run of
+  turns, turn), also when a fork's view opens on such a row; it is
+  dropped only when nothing does. Copy of a collapsed run or line is that line, and of a header its
   text.
 - **Summaries are the embedder's, with a fallback.**
   `toolview.Summarizer` reads the calls (`[]view.Call`: the tool's name

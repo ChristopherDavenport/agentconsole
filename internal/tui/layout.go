@@ -66,7 +66,7 @@ func quietKey(m view.Model, q *view.QuietRun) string { return m.Rows[q.Calls[0]]
 func runKey(b view.Block) string { return b.Turns[0].ResponseID }
 
 // layout lays the model's outline out.
-func layout(m view.Model, gp grouping) []item {
+func layout(m view.Model, gp outlineState) []item {
 	blocks := view.Outline(m)
 	hidden := hiddenOutputs(m)
 	info := turnInfos(m, blocks, gp)
@@ -77,10 +77,14 @@ func layout(m view.Model, gp grouping) []item {
 		}
 		items = append(items, item{kind: itemRow, row: i, stop: stop})
 	}
+	headed := map[int]bool{}
 	turn := func(b view.Block) {
 		ti := info[b.Turn]
 		if b.Turn > 0 {
-			items = append(items, item{kind: itemTurn, turn: b.Turn, resp: b.ResponseID, ti: ti, stop: turnStop + b.ResponseID})
+			if !headed[b.Turn] {
+				headed[b.Turn] = true
+				items = append(items, item{kind: itemTurn, turn: b.Turn, resp: b.ResponseID, ti: ti, stop: turnStop + b.ResponseID})
+			}
 			if ti != nil && ti.folded {
 				return
 			}
@@ -118,21 +122,32 @@ func layout(m view.Model, gp grouping) []item {
 }
 
 // quietExpanded reports whether the person expanded the quiet run.
-func (g grouping) quietExpanded(m view.Model, q *view.QuietRun) bool {
-	return g.all || g.quiet[quietKey(m, q)]
+func (g outlineState) quietExpanded(m view.Model, q *view.QuietRun) bool {
+	if g.all {
+		return true
+	}
+	for _, i := range q.Calls {
+		if g.quiet[m.Rows[i].EntryID] {
+			return true
+		}
+	}
+	return false
 }
 
 // runExpanded reports whether the person expanded the run of turns.
-func (g grouping) runExpanded(b view.Block) bool { return g.all || g.runs[runKey(b)] }
+func (g outlineState) runExpanded(b view.Block) bool { return g.all || g.runs[runKey(b)] }
 
 // turnInfos reads each turn's header off the outline's rows, by turn.
-func turnInfos(m view.Model, blocks []view.Block, gp grouping) map[int]*turnInfo {
+func turnInfos(m view.Model, blocks []view.Block, gp outlineState) map[int]*turnInfo {
 	asked := map[string]bool{}
 	for _, p := range m.Permissions {
 		asked[p.CallID] = true
 	}
 	for _, q := range m.Questions {
 		asked[q.CallID] = true
+	}
+	for _, p := range m.CutOff {
+		asked[p.CallID] = true
 	}
 	info := map[int]*turnInfo{}
 	var turn func(b view.Block)
@@ -146,8 +161,13 @@ func turnInfos(m view.Model, blocks []view.Block, gp grouping) map[int]*turnInfo
 		if b.Turn == 0 {
 			return
 		}
-		ti := &turnInfo{resp: b.ResponseID}
-		info[b.Turn] = ti
+		// A response whose rows are apart has several blocks and one set of
+		// counts.
+		ti := info[b.Turn]
+		if ti == nil {
+			ti = &turnInfo{resp: b.ResponseID}
+			info[b.Turn] = ti
+		}
 		for _, i := range b.Rows() {
 			row := m.Rows[i]
 			if row.Live {
@@ -177,11 +197,13 @@ func turnInfos(m view.Model, blocks []view.Block, gp grouping) map[int]*turnInfo
 				ti.busy = true
 			}
 		}
-		// A turn that has something live or waiting is never folded.
-		ti.folded = !gp.all && gp.folded[ti.resp] && !ti.busy
 	}
 	for _, b := range blocks {
 		turn(b)
+	}
+	for _, ti := range info {
+		// A turn that has something live or waiting is never folded.
+		ti.folded = !gp.all && gp.folded[ti.resp] && !ti.busy
 	}
 	return info
 }

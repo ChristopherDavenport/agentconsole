@@ -89,7 +89,9 @@ type Model struct {
 	// for every row drops the rows' own flips of it.
 	flips map[string]opts
 	// quietOpen, runsOpen and turnsFolded hold what the person expanded
-	// or folded in the outline (see grouping).
+	// or folded in the outline (see outlineState).
+	// The sets only grow: their keys are entry and response IDs, which a
+	// session does not reuse, so there is nothing to prune.
 	quietOpen, runsOpen, turnsFolded map[string]bool
 	// spans are where the rows sit in the viewport's content, from the
 	// last layout, for a click to find the row under it.
@@ -162,7 +164,7 @@ type Model struct {
 	cost client.Cost
 	// tools are the renderers of the tools' calls, by tool name.
 	tools toolview.Renderers
-	// sums are the summarizers of the groups of quiet calls, by tool name.
+	// sums are the summarizers of quiet runs, by tool name.
 	sums toolview.Summarizers
 
 	// screen is the conversation or the tree; pane the detail under the
@@ -269,7 +271,7 @@ func WithHistory(past []string, record func(line string)) Option {
 	}
 }
 
-// WithToolSummarizers sets the summarizers of the groups of quiet calls,
+// WithToolSummarizers sets the summarizers of the quiet runs of calls,
 // by tool name.
 func WithToolSummarizers(ss toolview.Summarizers) Option {
 	return func(m *Model) { m.sums = maps.Clone(ss) }
@@ -502,6 +504,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.frozen, m.err, m.curEntry = msg.frozen, "", msg.frozen.selected
 			m.panes = paneState{}
+			// The selected row may be one a collapsed line draws: the cursor
+			// goes to the stop that stands for it.
+			m.keepCursor()
 			m.reveal = m.curEntry != ""
 		}
 		m.relayout()
@@ -1128,7 +1133,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers), m.grouping())
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers), m.outlineState())
 	m.setContent(content)
 	m.spans = spans
 	switch {
