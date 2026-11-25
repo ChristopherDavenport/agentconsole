@@ -150,8 +150,10 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		switch it.kind {
 		case itemTurn:
 			add(turnLine(it.turn, it.ti, w), it.stop, true)
-		case itemGroup:
-			add(groupLine(m, it.blk, gp.expanded(m, it.blk), gp.sums), it.stop, false)
+		case itemQuiet:
+			add(quietLine(m, it.quiet, it.open, gp.sums), it.stop, false)
+		case itemRun:
+			add(turnsLine(m, it.block, it.open, gp.sums), it.stop, false)
 		default:
 			r := m.Rows[it.row]
 			if b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask); b != "" {
@@ -170,71 +172,61 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	return out.String(), spans
 }
 
-// grouping is how the conversation draws the outline's groups: which
-// are expanded.
+// grouping is how the conversation draws the outline: which of its
+// lines the person expanded or folded.
 type grouping struct {
-	// open holds the entries of the members of the groups the person
-	// expanded: a group is expanded when any of its members is in it, so
-	// a group that grows keeps its state.
-	open map[string]bool
-	// all expands every group, for asking which entries are in the line.
-	all bool
+	// quiet holds the quiet runs the person expanded, by their first
+	// call's entry.
+	quiet map[string]bool
+	// runs holds the runs of turns the person expanded, by their first
+	// turn's response ID.
+	runs map[string]bool
 	// folded are the responses whose turns the person folded, by ID.
 	folded map[string]bool
+	// all expands every line and folds none, for asking which entries
+	// are in the line.
+	all bool
 	// sums are the embedder's summarizers, by tool name.
 	sums toolview.Summarizers
 }
 
-// groupKey is the entry that stands for a group, its first member's:
-// the row cursor's stop and the span of its line.
-func groupKey(m view.Model, b view.Block) string { return m.Rows[b.Rows[0]].EntryID }
-
-// expanded reports whether the person expanded the group.
-func (g grouping) expanded(m view.Model, b view.Block) bool {
-	if g.all {
-		return true
-	}
-	for _, i := range b.Rows {
-		if g.open[m.Rows[i].EntryID] {
-			return true
-		}
-	}
-	return false
+// quietLine is a quiet run's line: the dot, what ran, and the key that
+// opens it, or closes it when it is open.
+func quietLine(m view.Model, q *view.QuietRun, open bool, sums toolview.Summarizers) string {
+	return foldLine(summaryOf(m, q.Calls, q.Tools, sums), open)
 }
 
-// groupLine is a group's line: the dot, what ran and over how many
-// turns, and the key that opens it, or closes it when it is open.
-func groupLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers) string {
-	text := groupSummary(m, b, sums)
+// turnsLine is a run of turns' line: the turns it covers and what ran in
+// them.
+func turnsLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers) string {
+	return foldLine(fmt.Sprintf("turns %d–%d · ", b.FirstTurn, b.LastTurn)+summaryOf(m, b.Calls, b.Tools, sums), open)
+}
+
+func foldLine(text string, open bool) string {
 	if open {
 		return dimStyle.Render("▾ ") + text + dimStyle.Render(" (ctrl+o to collapse)")
 	}
 	return toolStyle.Render("○ ") + text + dimStyle.Render(" (ctrl+o to expand)")
 }
 
-// groupSummary is what a group ran: its tool's summarizer's line when
-// every call is of one tool that has one and gives a line, otherwise the
-// counts by tool name in first-use order with the span of turns.
-func groupSummary(m view.Model, b view.Block, sums toolview.Summarizers) string {
-	g := b.Group
-	if len(g.Tools) == 1 {
-		calls := make([]view.Call, len(g.Calls))
-		for k, i := range g.Calls {
-			calls[k] = *m.Rows[i].Call
+// summaryOf is what calls ran: their tool's summarizer's line when every
+// call is of one tool that has one and gives a line, otherwise the
+// counts by tool name in first-use order.
+func summaryOf(m view.Model, calls []int, tools []view.ToolCount, sums toolview.Summarizers) string {
+	if len(tools) == 1 {
+		cs := make([]view.Call, len(calls))
+		for k, i := range calls {
+			cs[k] = *m.Rows[i].Call
 		}
-		if l, ok := summarize(sums[g.Tools[0].Name], calls); ok {
+		if l, ok := summarize(sums[tools[0].Name], cs); ok {
 			return drawLine(l)
 		}
 	}
-	parts := make([]string, len(g.Tools))
-	for k, t := range g.Tools {
+	parts := make([]string, len(tools))
+	for k, t := range tools {
 		parts[k] = fmt.Sprintf("%d %s", t.N, view.CleanLine(t.Name))
 	}
-	s := "ran " + strings.Join(parts, ", ")
-	if g.FirstTurn != g.LastTurn {
-		s += fmt.Sprintf(" · turns %d–%d", g.FirstTurn, g.LastTurn)
-	}
-	return s
+	return "ran " + strings.Join(parts, ", ")
 }
 
 // summarize is s's line for calls, and whether it gave one. It gave none

@@ -86,28 +86,45 @@ func selectable(m view.Model, gp grouping) []string {
 	return out
 }
 
-// groupAt is the group block whose stop is entry.
-func groupAt(m view.Model, entry string) (view.Block, bool) {
-	for _, blk := range view.Outline(m) {
-		if blk.Kind == view.BlockGroup && groupKey(m, blk) == entry {
-			return blk, true
+// stopItem is the drawn line a stop stands for: a turn's header, a quiet
+// run's line or a run of turns' line, and whether the stop is one.
+func (m *Model) stopItem(stop string) (item, bool) {
+	for _, it := range layout(m.shown(), m.grouping()) {
+		if it.stop == stop && it.kind != itemRow {
+			return it, true
 		}
 	}
-	return view.Block{}, false
+	return item{}, false
 }
 
-// toggleGroup expands the group a stop stands for, or collapses it.
-func (m *Model) toggleGroup(blk view.Block) {
-	sh := m.shown()
-	if m.grouping().expanded(sh, blk) {
-		for _, i := range blk.Rows {
-			delete(m.groupsOpen, sh.Rows[i].EntryID)
-		}
-	} else {
-		m.groupsOpen[groupKey(sh, blk)] = true
+// toggleLine folds, unfolds, expands or collapses what a stop stands
+// for, and reports whether it stands for something that does.
+func (m *Model) toggleLine(stop string) bool {
+	it, ok := m.stopItem(stop)
+	if !ok {
+		return false
+	}
+	switch it.kind {
+	case itemTurn:
+		m.toggleTurn(it.resp)
+		return true
+	case itemQuiet:
+		flip(m.quietOpen, stop)
+	case itemRun:
+		flip(m.runsOpen, runKey(it.block))
 	}
 	m.reveal = true
 	m.relayout()
+	return true
+}
+
+// flip toggles key in set.
+func flip(set map[string]bool, key string) {
+	if set[key] {
+		delete(set, key)
+	} else {
+		set[key] = true
+	}
 }
 
 // toggleTurn folds the turn of response resp to its header, or unfolds it.
@@ -134,6 +151,9 @@ func (m *Model) toggleTurn(resp string) {
 // for a turn's header the turn's first committed row.
 func (m *Model) cursorEntry() string {
 	resp, ok := strings.CutPrefix(m.curEntry, turnStop)
+	if r, isRun := strings.CutPrefix(m.curEntry, runStop); isRun {
+		resp, ok = r, true
+	}
 	if !ok {
 		return m.curEntry
 	}
@@ -147,7 +167,7 @@ func (m *Model) cursorEntry() string {
 
 // grouping is how the conversation draws groups now.
 func (m *Model) grouping() grouping {
-	return grouping{open: m.groupsOpen, folded: m.turnsFolded, sums: m.sums}
+	return grouping{quiet: m.quietOpen, runs: m.runsOpen, folded: m.turnsFolded, sums: m.sums}
 }
 
 // moveCursor moves the row cursor by delta, starting from the last row
@@ -179,14 +199,10 @@ func (m *Model) moveCursor(delta int) tea.Cmd {
 // own flips of it.
 func (m *Model) toggle(sw opts) {
 	if m.screen == screenConversation && m.curEntry != "" {
-		if resp, ok := strings.CutPrefix(m.curEntry, turnStop); ok {
+		if _, ok := m.stopItem(m.curEntry); ok {
 			if sw.output {
-				m.toggleTurn(resp)
+				m.toggleLine(m.curEntry)
 			}
-			return
-		}
-		if blk, ok := groupAt(m.shown(), m.curEntry); ok && sw.output {
-			m.toggleGroup(blk)
 			return
 		}
 		m.flipRow(m.curEntry, sw)
@@ -258,12 +274,7 @@ func (m *Model) clickRow(line int) tea.Cmd {
 			m.relayout()
 			return m.wantPane()
 		}
-		if resp, ok := strings.CutPrefix(sp.entry, turnStop); ok {
-			m.toggleTurn(resp)
-			return nil
-		}
-		if blk, ok := groupAt(m.shown(), sp.entry); ok {
-			m.toggleGroup(blk)
+		if m.toggleLine(sp.entry) {
 			return nil
 		}
 		sw := opts{output: true}
@@ -303,28 +314,58 @@ func (m *Model) keepCursor() {
 	if slices.Contains(selectable(sh, m.grouping()), m.curEntry) {
 		return
 	}
-	// A row a collapsed group or a folded turn took in is still there,
-	// in the group's stop or the turn's header.
+	// A row a collapsed line or a folded turn took in is still there, in
+	// the line: the quiet run's, the run of turns' or the turn's header.
 	stops := selectable(sh, m.grouping())
-	for _, blk := range view.Outline(sh) {
-		for _, i := range blk.Rows {
-			if sh.Rows[i].EntryID != m.curEntry {
-				continue
-			}
-			if blk.Kind == view.BlockGroup && slices.Contains(stops, groupKey(sh, blk)) {
-				m.curEntry = groupKey(sh, blk)
-				return
-			}
-			if t := turnStop + sh.Rows[i].ResponseID; sh.Rows[i].ResponseID != "" && slices.Contains(stops, t) {
-				m.curEntry = t
-				return
-			}
+	for _, c := range coverers(sh)[m.curEntry] {
+		if slices.Contains(stops, c) {
+			m.curEntry = c
+			return
 		}
 	}
 	m.curEntry = ""
 	if m.pane == paneDetail {
 		m.pane = paneNone
 	}
+}
+
+// coverers are the stops that stand for a row when it is not drawn, by
+// its entry, the nearest first: its quiet run, the run of turns it is
+// in, its turn.
+func coverers(m view.Model) map[string][]string {
+	out := map[string][]string{}
+	var turn func(b view.Block, run string)
+	turn = func(b view.Block, run string) {
+		for _, it := range b.Items {
+			for _, i := range it.Rows() {
+				id := m.Rows[i].EntryID
+				if id == "" {
+					continue
+				}
+				var cs []string
+				if it.Quiet != nil {
+					cs = append(cs, quietKey(m, it.Quiet))
+				}
+				if run != "" {
+					cs = append(cs, run)
+				}
+				if b.Turn > 0 {
+					cs = append(cs, turnStop+b.ResponseID)
+				}
+				out[id] = cs
+			}
+		}
+	}
+	for _, b := range view.Outline(m) {
+		if b.Kind != view.BlockRun {
+			turn(b, "")
+			continue
+		}
+		for _, t := range b.Turns {
+			turn(t, runStop+runKey(b))
+		}
+	}
+	return out
 }
 
 // paneState is what the pane under the conversation holds.

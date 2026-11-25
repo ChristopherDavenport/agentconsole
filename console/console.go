@@ -132,9 +132,9 @@ func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(c *config) { c.tools = rs }
 }
 
-// WithToolSummarizers sums up a collapsed group of quiet calls with the
-// summarizer of its tool, when every call of the group is that tool's
-// and the summarizer gives a line; any other group shows the client's
+// WithToolSummarizers sums up a collapsed run of quiet calls, or of quiet turns, with the
+// summarizer of its tool, when every call of the run is that tool's
+// and the summarizer gives a line; any other run shows the client's
 // own line. A later call replaces the set.
 func WithToolSummarizers(ss toolview.Summarizers) Option {
 	return func(c *config) { c.sums = ss }

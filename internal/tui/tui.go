@@ -88,12 +88,9 @@ type Model struct {
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
 	flips map[string]opts
-	// groupsOpen holds the entries of the members of the outline's groups
-	// the person expanded (see grouping).
-	groupsOpen map[string]bool
-	// turnsFolded holds the responses whose turns the person folded to
-	// their headers.
-	turnsFolded map[string]bool
+	// quietOpen, runsOpen and turnsFolded hold what the person expanded
+	// or folded in the outline (see grouping).
+	quietOpen, runsOpen, turnsFolded map[string]bool
 	// spans are where the rows sit in the viewport's content, from the
 	// last layout, for a click to find the row under it.
 	spans []rowSpan
@@ -312,7 +309,8 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 		spinner:     spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		md:          newMarkdown(),
 		flips:       map[string]opts{},
-		groupsOpen:  map[string]bool{},
+		quietOpen:   map[string]bool{},
+		runsOpen:    map[string]bool{},
 		turnsFolded: map[string]bool{},
 		decided:     map[string]client.CallAnswer{},
 		offers:      map[string]client.GrantOffer{},

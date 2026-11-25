@@ -1892,119 +1892,98 @@ No RFC holds it; it is this plan's.
 
 A coding session is long chains of calls whose outputs are empty: a
 `mkdir`, a `cd`, a `git add`. Each takes a row and says nothing. The
-user's decisions: group them, keep every call reachable, and summarize
-the group by what ran. A mix of tools is one group; only quiet runs
-collapse.
+user's decisions: summarize them by what ran, keep every call
+reachable, and show the turn structure of the loop.
+
+History. The first design grouped runs of quiet calls across turns, one
+group slicing through several responses. The user found the layers
+mixed: a turn's header ended up inside a tool block, and a turn number
+went missing behind a group. The design below replaced it: levels
+nested one in another, the same shape at every depth, nothing slicing
+across.
 
 - **A layer above the rows, not a change to them.** `view.Model.Rows`
   stays one row per item, in the record's order, so the Open Responses
   view is as it was and every rule about the overlay and the record
-  holds. `view.Outline(Model) []Block` is a pure projection of a model:
-  no state, no I/O, same input and same output. The TUI renders blocks;
-  an embedder that wants the turn structure calls it too.
-- **A turn is one model response.** `Block` of kind turn holds the rows
-  that share a `ResponseID` (reasoning, message, calls), the outputs the
-  harness sent back for its calls following them, and its position in
-  the run. That is the loop's structure: response, calls, outputs, next
-  response. A row with no response (a live row not named yet, a user
-  message) is its own block.
-- **A group is a run of quiet calls.** A call is quiet when it has
-  ended, its output is on the record, it did not fail, its output is
-  empty after trimming, and nothing about it needs the person (no
-  question, no hold, no withdrawal, no cut-off, no policy verdict other
-  than allow). Reasoning between quiet calls joins the run. Anything
-  else ends it: a message, a call with output, a failed, running or
-  waiting call. A run of two or more is a group; one quiet call stays a
-  row. The run crosses turns, so `mkdir; cd; git add` over three
-  responses is one group, and the group lists the turns it spans.
-- **Nothing is lost.** A group holds its member rows by index into
-  `Model.Rows`; expanding it (Ctrl-O on the group or a click) shows the
-  member rows as they are drawn now. A live call joins a group only once
-  it has ended and is committed, so a running call is never hidden and a
-  group never changes under a call the person is reading. A call that
-  fails after joining cannot happen (it has ended); a call that later
-  needs the person was never quiet.
-- **Selection and copy see the rows.** Copy of a collapsed group copies
-  the summary line; expanded, the rows. The row cursor steps over a
-  group as one stop.
+  holds. `view.Outline(Model) []Block` is a pure, linear projection of a
+  model: no state, no I/O, same input and same output. The TUI renders
+  blocks; an embedder that wants the turn structure calls it too.
+- **A turn is one model response and always has its header.** A
+  `BlockTurn` holds the rows that share a `ResponseID` (the outputs the
+  harness sent back for its calls following them) as `Items`, in order:
+  a loud row to show in full (a message, reasoning with no call around
+  it, a call that says something, any output of one), or a quiet run. A
+  row with no response (a user message) is a turn block of its own,
+  numbered 0, with no header. `Turn` counts the responses from 1 in the
+  order they first appear.
+- **A quiet call** has ended, its output is on the record, it did not
+  fail, its output is empty after trimming, and nothing about it needs
+  the person (no question, no hold, no withdrawal, no cut-off, no policy
+  verdict other than proceed, no left-out mark). A row that is live,
+  hidden or a fold is never quiet, so a running or waiting call is
+  never hidden.
+- **A quiet run** (`QuietRun`) is each maximal stretch inside a turn of
+  quiet calls, their outputs and the reasoning around them, with at
+  least one call, even for a single call. Order is kept: quiet, loud,
+  quiet is a summary, a row, a summary. A run is shown as one line by
+  default, the counts by tool name in first-use order (`ran 2 bash, 1
+  read`), or its tool's summarizer's line when every call is that
+  tool's. Expanded it shows its rows as they are drawn outside a run.
+- **A run of turns** (`BlockRun`) is two or more consecutive turns that
+  are quiet through and through: every item a quiet run, so no message,
+  no loud row, no live row, nothing asked. It is one line, `turns 2–3 ·
+  ran 2 bash, 1 read`, with the same summary rules over all its calls.
+  Expanded it shows its turns exactly as a turn is drawn outside a
+  run: header, then its quiet summary line, itself expandable. One
+  quiet turn alone is not a run: its header and its summary line. A
+  turn with a message is never in one, so an intro text and a `mkdir`
+  keep the header, the message and a `ran 1 bash` line.
+- **Nothing is lost, no number goes missing.** Every row is in exactly
+  one block, and expanding reaches every call. A run of turns stands for
+  the headers of the turns it covers by naming the range, so every turn
+  number from 1 to the last is on the screen as a header or inside a
+  run's range, in any collapse state.
+- **The TUI's header, folds and stops.** A header is one line of dim
+  text, no rule, `turn 3 · 2 calls → 2 outputs · 1 failed` (the failed
+  count in the error colour), or `turn 4 · answer`, with no blank row
+  under it (the rows follow; a folded header, with nothing under it, is
+  followed by the blank line every block has). It never wraps, and
+  narrow, its end is cut. The counts read the whole turn through the
+  outline. The model holds usage for the line and for its last call, not
+  per response, so a header has counts only and invents no tokens or
+  time. Ctrl-O or a second click on a header folds the turn to it
+  (`▸ turn 3 · … (ctrl+o to expand)`); a turn with a live row, a call in
+  motion or waiting, or a permission or question on one of its calls is
+  never folded: the choice is kept, and the turn stays drawn until it
+  settles. The cursor's stops are the run's line, a turn's header, a
+  quiet run's line and the loud rows; an expanded run's first call has
+  no stop of its own, its line is the stop, so ctrl+o on the line
+  collapses it. A stop is a real entry where it can be (a quiet run: its
+  first call's; the detail pane and the head move read it), and a
+  synthetic `turn:<response ID>` or `run:<first response ID>` otherwise,
+  the pane and the head move reading the turn's first committed row. What
+  the person expanded is kept by key so it survives growth: a turn's fold
+  and a run of turns by the first response ID, a quiet run by its first
+  call's entry. A cursor on a row a collapsed line took in moves to that
+  line. Copy of a collapsed run or line is that line, and of a header its
+  text.
 - **Summaries are the embedder's, with a fallback.**
-  `toolview.Summarizer` reads the group's `[]view.Call` (the tool's name
+  `toolview.Summarizer` reads the calls (`[]view.Call`: the tool's name
   and arguments, never the tool) and returns a line with roles, or
-  declines. `Summarizers` is by tool name; a group takes the summarizer
-  of its tool when every call is that tool's, and the client's own line
-  otherwise: the counts by tool name in first-use order ("ran 4 bash, 2
-  read") with the group's turn span. `console.WithToolSummarizers` hands
-  them in, beside `WithToolRenderers`. The client ships none.
-- **Blocks are a partition of the rows.** The blocks cut `Model.Rows` into
-  contiguous stretches, every row in exactly one. A turn block is a
-  stretch of non-group rows sharing a `ResponseID`, an output (which
-  carries none) joining the block of the call it answers; its `Turn` is
-  the response's position among the model's responses counted from 1 in
-  row order (0 for a row with no response). A turn that a group cuts
-  into appears as two blocks. A group's member rows are its calls, the
-  reasoning between them and the outputs of its calls; `Group.Calls`
-  names the call rows, `Group.Tools` the names with counts in first-use
-  order, `FirstTurn`/`LastTurn` the span. A row that is live, hidden or
-  a fold never joins, nor does a call with children, a left-out call, or
-  one a panel or the cut-off list names.
-- **The TUI's group line and stops.** A collapsed group is one line, a dot,
-  the summary and `(ctrl+o to expand)`; its stop is its first member's
-  entry, so the detail pane and the head move read that call. Ctrl-O or
-  a second click on the stop expands it: the line stays, as `▾` with
-  `(ctrl+o to collapse)`, and the member rows follow it, each a stop but
-  the first, whose stop the line is (so ctrl+o on the line collapses, not
-  flips the first call's output). A group is expanded while any member's
-  entry is in the TUI's open set, so one that grows keeps its state; a
-  cursor on a row a collapsed group took in moves to the group's stop.
-  The global ctrl+o (no cursor) flips every call's output as before and
-  leaves groups as they are.
-- **A header on every response.** The user's decision: the TUI draws a
-  one-line header above the rows of each response: its text dim,
-  `turn 3 · 2 calls → 2 outputs · 1 failed` (the failed count in the error
-  colour), and `turn 4 · answer` for a response with no calls. The user
-  first asked for a bold line with a rule to its right, then dim, then no
-  rule: the text alone marks the turn, nothing runs across the page.
-  Nothing but the line: no blank row under it (the rows follow at once;
-  the blank line between blocks is above it), and it never wraps:
-  narrow, the end of the text is cut. A folded header keeps its marker
-  and hint, `▸ turn 3 · … (ctrl+o to expand)`. Copying a header copies
-  its text. The counts read the turn's rows through the outline (calls, the
-  calls that have an output, the calls that failed), the whole turn
-  even when a group cuts it into two blocks, which draw one header, at
-  the turn's first block. A row with no response has no header. The
-  model holds usage only for the whole line and for its last call
-  (`Model.Usage`, `Model.LastCall`), not per response, so the header
-  shows counts only and invents no tokens or time. `Block.RowTurns`
-  gives the turn of each row of a block, parallel to `Rows`, so a client
-  can place a header between the members of an expanded group.
-- **Folding a turn.** Ctrl-O or a second click on a header folds the turn
-  to its header (`▸ turn 3 · … (ctrl+o to expand)`), which is one stop
-  of the row cursor (`turn:<response ID>`; the detail pane and the head
-  move read the turn's first committed row). The folded set is by
-  response ID, which outlives a turn that grows, where an entry would
-  not. A turn with a live row, a call in motion or waiting, or a
-  permission or question on one of its calls is never folded: the set
-  keeps the person's choice and the turn stays drawn until it settles.
-  Copy of a folded turn is its header.
-- **Groups and headers.** A collapsed group that spans several turns
-  stands for their headers (first to last) and names the range in its
-  own line, `turns 2–3`, so every turn number from 1 to the last is on
-  the screen as a header or inside a group's range, in any collapse
-  state. A group inside one turn keeps that turn's header above it and
-  names no turn; its line is drawn unless every turn it spans is folded, when
-  their headers stand instead. A turn the group swallows gets a header
-  again only where rows of its own go on after the group (a final
-  message after a quiet call), drawn then, once, with the whole turn's
-  counts. An expanded group draws the headers back between its members,
-  each at the first row of its turn.
-- **Headers are stops.** Every header is a stop of the row cursor, folded
-  or not, so ctrl+p and ctrl+n step over them and the keyboard can fold
-  any turn; that adds a stop per response to the counts the tests press.
-- **Exported names added:** `Block.RowTurns`, `view.Outline`, `view.Block`, `view.Group`
-  and their kinds (`BlockKind`, `BlockTurn`, `BlockGroup`),
-  `view.ToolCount`, `Group.Turns`, `toolview.Summarizer` (an interface with
-  `Summarize(calls []view.Call) (Line, bool)`, as `Renderer` is),
-  `toolview.Summarizers` and `console.WithToolSummarizers`.
+  declines; a panic is a decline. `Summarizers` is by tool name; a quiet
+  run or a run of turns takes the summarizer of its tool when every call
+  is that tool's, and the client's own line otherwise. For a run of
+  turns the line is `turns 2–3 · ` and the summary.
+  `console.WithToolSummarizers` hands them in, beside
+  `WithToolRenderers`. The client ships none.
+- **Exported names added:** `view.Outline`, `view.Block` (`Kind`, `Turn`,
+  `ResponseID`, `Items`, `Turns`, `FirstTurn`, `LastTurn`, `Calls`,
+  `Tools`, and `Rows()`), `view.BlockKind` with `BlockTurn` and
+  `BlockRun`, `view.Item` (`Row`, `Quiet`, and `Rows()`), `view.QuietRun`
+  (`Rows`, `Calls`, `Tools`), `view.ToolCount`, `toolview.Summarizer`
+  (an interface with `Summarize(calls []view.Call) (Line, bool)`, as
+  `Renderer` is), `toolview.Summarizers` and
+  `console.WithToolSummarizers`.
 
 ## Open questions
 
