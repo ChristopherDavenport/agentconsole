@@ -5,6 +5,15 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Fixed
+
+- The powerline status line draws a blue (4) block's text dark, where it
+  drew it light. Blue is a light blue in many terminals' palettes, and
+  agnoster draws black text on it, so a dax `dir` block could not be
+  read. Of the basic colors 0, 1, 5, 8 and 12 now count as dark.
+
 ## v0.0.21 - 2026-11-25
 
 ### Fixed
