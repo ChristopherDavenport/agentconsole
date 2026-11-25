@@ -337,8 +337,7 @@ func (m *Model) keepCursor() {
 // in, its turn.
 func coverers(m view.Model) map[string][]string {
 	out := map[string][]string{}
-	var turn func(b view.Block, run string)
-	turn = func(b view.Block, run string) {
+	turn := func(b view.Block, run string) {
 		for _, it := range b.Items {
 			for _, i := range it.Rows() {
 				id := m.Rows[i].EntryID
