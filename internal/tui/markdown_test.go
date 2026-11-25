@@ -144,7 +144,7 @@ func TestOnlyTheAssistantsMessagesAreMarkdown(t *testing.T) {
 		msg(openresponses.RoleUser, "**as typed**"),
 		msg(openresponses.RoleAssistant, "**rendered** [link](https://example.com)"),
 	}}
-	out, _ := renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{})
+	out, _ := renderRows(m, opts{}, nil, nil, 40, "", "", newMarkdown(), asks{}, outlineState{})
 	got := plain(out)
 	if !strings.Contains(got, "**as typed**") {
 		t.Errorf("the user's message is not shown as typed:\n%s", got)

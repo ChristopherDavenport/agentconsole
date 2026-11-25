@@ -5,6 +5,40 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Added
+
+- `view.Outline(Model) []Block`: a pure projection of a model's rows into
+  turns (one model response each, with the outputs sent back for its
+  calls) holding loud rows and quiet runs (each maximal stretch of quiet
+  calls, their outputs and the reasoning around them, even one call), and
+  runs of turns (two or more consecutive turns that are quiet through and
+  through). A call is quiet when it ended, its output is on the record,
+  short (at most 5 lines and 400 runes), not failed, and nothing is
+  asked of the person. `Model.Rows` is
+  unchanged.
+- The conversation shows the outline. Every response has a one-line dim
+  header (`turn 3 · 2 calls → 2 outputs · 1 failed`, `turn 4 · answer`),
+  counts only: the model holds usage per line, not per response. Inside a
+  turn a quiet run is one line (`ran 2 bash, 1 read · 6 lines out`, with
+  the lines of output it folded), in order with the rows around it; a run
+  of quiet turns is one line (`turns 2–3 · ran 2 bash · 3 lines out`) in place of their headers, and expands to the turns as they are
+  drawn elsewhere. Ctrl-O or a second click expands a line, or folds a
+  turn to its header; a turn with a running or waiting call, or a live
+  row, is never folded, and a running call is never inside a summary.
+  Headers and lines are stops of the row cursor, and copy takes a
+  collapsed line.
+- `toolview.Bare`: an optional interface of a renderer. When `Bare()` is
+  true its head stands in for the tool's name on the collapsed call line
+  (`○ $ ls`, not `○ bash $ ls`); a declined head falls back to the name
+  and arguments, and expanded the name is always drawn.
+- `toolview.Summarizer` and `toolview.Summarizers`, and
+  `console.WithToolSummarizers`: an embedder sums up a quiet run, or a run
+  of turns, whose calls are all of one tool in a line of its own; the
+  client's counts by tool name are the fallback when the summarizer
+  declines or panics, and for several tools.
+
 ## v0.0.19 - 2026-11-16
 
 - Security: the input line no longer takes a bidi control. The

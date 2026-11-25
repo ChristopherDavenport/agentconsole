@@ -87,8 +87,9 @@ func branched(t *testing.T) (*app, *recordingModel) {
 	a := newApp(t, agentturn.Config{ModelName: "scripted", Model: rm})
 	a.exchange("one", "r1")
 	a.exchange("two", "r2")
-	// Select r1 (up from the last row: r2, two, r1) and continue there.
-	a.press("ctrl+p", "ctrl+p", "ctrl+p")
+	// Select r1 (up from the last row: r2, its turn's header, two, r1) and
+	// continue there.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
 	a.waitFor("the cursor", has("▶"))
 	a.key("ctrl+b")
 	s := a.waitFor("the head moved", all(has("head moved to"), lacks("two", "r2")))
@@ -175,7 +176,7 @@ func TestContinueFromHereIsRefusedWhileARunGoes(t *testing.T) {
 	a.submit("two")
 	g.arrive(t, "mid")
 	a.waitFor("writing", has("writing"))
-	a.key("ctrl+p")
+	a.press("ctrl+p", "ctrl+p") // the live turn's header, then the prompt
 	a.waitFor("the cursor", has("▶"))
 	a.key("ctrl+b")
 	a.waitFor("the refusal", has("cannot move the head while a run goes"))
@@ -257,16 +258,16 @@ func callApp(t *testing.T) *app {
 
 func TestDetailPaneShowsADeferredCallsDecisionAndWhoApprovedIt(t *testing.T) {
 	a := callApp(t)
-	a.press("ctrl+p", "ctrl+p") // the answer, then the call
+	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its turn's header, then the call
 	a.key("tab")
 	s := a.waitFor("the detail", has("record detail", "call call_1 upper", "hold by", "may I run upper?", "proceed by human", "dispatch: to", "ABC"))
 	if !strings.Contains(s, "state:    completed") {
 		t.Errorf("no call state:\n%s", s)
 	}
 	// Moving the cursor re-targets the pane.
-	a.key("ctrl+p")
+	a.press("ctrl+p", "ctrl+p") // the turn's header, then the prompt
 	a.waitFor("the prompt's detail", has("user message", "response: none"))
-	a.key("ctrl+n")
+	a.press("ctrl+n", "ctrl+n")
 	a.waitFor("the call's detail again", has("call call_1 upper"))
 	// Tab goes to the session pane, then closes.
 	a.key("tab")
@@ -283,7 +284,7 @@ func TestAnUnhashedResponseShowsWhy(t *testing.T) {
 	a := newApp(t, cfg)
 	a.resize(110, 50)
 	a.exchange("hello", "hi")
-	a.key("ctrl+p") // the answer
+	a.press("ctrl+p", "ctrl+p") // the answer, then its turn's header: the detail is the answer's
 	a.key("tab")
 	a.waitFor("why", has("UNHASHED", "why: the request's input differs", "model:    scripted"))
 	a.key("tab")

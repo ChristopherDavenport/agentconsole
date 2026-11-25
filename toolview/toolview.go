@@ -55,10 +55,46 @@ type Renderer interface {
 	Body(c view.Call, expanded bool) (body []Line, ok bool)
 }
 
+// Bare is an optional interface of a [Renderer]: when Bare reports true,
+// the head it gives stands in for the tool's name on the call's
+// collapsed line, so a shell tool's call reads `○ $ ls` and not `○ bash
+// $ ls`. The client still draws the dot and the state around the head
+// and the notes under it; only the name goes. The head must then say what
+// the tool is by itself. A call whose head is declined (ok false, empty,
+// or a panic) has no head to stand in, and is drawn with its name and
+// its arguments as key=value pairs. Expanded (ctrl+o) the name is always
+// drawn: the raw view is where the person reads what will run, and the
+// permission panel is never changed by a renderer.
+type Bare interface {
+	Bare() bool
+}
+
 // Renderers are the renderers a client uses, by tool name as the model
 // calls it, an MCP tool's prefix included. A call to a tool with no
 // renderer is shown as the client shows any tool's.
 type Renderers map[string]Renderer
+
+// Summarizer says what a run of calls of one tool did, in one line: the
+// line a collapsed quiet run, or run of quiet turns, shows (see [view.Outline]). It
+// reads the calls as [view.Call] values, the name and arguments
+// the record holds and never the tool, and is quick and pure, as a
+// [Renderer] is: it runs whenever the conversation is laid out. A
+// summarizer that panics has declined.
+type Summarizer interface {
+	// Summarize is the line for calls, all of the tool the summarizer is
+	// registered for, in the order they ran. ok is false to show the
+	// client's own line: the counts by tool name and the lines of output
+	// the run folded. A quiet call has ended and its Output is on the
+	// record, and short (at most 5 lines and 400 runes), so a summarizer
+	// may show a first line of it.
+	Summarize(calls []view.Call) (line Line, ok bool)
+}
+
+// Summarizers are the summarizers a client uses, by tool name as the
+// model calls it. A run takes its tool's summarizer when every one of
+// its calls is that tool's; a run of several tools has the client's
+// line.
+type Summarizers map[string]Summarizer
 
 // Role is what a span of a line is, which the client draws in its own
 // way.

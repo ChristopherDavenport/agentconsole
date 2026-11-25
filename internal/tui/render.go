@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ChristopherDavenport/agentsession"
 	"github.com/ChristopherDavenport/agentturn"
@@ -72,15 +73,14 @@ type rowSpan struct {
 // hiddenOutputs are the rows whose call's row carries their output, by
 // index.
 func hiddenOutputs(m view.Model) map[int]bool {
-	answered := map[string]bool{}
-	for _, row := range m.Rows {
-		if row.Call != nil {
-			answered[row.Call.CallID] = true
-		}
-	}
+	seen := map[string]bool{}
 	hidden := map[int]bool{}
 	for i, row := range m.Rows {
-		if out, ok := row.Item.(*openresponses.FunctionCallOutput); ok && answered[out.CallID] {
+		if row.Call != nil && row.Call.CallID != "" {
+			seen[row.Call.CallID] = true
+		}
+		// An output follows its call's row, which carries it.
+		if out, ok := row.Item.(*openresponses.FunctionCallOutput); ok && out.CallID != "" && seen[out.CallID] {
 			hidden[i] = true
 		}
 	}
@@ -98,29 +98,31 @@ const gutter = 2
 // motion. md renders the assistant's messages. The spans say where each committed row's block sits, so the
 // viewport can scroll to the selected one and a click can find the row
 // under it.
-func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks) (content string, spans []rowSpan) {
+func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Renderers, width int, sel, spin string, md *markdown, ask asks, gp outlineState) (content string, spans []rowSpan) {
 	if width < 10 {
 		width = 10
 	}
-	hidden := hiddenOutputs(m)
 	w := width
 	if sel != "" {
 		w = max(width-gutter, 8)
 	}
-	var blocks []string
+	var out strings.Builder
 	at := 0
-	for i, row := range m.Rows {
-		if hidden[i] {
-			continue
-		}
-		b := renderRow(row, o.flipped(flips[row.EntryID]), tools, spin, w, md, ask)
-		if b == "" {
-			continue
+	// gap is what goes before the next block: a blank line between
+	// blocks, but none between a turn's header and what is under it.
+	gap := ""
+	// add lays one drawn block out: wrapped, with the gutter's marker
+	// when it is the selected one, and a span for entry if it has one.
+	add := func(b, entry string, headerOf bool) {
+		if headerOf && gap == "\n" {
+			// A header with nothing under it (a folded turn) is followed by
+			// a header: a blank line between them, as between any blocks.
+			gap, at = "\n\n", at+1
 		}
 		b = wrap(b, w)
 		if sel != "" {
 			mark := "  "
-			if row.EntryID == sel {
+			if entry != "" && entry == sel {
 				mark = warnStyle.Render("▶") + " "
 			}
 			ls := strings.Split(b, "\n")
@@ -134,21 +136,130 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 			b = strings.Join(ls, "\n")
 		}
 		h := lipgloss.Height(b)
-		if row.EntryID != "" {
-			spans = append(spans, rowSpan{entry: row.EntryID, start: at, height: h})
+		if entry != "" {
+			spans = append(spans, rowSpan{entry: entry, start: at, height: h})
 		}
-		blocks = append(blocks, b)
-		at += h + 1
+		out.WriteString(gap + b)
+		if headerOf {
+			gap, at = "\n", at+h
+		} else {
+			gap, at = "\n\n", at+h+1
+		}
+	}
+	for _, it := range layout(m, gp) {
+		switch it.kind {
+		case itemTurn:
+			add(turnLine(it.turn, it.ti, w), it.stop, true)
+		case itemQuiet:
+			add(quietLine(m, it.quiet, it.open, gp.sums, w), it.stop, false)
+		case itemRun:
+			add(turnsLine(m, it.block, it.open, gp.sums, w), it.stop, false)
+		default:
+			r := m.Rows[it.row]
+			if b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask); b != "" {
+				add(b, it.stop, false)
+			}
+		}
 	}
 	if note := runEndNote(m); note != "" {
 		b := wrap(note, w)
 		if sel != "" {
 			b = "  " + strings.ReplaceAll(b, "\n", "\n  ")
 		}
-		blocks = append(blocks, b)
+		out.WriteString(gap + b)
 	}
 	md.sweep()
-	return strings.Join(blocks, "\n\n"), spans
+	return out.String(), spans
+}
+
+// outlineState is how the conversation draws the outline: which of its
+// lines the person expanded or folded.
+type outlineState struct {
+	// quiet holds the quiet runs the person expanded, by their first
+	// call's entry.
+	quiet map[string]bool
+	// runs holds the runs of turns the person expanded, by their first
+	// turn's response ID.
+	runs map[string]bool
+	// folded are the responses whose turns the person folded, by ID.
+	folded map[string]bool
+	// all expands every line and folds none, for asking which entries
+	// are in the line.
+	all bool
+	// sums are the embedder's summarizers, by tool name.
+	sums toolview.Summarizers
+}
+
+// quietLine is a quiet run's line: the dot, what ran, and the key that
+// opens it, or closes it when it is open.
+func quietLine(m view.Model, q *view.QuietRun, open bool, sums toolview.Summarizers, width int) string {
+	return foldLine(summaryOf(m, q.Calls, q.Tools, sums), open, width)
+}
+
+// turnsLine is a run of turns' line: the turns it covers and what ran in
+// them.
+func turnsLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers, width int) string {
+	return foldLine(fmt.Sprintf("turns %d–%d · ", b.FirstTurn, b.LastTurn)+summaryOf(m, b.Calls, b.Tools, sums), open, width)
+}
+
+// foldLine is the line of a quiet run or a run of turns: one line, cut
+// to width, so a long summary never wraps.
+func foldLine(text string, open bool, width int) string {
+	text = strings.ReplaceAll(text, "\n", " ")
+	hint, mark := " (ctrl+o to expand)", toolStyle.Render("○ ")
+	if open {
+		hint, mark = " (ctrl+o to collapse)", dimStyle.Render("▾ ")
+	}
+	// The text gives way, not the hint; a screen too narrow for the hint
+	// cuts the whole line.
+	text = ansi.Truncate(text, max(width-2-lipgloss.Width(hint), 8), "…")
+	return ansi.Truncate(mark+text+dimStyle.Render(hint), width, "")
+}
+
+// summaryOf is what calls ran: their tool's summarizer's line when every
+// call is of one tool that has one and gives a line, otherwise the
+// counts by tool name in first-use order.
+func summaryOf(m view.Model, calls []int, tools []view.ToolCount, sums toolview.Summarizers) string {
+	if len(tools) == 1 {
+		cs := make([]view.Call, len(calls))
+		for k, i := range calls {
+			cs[k] = *m.Rows[i].Call
+		}
+		if l, ok := summarize(sums[tools[0].Name], cs); ok {
+			return drawLine(l)
+		}
+	}
+	parts := make([]string, len(tools))
+	for k, t := range tools {
+		parts[k] = fmt.Sprintf("%d %s", t.N, view.CleanLine(t.Name))
+	}
+	line := "ran " + strings.Join(parts, ", ")
+	// What was folded away: the short outputs the person has not looked at.
+	n := 0
+	for _, i := range calls {
+		if out := strings.TrimSpace(m.Rows[i].Call.Output); out != "" {
+			n += strings.Count(out, "\n") + 1
+		}
+	}
+	if n > 0 {
+		line += " · " + plural(n, "line") + " out"
+	}
+	return line
+}
+
+// summarize is s's line for calls, and whether it gave one. It gave none
+// when s is nil, declined, returned an empty line or panicked.
+func summarize(s toolview.Summarizer, calls []view.Call) (l toolview.Line, ok bool) {
+	if s == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			l, ok = nil, false
+		}
+	}()
+	l, ok = s.Summarize(calls)
+	return l, ok && len(l) > 0
 }
 
 func wrap(s string, width int) string {
@@ -412,15 +523,22 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	raw := c
 	c.Name = view.CleanLine(c.Name)
 	c.Reason, c.Withdrawn, c.Verdict = view.CleanLine(c.Reason), view.CleanLine(c.Withdrawn), view.CleanLine(c.Verdict)
-	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
+	// The dot, in the style of the call's state, and the name after it.
+	dotCh, style, state := "○", toolStyle, " ["+c.State.String()+"]"
 	switch {
 	case moving(c):
-		name, state = runStyle.Render(dot(spin)+" "+c.Name), runStyle.Render(state)
+		dotCh, style, state = dot(spin), runStyle, runStyle.Render(state)
 	case c.State == view.CallDeferred && !c.HeldBeside:
-		name = warnStyle.Render("◆ " + c.Name)
+		dotCh, style = "◆", warnStyle
 	}
+	name := style.Render(dotCh + " " + c.Name)
 	r := tools[raw.Name]
 	rhead, custom := toolHead(r, raw)
+	// A bare renderer's head stands in for the name, collapsed only: the
+	// expanded line is where the person reads which tool it is.
+	if custom && !o.output && isBare(r) {
+		name = style.Render(dotCh)
+	}
 	body, hasBody := toolBody(r, raw, o.output)
 	var b strings.Builder
 	if o.output {
@@ -537,6 +655,21 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	return b.String()
 }
 
+// isBare reports whether r's head stands in for its tool's name. A
+// renderer whose Bare panics is not.
+func isBare(r toolview.Renderer) (bare bool) {
+	b, ok := r.(toolview.Bare)
+	if !ok {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			bare = false
+		}
+	}()
+	return b.Bare()
+}
+
 // toolHead is r's head for c, and whether r gave one. It gave none when
 // r is nil, declined, returned an empty line or panicked.
 func toolHead(r toolview.Renderer, c view.Call) (l toolview.Line, ok bool) {
@@ -549,7 +682,7 @@ func toolHead(r toolview.Renderer, c view.Call) (l toolview.Line, ok bool) {
 		}
 	}()
 	l, ok = r.Head(c)
-	return l, ok && len(l) > 0
+	return l, ok && strings.TrimSpace(view.Clean(l.String())) != ""
 }
 
 // toolBody is r's body for c, and whether r gave one. It gave none when

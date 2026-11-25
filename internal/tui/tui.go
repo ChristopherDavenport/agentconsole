@@ -88,6 +88,11 @@ type Model struct {
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
 	flips map[string]opts
+	// quietOpen, runsOpen and turnsFolded hold what the person expanded
+	// or folded in the outline (see outlineState).
+	// The sets only grow: their keys are entry and response IDs, which a
+	// session does not reuse, so there is nothing to prune.
+	quietOpen, runsOpen, turnsFolded map[string]bool
 	// spans are where the rows sit in the viewport's content, from the
 	// last layout, for a click to find the row under it.
 	spans []rowSpan
@@ -159,6 +164,8 @@ type Model struct {
 	cost client.Cost
 	// tools are the renderers of the tools' calls, by tool name.
 	tools toolview.Renderers
+	// sums are the summarizers of quiet runs, by tool name.
+	sums toolview.Summarizers
 
 	// screen is the conversation or the tree; pane the detail under the
 	// conversation; frozen a read-only look at another line, nil when the
@@ -264,6 +271,12 @@ func WithHistory(past []string, record func(line string)) Option {
 	}
 }
 
+// WithToolSummarizers sets the summarizers of the quiet runs of calls,
+// by tool name.
+func WithToolSummarizers(ss toolview.Summarizers) Option {
+	return func(m *Model) { m.sums = maps.Clone(ss) }
+}
+
 // WithToolRenderers sets the renderers of the tools' calls, by tool
 // name; a call to any other tool shows its arguments as key=value pairs.
 func WithToolRenderers(rs toolview.Renderers) Option {
@@ -288,24 +301,27 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 	in.SetStyles(inputStyles(true))
 	in.Focus()
 	m := &Model{
-		ctx:      ctx,
-		src:      src,
-		act:      act,
-		verified: rec.Verified(),
-		rec:      rec,
-		vp:       viewport.New(),
-		in:       in,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		md:       newMarkdown(),
-		flips:    map[string]opts{},
-		decided:  map[string]client.CallAnswer{},
-		offers:   map[string]client.GrantOffer{},
-		offering: map[string]bool{},
-		replied:  map[string]bool{},
-		steers:   &steerQueue{},
-		inputY:   -1,
-		exec:     tea.ExecProcess,
-		now:      time.Now,
+		ctx:         ctx,
+		src:         src,
+		act:         act,
+		verified:    rec.Verified(),
+		rec:         rec,
+		vp:          viewport.New(),
+		in:          in,
+		spinner:     spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		md:          newMarkdown(),
+		flips:       map[string]opts{},
+		quietOpen:   map[string]bool{},
+		runsOpen:    map[string]bool{},
+		turnsFolded: map[string]bool{},
+		decided:     map[string]client.CallAnswer{},
+		offers:      map[string]client.GrantOffer{},
+		offering:    map[string]bool{},
+		replied:     map[string]bool{},
+		steers:      &steerQueue{},
+		inputY:      -1,
+		exec:        tea.ExecProcess,
+		now:         time.Now,
 
 		panelSettle: defaultPanelSettle,
 	}
@@ -488,6 +504,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.frozen, m.err, m.curEntry = msg.frozen, "", msg.frozen.selected
 			m.panes = paneState{}
+			// The selected row may be one a collapsed line draws: the cursor
+			// goes to the stop that stands for it.
+			m.keepCursor()
 			m.reveal = m.curEntry != ""
 		}
 		m.relayout()
@@ -812,7 +831,7 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+n":
 		return m, m.moveCursor(1)
 	case "ctrl+b":
-		return m, m.continueFrom(m.curEntry)
+		return m, m.continueFrom(m.cursorEntry())
 	}
 	if m.frozen != nil {
 		switch msg.String() {
@@ -822,7 +841,7 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.wantPane()
 		case "c":
 			if m.curEntry != "" {
-				return m, m.continueFrom(m.curEntry)
+				return m, m.continueFrom(m.cursorEntry())
 			}
 			return m, m.continueFrom(m.frozen.model.Leaf)
 		}
@@ -1114,7 +1133,7 @@ func (m *Model) relayout() {
 		m.drawn = m.screen
 		return
 	}
-	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers))
+	content, spans := renderRows(m.shown(), m.o, m.flips, m.tools, m.width, m.curEntry, m.spinner.View(), m.md, asksOf(m.shown(), m.offers), m.outlineState())
 	m.setContent(content)
 	m.spans = spans
 	switch {

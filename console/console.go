@@ -69,6 +69,7 @@ type config struct {
 	warn    func(string)
 	cost    client.Cost
 	tools   toolview.Renderers
+	sums    toolview.Summarizers
 	submit  func(context.Context, Line) (Submit, error)
 	past    []string
 	record  func(string)
@@ -129,6 +130,14 @@ func WithCost(fn client.Cost) Option { return func(c *config) { c.cost = fn } }
 // replaces the set.
 func WithToolRenderers(rs toolview.Renderers) Option {
 	return func(c *config) { c.tools = rs }
+}
+
+// WithToolSummarizers sums up a collapsed run of quiet calls, or of quiet turns, with the
+// summarizer of its tool, when every call of the run is that tool's
+// and the summarizer gives a line; any other run shows the client's
+// own line. A later call replaces the set.
+func WithToolSummarizers(ss toolview.Summarizers) Option {
+	return func(c *config) { c.sums = ss }
 }
 
 // WithGrantOffer lets the permission panel offer "always": fn says, for
@@ -288,7 +297,7 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	if cfg.out != nil {
 		out = cfg.out
 	}
-	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithCopier(tui.Clipboard(out)), tui.WithStatus(status)}
+	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithToolSummarizers(cfg.sums), tui.WithCopier(tui.Clipboard(out)), tui.WithStatus(status)}
 	if cfg.history {
 		topts = append(topts, tui.WithHistory(cfg.past, cfg.record))
 	}

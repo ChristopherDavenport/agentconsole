@@ -148,7 +148,7 @@ const hostile = "see \x1b]8;;x-evil:payload\x1b\\here\x1b]8;;\x1b\\ \x1b[2J\x1b[
 func TestModelAndToolTextCannotWriteControlSequences(t *testing.T) {
 	cfg := cfgWith(think("thought "+hostile, callTool("call_1", "leak", `{"text":"x"}`)), say(nil, nil, "said "+hostile))
 	cfg.Tools = []agenttool.Tool{agenttool.New("leak", "returns hostile text", func(context.Context, textArgs) (string, error) {
-		return "output " + hostile, nil
+		return "output " + hostile + loudPad, nil
 	})}
 	a := newApp(t, cfg)
 	a.resize(200, 60)
@@ -158,7 +158,7 @@ func TestModelAndToolTextCannotWriteControlSequences(t *testing.T) {
 	s := a.waitFor("everything expanded", has("thought", "output", "said"))
 	f := a.frame()
 	inert(t, f, s, "]8;;x-evil:payload", "[2J", "]0;pwned", "]52;c;ZXZpbA==")
-	for _, who := range []string{"thought", "output", "said"} {
+	for _, who := range []string{"thought", "↳ output", "said"} {
 		if l := lineWith(s, who); !strings.Contains(l, "]0;pwned") {
 			t.Errorf("the %s line keeps a sequence: %q", who, l)
 		}
@@ -201,7 +201,7 @@ func TestNewlinesTabsAndUnicodeAreKept(t *testing.T) {
 	text := "漢字 👍🏽 cafe\u0301"
 	cfg := cfgWith(callTool("call_1", "leak", `{"text":"x"}`), say(nil, nil, "first "+text+"\n\nsecond line"))
 	cfg.Tools = []agenttool.Tool{agenttool.New("leak", "returns lines", func(context.Context, textArgs) (string, error) {
-		return "one\ttab " + text + "\ntwo", nil
+		return "one\ttab " + text + "\ntwo" + loudPad, nil
 	})}
 	a := newApp(t, cfg)
 	a.resize(150, 50)

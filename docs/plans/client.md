@@ -1012,6 +1012,17 @@ reads a command, an edit or a read as the JSON the model wrote.
 - **Exported names added:** the package `toolview` (`Renderer`,
   `Renderers`, `Line`, `Span`, `Role` and its six values, `S`, `Text`,
   `Line.String`), `view.Call.Schema` and `console.WithToolRenderers`.
+- **A bare renderer stands in for the name** (`toolview.Bare`, an
+  optional interface with `Bare() bool`). The client draws the dot, the
+  tool's name and then the head, so a shell renderer's `$ ls` read `○
+  bash $ ls`. A renderer that is bare has its head replace the name on the
+  collapsed line (`○ $ ls`): the dot and the state stay the client's, and
+  a call whose head is declined, empty or panics is drawn with its name
+  and key=value arguments as before, as is a call whose `Bare` panics.
+  Expanded (ctrl+o) the name is drawn, since the raw view is where the
+  person reads which tool will run, and the permission panel is not
+  changed. Child calls follow their tool's renderer. Added name:
+  `toolview.Bare`.
 
 ## Decided in implementation, submitted lines
 
@@ -1887,6 +1898,139 @@ No RFC holds it; it is this plan's.
   back, the draft) are filtered as they go in. A bidi override there
   would make the line about to be sent read as another. A test holds
   the filter's set to Clean's.
+
+## Decided in implementation, the outline
+
+A coding session is long chains of calls whose outputs are empty: a
+`mkdir`, a `cd`, a `git add`. Each takes a row and says nothing. The
+user's decisions: summarize them by what ran, keep every call
+reachable, and show the turn structure of the loop.
+
+History. The first design grouped runs of quiet calls across turns, one
+group slicing through several responses. The user found the layers
+mixed: a turn's header ended up inside a tool block, and a turn number
+went missing behind a group. The design below replaced it: levels
+nested one in another, the same shape at every depth, nothing slicing
+across.
+
+The user first said a call is quiet when its output is empty. Short
+outputs (an `ls`, a `git status -s`) then broke the structure, though the
+model needs them and the person only when they look. So quiet is by
+size: a short output is quiet and is counted in the summary, a long one
+is loud and shown in full. The cutoff is 5 lines and 400 characters.
+
+- **A layer above the rows, not a change to them.** `view.Model.Rows`
+  stays one row per item, in the record's order, so the Open Responses
+  view is as it was and every rule about the overlay and the record
+  holds. `view.Outline(Model) []Block` is a pure, linear projection of a
+  model: no state, no I/O, same input and same output. The TUI renders
+  blocks; an embedder that wants the turn structure calls it too.
+- **A turn is one model response and always has its header.** A
+  `BlockTurn` holds the rows that share a `ResponseID` (the outputs the
+  harness sent back for its calls following them) as `Items`, in order:
+  a loud row to show in full (a message, reasoning with no call around
+  it, a call that says something, any output of one), or a quiet run. A
+  row with no response (a user message) is a turn block of its own,
+  numbered 0, with no header. `Turn` counts the responses from 1 in the
+  order they first appear.
+- **A quiet call** has ended, its output is on the record, it did not
+  fail, its output is short, and nothing about it needs the person. Short
+  is at most 5 lines and at most 400 runes, after trimming whitespace
+  (a trailing newline is not a line; an empty output is short), fixed
+  constants with no option. A longer output is loud and shown in full as
+  before, and so is a failed call whatever its output. Nothing about it
+  may need the person: no question, no hold, no withdrawal, no cut-off,
+  no policy verdict other than proceed, no left-out mark. A row that is live,
+  hidden or a fold is never quiet, so a running or waiting call is
+  never hidden.
+- **A quiet run** (`QuietRun`) is each maximal stretch inside a turn of
+  quiet calls, their outputs and the reasoning around them, with at
+  least one call, even for a single call. Order is kept: quiet, loud,
+  quiet is a summary, a row, a summary. A run is shown as one line by
+  default, the counts by tool name in first-use order and the lines of
+  output it folded (`ran 3 bash · 6 lines out`, the part left out when
+  there are none), or its tool's summarizer's line when every call is
+  that tool's; the summarizer reads the calls with their `Output`, which
+  on a quiet call is short, so it may show a first line. Expanded it shows its rows as they are drawn outside a run.
+- **A run of turns** (`BlockRun`) is two or more consecutive turns that
+  are quiet through and through: every item a quiet run, so no message,
+  no loud row, no live row, nothing asked. It is one line, `turns 2–3 ·
+  ran 2 bash, 1 read · 6 lines out`, with the same summary rules over all its calls.
+  Expanded it shows its turns exactly as a turn is drawn outside a
+  run: header, then its quiet summary line, itself expandable. One
+  quiet turn alone is not a run: its header and its summary line. A
+  turn with a message is never in one, so an intro text and a `mkdir`
+  keep the header, the message and a `ran 1 bash` line.
+- **Quietness is a row's.** A call row is quiet by its own state, never
+  by its call ID: an ID may be reused (a provider's, a copied context) or
+  empty. An output belongs to the nearest call row before it with its ID,
+  in that row's turn, and an output with no such row, or a call with no
+  ID, is loud.
+- **Summaries are one line.** A quiet run's line and a run of turns' line
+  are cut to the width, the text giving way to the hint, and never wrap.
+- **A bare renderer's head and a pending call.** `toolview.Bare` drops the
+  name from a call's collapsed line, so a call waiting for permission
+  reads `◆ $ rm -rf x`. That is by design: the line is the call's own,
+  and the permission panel, where the decision is made, always names the
+  tool and shows the arguments as given; no renderer changes it.
+- **Nothing is lost, no number goes missing.** Every row is in exactly
+  one block, and expanding reaches every call. A run of turns stands for
+  the headers of the turns it covers by naming the range, so every turn
+  number from 1 to the last is on the screen as a header or inside a
+  run's range, in any collapse state.
+- **The TUI's header, folds and stops.** A header is one line of dim
+  text, no rule, `turn 3 · 2 calls → 2 outputs · 1 failed` (the failed
+  count in the error colour), or `turn 4 · answer`, with no blank row
+  under it (the rows follow; a folded header, with nothing under it, is
+  followed by the blank line every block has). It never wraps, and
+  narrow, its end is cut. The counts read the whole turn through the
+  outline. The model holds usage for the line and for its last call, not
+  per response, so a header has counts only and invents no tokens or
+  time. Ctrl-O or a second click on a header folds the turn to it
+  (`▸ turn 3 · … (ctrl+o to expand)`); a turn with a live row, a call in
+  motion or waiting, or a permission or question on one of its calls is
+  never folded: the choice is kept, and the turn stays drawn until it
+  settles, and a press on it says "this turn is still going" whether or
+  not a fold was stored. A turn the record cut off (a call a run left
+  unanswered) counts as waiting. A response whose rows are not
+  contiguous (an output after a user message) has one header, at its
+  first block, and counts over the whole response. The cursor's stops are the run's line, a turn's header, a
+  quiet run's line and the rows, expanded quiet runs' calls included, so
+  a call's output is one ctrl+o away on its row as ever. A row's stop is
+  its entry; a line's is synthetic, `turn:<response ID>`,
+  `run:<first response ID>` or `quiet:<first call's entry>`, the pane
+  and the head move reading the entry (the first call's, the turn's
+  first committed row). What
+  the person expanded is kept by key so it survives growth: a turn's fold
+  and a run of turns by the first response ID, and a quiet run by its
+  calls: it is open when any of its calls' entries is in the set, so a
+  run that grows at its front (an earlier parallel call ends and joins
+  it) stays as the person left it, and one that splits or merges keeps
+  the state of the calls it still holds; collapsing takes all of them
+  out. The sets only grow, keyed by IDs a session does not reuse. A
+  cursor on a row or a line that a collapsed line, a folded turn or a run
+  of turns now stands for (a row, a quiet run's line, a turn's header)
+  moves to the nearest stop that does, nearest first (quiet run, run of
+  turns, turn), also when a fork's view opens on such a row; it is
+  dropped only when nothing does. Copy of a collapsed run or line is that line, and of a header its
+  text.
+- **Summaries are the embedder's, with a fallback.**
+  `toolview.Summarizer` reads the calls (`[]view.Call`: the tool's name
+  and arguments, never the tool) and returns a line with roles, or
+  declines; a panic is a decline. `Summarizers` is by tool name; a quiet
+  run or a run of turns takes the summarizer of its tool when every call
+  is that tool's, and the client's own line otherwise. For a run of
+  turns the line is `turns 2–3 · ` and the summary.
+  `console.WithToolSummarizers` hands them in, beside
+  `WithToolRenderers`. The client ships none.
+- **Exported names added:** `view.Outline`, `view.Block` (`Kind`, `Turn`,
+  `ResponseID`, `Items`, `Turns`, `FirstTurn`, `LastTurn`, `Calls`,
+  `Tools`, and `Rows()`), `view.BlockKind` with `BlockTurn` and
+  `BlockRun`, `view.Item` (`Row`, `Quiet`, and `Rows()`), `view.QuietRun`
+  (`Rows`, `Calls`, `Tools`), `view.ToolCount`, `toolview.Summarizer`
+  (an interface with `Summarize(calls []view.Call) (Line, bool)`, as
+  `Renderer` is), `toolview.Summarizers` and
+  `console.WithToolSummarizers`.
 
 ## Open questions
 

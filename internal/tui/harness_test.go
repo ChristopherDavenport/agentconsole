@@ -183,9 +183,13 @@ func upperTool(g *gates) agenttool.Tool {
 				return "", err
 			}
 		}
-		return strings.ToUpper(a.Text), nil
+		return strings.ToUpper(a.Text) + loudPad, nil
 	})
 }
+
+// loudPad makes a tool's output loud by size (over 400 runes, on the same
+// line), so a test about how a call row reads is not about the outline.
+var loudPad = " " + strings.Repeat("·", 400)
 
 func deferAll(reason string) func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
 	return func(context.Context, agentturn.ToolCallInfo) (*agentturn.ToolDecision, error) {
