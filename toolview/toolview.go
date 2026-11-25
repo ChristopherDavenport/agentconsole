@@ -69,7 +69,7 @@ type Renderers map[string]Renderer
 type Summarizer interface {
 	// Summarize is the line for calls, all of the tool the summarizer is
 	// registered for, in the order they ran. ok is false to show the
-	// client's own line: the counts by tool name and the span of turns.
+	// client's own line: the counts by tool name.
 	Summarize(calls []view.Call) (line Line, ok bool)
 }
 
