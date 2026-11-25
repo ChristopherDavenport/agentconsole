@@ -55,6 +55,20 @@ type Renderer interface {
 	Body(c view.Call, expanded bool) (body []Line, ok bool)
 }
 
+// Bare is an optional interface of a [Renderer]: when Bare reports true,
+// the head it gives stands in for the tool's name on the call's
+// collapsed line, so a shell tool's call reads `○ $ ls` and not `○ bash
+// $ ls`. The client still draws the dot and the state around the head
+// and the notes under it; only the name goes. The head must then say what
+// the tool is by itself. A call whose head is declined (ok false, empty,
+// or a panic) has no head to stand in, and is drawn with its name and
+// its arguments as key=value pairs. Expanded (ctrl+o) the name is always
+// drawn: the raw view is where the person reads what will run, and the
+// permission panel is never changed by a renderer.
+type Bare interface {
+	Bare() bool
+}
+
 // Renderers are the renderers a client uses, by tool name as the model
 // calls it, an MCP tool's prefix included. A call to a tool with no
 // renderer is shown as the client shows any tool's.

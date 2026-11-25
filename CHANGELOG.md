@@ -29,6 +29,10 @@ versions may break the API.
   row, is never folded, and a running call is never inside a summary.
   Headers and lines are stops of the row cursor, and copy takes a
   collapsed line.
+- `toolview.Bare`: an optional interface of a renderer. When `Bare()` is
+  true its head stands in for the tool's name on the collapsed call line
+  (`○ $ ls`, not `○ bash $ ls`); a declined head falls back to the name
+  and arguments, and expanded the name is always drawn.
 - `toolview.Summarizer` and `toolview.Summarizers`, and
   `console.WithToolSummarizers`: an embedder sums up a quiet run, or a run
   of turns, whose calls are all of one tool in a line of its own; the

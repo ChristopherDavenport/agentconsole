@@ -516,15 +516,22 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	raw := c
 	c.Name = view.CleanLine(c.Name)
 	c.Reason, c.Withdrawn, c.Verdict = view.CleanLine(c.Reason), view.CleanLine(c.Withdrawn), view.CleanLine(c.Verdict)
-	name, state := toolStyle.Render("○ "+c.Name), " ["+c.State.String()+"]"
+	// The dot, in the style of the call's state, and the name after it.
+	dotCh, style, state := "○", toolStyle, " ["+c.State.String()+"]"
 	switch {
 	case moving(c):
-		name, state = runStyle.Render(dot(spin)+" "+c.Name), runStyle.Render(state)
+		dotCh, style, state = dot(spin), runStyle, runStyle.Render(state)
 	case c.State == view.CallDeferred && !c.HeldBeside:
-		name = warnStyle.Render("◆ " + c.Name)
+		dotCh, style = "◆", warnStyle
 	}
+	name := style.Render(dotCh + " " + c.Name)
 	r := tools[raw.Name]
 	rhead, custom := toolHead(r, raw)
+	// A bare renderer's head stands in for the name, collapsed only: the
+	// expanded line is where the person reads which tool it is.
+	if custom && !o.output && isBare(r) {
+		name = style.Render(dotCh)
+	}
 	body, hasBody := toolBody(r, raw, o.output)
 	var b strings.Builder
 	if o.output {
@@ -639,6 +646,21 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask))
 	}
 	return b.String()
+}
+
+// isBare reports whether r's head stands in for its tool's name. A
+// renderer whose Bare panics is not.
+func isBare(r toolview.Renderer) (bare bool) {
+	b, ok := r.(toolview.Bare)
+	if !ok {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			bare = false
+		}
+	}()
+	return b.Bare()
 }
 
 // toolHead is r's head for c, and whether r gave one. It gave none when

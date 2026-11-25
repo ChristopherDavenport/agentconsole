@@ -1012,6 +1012,17 @@ reads a command, an edit or a read as the JSON the model wrote.
 - **Exported names added:** the package `toolview` (`Renderer`,
   `Renderers`, `Line`, `Span`, `Role` and its six values, `S`, `Text`,
   `Line.String`), `view.Call.Schema` and `console.WithToolRenderers`.
+- **A bare renderer stands in for the name** (`toolview.Bare`, an
+  optional interface with `Bare() bool`). The client draws the dot, the
+  tool's name and then the head, so a shell renderer's `$ ls` read `○
+  bash $ ls`. A renderer that is bare has its head replace the name on the
+  collapsed line (`○ $ ls`): the dot and the state stay the client's, and
+  a call whose head is declined, empty or panics is drawn with its name
+  and key=value arguments as before, as is a call whose `Bare` panics.
+  Expanded (ctrl+o) the name is drawn, since the raw view is where the
+  person reads which tool will run, and the permission panel is not
+  changed. Child calls follow their tool's renderer. Added name:
+  `toolview.Bare`.
 
 ## Decided in implementation, submitted lines
 
