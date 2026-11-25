@@ -63,7 +63,8 @@ type Block struct {
 	Kind BlockKind
 	// Turn is the position in the line of a turn block's response,
 	// counted from 1 in the order the responses first appear in the rows,
-	// 0 for a block with no response. ResponseID is that response.
+	// 0 for a block with no response (a run block has none either: it is
+	// FirstTurn to LastTurn). ResponseID is that response.
 	Turn       int
 	ResponseID string
 	// Items are what a turn block holds, in order.
@@ -128,11 +129,21 @@ func Outline(m Model) []Block {
 		}
 		return turns[resp]
 	}
-	answers := map[string]string{} // call ID -> response of its call row
-	for _, row := range m.Rows {
+	// An output belongs to the nearest call row before it with its call
+	// ID: a row's own, since an ID may be reused (a provider's, a copied
+	// context) and an empty one names nothing.
+	callOf := make([]int, len(m.Rows))
+	last := map[string]int{}
+	for i, row := range m.Rows {
 		turnOf(row.ResponseID)
-		if row.Call != nil {
-			answers[row.Call.CallID] = row.ResponseID
+		callOf[i] = -1
+		if row.Call != nil && row.Call.CallID != "" {
+			last[row.Call.CallID] = i
+		}
+		if o, ok := row.Item.(*openresponses.FunctionCallOutput); ok && row.Call == nil && o.CallID != "" {
+			if j, ok := last[o.CallID]; ok {
+				callOf[i] = j
+			}
 		}
 	}
 	asked := map[string]bool{}
@@ -145,11 +156,9 @@ func Outline(m Model) []Block {
 	for _, q := range m.Questions {
 		asked[q.CallID] = true
 	}
-	quietCall := map[string]bool{}
-	for _, row := range m.Rows {
-		if quiet(row, asked) {
-			quietCall[row.Call.CallID] = true
-		}
+	quietAt := make([]bool, len(m.Rows))
+	for i, row := range m.Rows {
+		quietAt[i] = row.Call != nil && row.Call.CallID != "" && quiet(row, asked)
 	}
 
 	// The turns: contiguous rows of one response, an output with the
@@ -158,8 +167,8 @@ func Outline(m Model) []Block {
 	var rows [][]int
 	for i, row := range m.Rows {
 		resp := row.ResponseID
-		if o, ok := row.Item.(*openresponses.FunctionCallOutput); ok && resp == "" {
-			resp = answers[o.CallID]
+		if callOf[i] >= 0 && resp == "" {
+			resp = m.Rows[callOf[i]].ResponseID
 		}
 		if n := len(blocks); n > 0 && resp != "" && blocks[n-1].ResponseID == resp {
 			rows[n-1] = append(rows[n-1], i)
@@ -169,7 +178,7 @@ func Outline(m Model) []Block {
 		rows = append(rows, []int{i})
 	}
 	for k := range blocks {
-		blocks[k].Items = items(m, rows[k], quietCall)
+		blocks[k].Items = items(m, rows[k], quietAt, callOf)
 	}
 
 	// Runs of turns.
@@ -198,7 +207,7 @@ func Outline(m Model) []Block {
 }
 
 // items cuts one turn's rows into loud rows and quiet runs.
-func items(m Model, rows []int, quietCall map[string]bool) []Item {
+func items(m Model, rows []int, quietAt []bool, callOf []int) []Item {
 	var out []Item
 	var stretch, calls []int
 	flush := func() {
@@ -214,12 +223,12 @@ func items(m Model, rows []int, quietCall map[string]bool) []Item {
 	for _, i := range rows {
 		row := m.Rows[i]
 		member, isCall := false, false
-		switch it := row.Item.(type) {
+		switch row.Item.(type) {
 		case *openresponses.FunctionCall:
-			member = row.Call != nil && quietCall[row.Call.CallID]
+			member = quietAt[i]
 			isCall = member
 		case *openresponses.FunctionCallOutput:
-			member = row.Call == nil && !row.Live && quietCall[it.CallID]
+			member = row.Call == nil && !row.Live && callOf[i] >= 0 && quietAt[callOf[i]]
 		case *openresponses.ReasoningItem:
 			member = !row.Live && !row.Hidden && row.Fold == nil
 		}

@@ -263,3 +263,42 @@ func TestAFailedCallWithAShortOutputIsStillLoud(t *testing.T) {
 		t.Errorf("outline = %s, want %s", got, want)
 	}
 }
+
+// Quietness is a row's, not a call ID's: a provider that reuses an ID per
+// response, or leaves it empty, must not let one call's state speak for
+// another's.
+func TestTwoCallsWithOneIDAreEachTheirOwn(t *testing.T) {
+	done := Row{ResponseID: "r1", Item: &openresponses.FunctionCall{CallID: "c", Name: "bash"},
+		Call: &Call{CallID: "c", Name: "bash", State: CallEnded, Committed: true, Output: "ok"}}
+	running := Row{ResponseID: "r2", Live: true, Item: &openresponses.FunctionCall{CallID: "c", Name: "bash"},
+		Call: &Call{CallID: "c", Name: "bash", State: CallRunning}}
+	out := Row{Item: openresponses.NewFunctionCallOutput("c", "ok")}
+	bs := Outline(Model{Rows: []Row{done, out, running}})
+	// 0 call, 1 its output, 2 the live call with the same ID
+	if got, want := shape(bs), "T1(q0.1) T2(r2)"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+	// A failed twin behind a quiet one.
+	failed := Row{ResponseID: "r2", Item: &openresponses.FunctionCall{CallID: "c", Name: "bash"},
+		Call: &Call{CallID: "c", Name: "bash", State: CallEnded, Committed: true, Failed: true}}
+	if got, want := shape(Outline(Model{Rows: []Row{done, out, failed}})), "T1(q0.1) T2(r2)"; got != want {
+		t.Errorf("failed twin: outline = %s, want %s", got, want)
+	}
+	// Outputs pair with the nearest call before them: the second output is
+	// the second call's, in its turn.
+	second := done
+	second.ResponseID = "r2"
+	out2 := Row{Item: openresponses.NewFunctionCallOutput("c", "ok")}
+	if got, want := shape(Outline(Model{Rows: []Row{done, out, second, out2}})), "R1-2(T1(q0.1) T2(q2.3))"; got != want {
+		t.Errorf("reused id: outline = %s, want %s", got, want)
+	}
+}
+
+func TestACallWithNoIDIsLoud(t *testing.T) {
+	call := Row{ResponseID: "r1", Item: &openresponses.FunctionCall{Name: "bash"},
+		Call: &Call{Name: "bash", State: CallEnded, Committed: true}}
+	out := Row{Item: openresponses.NewFunctionCallOutput("", "")}
+	if got, want := shape(Outline(Model{Rows: []Row{call, out}})), "T1(r0) T0(r1)"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
