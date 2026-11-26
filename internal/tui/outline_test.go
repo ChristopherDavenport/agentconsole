@@ -468,3 +468,55 @@ func TestALongOutputIsALoudRowAmongQuietOnes(t *testing.T) {
 		t.Errorf("summary, loud cat, summary expected (%d %d %d):\n%s", i, j, k, s)
 	}
 }
+
+// Reasoning between quiet calls folds with them, and expanding the run
+// shows it where it was, collapsed by default and in full with
+// WithReasoningShown; Ctrl-R on the row flips it either way.
+func TestAQuietRunsReasoningFollowsTheSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		opts  []tui.Option
+		shown bool
+	}{
+		{"collapsed by default", nil, false},
+		{"shown with the option", []tui.Option{tui.WithReasoningShown()}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := cfgWith(
+				think("checking the dir", callTool("call_1", "mkdir", `{"text":"a"}`)),
+				say(nil, nil, "all done"),
+			)
+			cfg.Tools = []agenttool.Tool{quietTool("mkdir")}
+			a := newAppWith(t, cfg, nil, nil, tc.opts...)
+			a.resize(110, 50)
+			a.submit("go")
+			s := settled(a, "all done")
+			if !strings.Contains(s, "ran 1 mkdir") || strings.Contains(s, "reasoning") || strings.Contains(s, "checking the dir") {
+				t.Fatalf("the reasoning did not fold with its call:\n%s", s)
+			}
+			a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the quiet run
+			if l := lineWith(a.screen(), "ran 1 mkdir"); !strings.Contains(l, "▶") {
+				t.Fatalf("the cursor is not on the quiet run:\n%s", a.screen())
+			}
+			a.key("ctrl+o")
+			collapsed := func(s string) bool {
+				return strings.Contains(s, "reasoning (16 chars") && !strings.Contains(s, "checking the dir")
+			}
+			expanded := func(s string) bool {
+				return strings.Contains(s, "▾ reasoning") && strings.Contains(s, "checking the dir")
+			}
+			want, other := collapsed, expanded
+			if tc.shown {
+				want, other = expanded, collapsed
+			}
+			if s := a.screen(); !want(s) || !strings.Contains(s, `mkdir text="a"`) {
+				t.Errorf("expanded run:\n%s", s)
+			}
+			a.key("ctrl+n") // the reasoning row
+			a.key("ctrl+r")
+			if s := a.screen(); !other(s) {
+				t.Errorf("ctrl+r did not flip the row:\n%s", s)
+			}
+		})
+	}
+}

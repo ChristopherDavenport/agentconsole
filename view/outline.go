@@ -28,8 +28,7 @@ type ToolCount struct {
 }
 
 // QuietRun is a maximal stretch of a turn's rows made of quiet calls,
-// their outputs and the reasoning with no text around them, with at
-// least one call. Reasoning with text is a loud row.
+// their outputs and the reasoning around them, with at least one call.
 // A client shows it as one line, and its rows when expanded.
 type QuietRun struct {
 	// Rows are the indices into [Model.Rows] of the stretch, in order.
@@ -111,9 +110,8 @@ func (b Block) quietThrough() bool {
 //
 // A turn is one model response: the rows that share a ResponseID, with
 // the outputs sent back for its calls following them. Inside a turn, each
-// maximal stretch of quiet calls, their outputs and the reasoning with no
-// text around them is a quiet run, even for one call; every other row,
-// reasoning with text included, is a loud row,
+// maximal stretch of quiet calls, their outputs and the reasoning around
+// them is a quiet run, even for one call; every other row is a loud row,
 // and the order is kept. A call is quiet when it has ended, its output is
 // on the record, it did not fail, its output is short (at most 5 lines and 400 runes after trimming), and
 // nothing about it needs the person (no question, hold, withdrawal,
@@ -232,12 +230,7 @@ func items(m Model, rows []int, quietAt []bool, callOf []int) []Item {
 		case *openresponses.FunctionCallOutput:
 			member = row.Call == nil && !row.Live && callOf[i] >= 0 && quietAt[callOf[i]]
 		case *openresponses.ReasoningItem:
-			// Reasoning with text is the model's thinking and is shown
-			// as its own row; folded into a run's line, which counts
-			// only calls, it would leave no trace on the screen. A
-			// reasoning item with none (a provider that omits the text
-			// and returns only a signature) has nothing to show.
-			member = !row.Live && !row.Hidden && row.Fold == nil && !hasText(row.Item.(*openresponses.ReasoningItem))
+			member = !row.Live && !row.Hidden && row.Fold == nil
 		}
 		if !member {
 			flush()
@@ -303,10 +296,4 @@ const (
 func short(out string) bool {
 	out = strings.TrimSpace(out)
 	return utf8.RuneCountInString(out) <= quietRunes && strings.Count(out, "\n") < quietLines
-}
-
-// hasText reports whether reasoning has text to show: its summary or its
-// content, after trimming.
-func hasText(r *openresponses.ReasoningItem) bool {
-	return strings.TrimSpace(r.Summary.Text()) != "" || strings.TrimSpace(r.Content.Text()) != ""
 }
