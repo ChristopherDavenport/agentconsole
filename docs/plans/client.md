@@ -2034,6 +2034,25 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   `Renderer` is), `toolview.Summarizers` and
   `console.WithToolSummarizers`.
 
+## Decided in implementation, reasoning collapsed or shown
+
+The user, comparing dax on Claude with pi, missed the thinking in dax:
+reasoning starts collapsed to its length, and between quiet calls it
+folds with them. A first cut made reasoning with text a loud row, and
+another drew it in full whenever its quiet run was expanded; the user
+chose neither. Reasoning appears where it naturally is, in the turn or
+in the quiet run it folds into, and one setting says whether it starts
+expanded or collapsed.
+
+- **A host can start reasoning shown.** `console.WithReasoningShown`
+  starts the conversation with every reasoning row expanded, as Ctrl-R
+  with no row selected sets it, its text drawn as it streams, inside an
+  expanded quiet run too; Ctrl-R toggles it as without the option, and
+  on a selected row flips that row. Without it reasoning starts
+  collapsed to its length, as before. The outline is unchanged. dax
+  sets it from its config.
+- **Exported names added:** `console.WithReasoningShown`.
+
 ## Open questions
 
 - **Edit-and-allow over ACP.** ACP's permission is allow once or reject

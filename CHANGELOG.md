@@ -5,6 +5,15 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Added
+
+- `console.WithReasoningShown()` starts the conversation with every
+  reasoning row expanded, its text shown as it streams, instead of
+  collapsed to its length; that includes reasoning inside an expanded
+  quiet run. Ctrl-R still toggles it.
+
 ## v0.0.21 - 2026-11-25
 
 ### Fixed
