@@ -1928,8 +1928,8 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
 - **A turn is one model response and always has its header.** A
   `BlockTurn` holds the rows that share a `ResponseID` (the outputs the
   harness sent back for its calls following them) as `Items`, in order:
-  a loud row to show in full (a message, reasoning with no call around
-  it, a call that says something, any output of one), or a quiet run. A
+  a loud row to show in full (a message, reasoning with text, a call
+  that says something, any output of one), or a quiet run. A
   row with no response (a user message) is a turn block of its own,
   numbered 0, with no header. `Turn` counts the responses from 1 in the
   order they first appear.
@@ -1946,8 +1946,8 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   hidden or a fold is never quiet, so a running or waiting call is
   never hidden.
 - **A quiet run** (`QuietRun`) is each maximal stretch inside a turn of
-  quiet calls, their outputs and the reasoning around them, with at
-  least one call, even for a single call. Order is kept: quiet, loud,
+  quiet calls, their outputs and the reasoning with no text around
+  them, with at least one call, even for a single call. Order is kept: quiet, loud,
   quiet is a summary, a row, a summary. A run is shown as one line by
   default, the counts by tool name in first-use order and the lines of
   output it folded (`ran 3 bash · 6 lines out`, the part left out when
@@ -2033,6 +2033,28 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   (an interface with `Summarize(calls []view.Call) (Line, bool)`, as
   `Renderer` is), `toolview.Summarizers` and
   `console.WithToolSummarizers`.
+
+## Decided in implementation, reasoning on the screen
+
+The user, comparing dax on Claude with pi, saw no thinking in dax,
+though the record held it. Two things hid it, and both changed.
+
+- **Reasoning with text is loud.** The outline had folded every
+  reasoning row next to quiet calls into their quiet run, and a run's
+  line counts calls only (`ran 1 ls, 2 read`), so once a thought
+  landed nothing on the screen said it was there; between tool calls
+  is where a coding agent mostly thinks. Reasoning whose summary or
+  content has text after trimming is now a loud row: it splits the
+  quiet run around it, and its turn is not quiet through and through,
+  so never in a run of turns. Reasoning with no text (a provider that
+  omits it and returns only a signature, Claude's `display: omitted`)
+  has nothing to show and still joins the run, so it costs no row.
+- **A host can start reasoning shown.** `console.WithReasoningShown`
+  starts the conversation with every reasoning row expanded, as Ctrl-R
+  with no row selected sets it, its text drawn as it streams; Ctrl-R
+  toggles it as without the option. Without it reasoning starts
+  collapsed to its length, as before. dax sets it from its config.
+- **Exported names added:** `console.WithReasoningShown`.
 
 ## Open questions
 

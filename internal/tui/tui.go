@@ -271,6 +271,10 @@ func WithHistory(past []string, record func(line string)) Option {
 	}
 }
 
+// WithReasoningShown starts with every reasoning row expanded, as Ctrl-R
+// with no row selected sets it; Ctrl-R still toggles it.
+func WithReasoningShown() Option { return func(m *Model) { m.o.reasoning = true } }
+
 // WithToolSummarizers sets the summarizers of the quiet runs of calls,
 // by tool name.
 func WithToolSummarizers(ss toolview.Summarizers) Option {

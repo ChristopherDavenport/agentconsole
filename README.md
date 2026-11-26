@@ -147,7 +147,9 @@ and Down on its last walk the lines sent before when the host keeps a
 history (`console.WithHistory`; this binary keeps none, dax does);
 Ctrl-G opens the prompt in `$VISUAL` or `$EDITOR` (one that waits for
 the file, `code --wait`) and puts what is saved back in the input,
-unsent; Ctrl-R shows reasoning; Ctrl-O shows tool
+unsent; Ctrl-R shows reasoning (collapsed to its length until then,
+unless the host starts it shown with `console.WithReasoningShown`);
+Ctrl-O shows tool
 arguments and output in full. A mouse drag selects text anywhere on the
 screen — the client has the mouse, so the terminal's own selection
 cannot reach it — and the selection stays drawn until the next key or

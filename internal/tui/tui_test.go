@@ -79,6 +79,14 @@ func TestReasoningIsCollapsedUntilToggled(t *testing.T) {
 	a.waitFor("the reasoning collapsed again", lacks("secret musings"))
 }
 
+func TestReasoningShownStartsExpanded(t *testing.T) {
+	a := newAppWith(t, cfgWith(think("secret musings", say(nil, nil, "answer"))), nil, nil, tui.WithReasoningShown())
+	a.submit("q")
+	a.waitFor("the answer with its reasoning", all(has("answer", "idle", "▾ reasoning", "secret musings"), lacks("ctrl+r to show")))
+	a.key("ctrl+r")
+	a.waitFor("the reasoning collapsed", all(has("reasoning (14 chars"), lacks("secret musings")))
+}
+
 // spinFrames are the spinner's frames, one rune each.
 const spinFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 

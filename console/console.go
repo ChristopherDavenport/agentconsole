@@ -77,6 +77,7 @@ type config struct {
 	offer   func(context.Context, view.Permission) client.GrantOffer
 	comp    func(context.Context, Completing) []Completion
 	hidden  bool
+	think   bool
 	// status is the status line's make-up, when statusSet.
 	status    StatusLine
 	statusSet bool
@@ -198,6 +199,11 @@ func WithCompletion(fn func(ctx context.Context, c Completing) []Completion) Opt
 // and never shown as the person's words.
 func WithHidden() Option { return func(c *config) { c.hidden = true } }
 
+// WithReasoningShown starts the conversation with every reasoning row
+// expanded, its text shown as it streams, instead of collapsed to its
+// length. Ctrl-R toggles it as without the option.
+func WithReasoningShown() Option { return func(c *config) { c.think = true } }
+
 // Line is a line the user submitted in the client's input.
 type Line struct {
 	// Text is what was typed, without the space around it.
@@ -300,6 +306,9 @@ func Run(ctx context.Context, rec client.Record, src client.Source, act client.C
 	topts := []tui.Option{tui.WithCost(cfg.cost), tui.WithToolRenderers(cfg.tools), tui.WithToolSummarizers(cfg.sums), tui.WithCopier(tui.Clipboard(out)), tui.WithStatus(status)}
 	if cfg.history {
 		topts = append(topts, tui.WithHistory(cfg.past, cfg.record))
+	}
+	if cfg.think {
+		topts = append(topts, tui.WithReasoningShown())
 	}
 	if cfg.offer != nil {
 		topts = append(topts, tui.WithGrantOffer(cfg.offer))

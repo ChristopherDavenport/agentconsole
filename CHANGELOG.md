@@ -5,6 +5,23 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Added
+
+- `console.WithReasoningShown()` starts the conversation with every
+  reasoning row expanded, its text shown as it streams, instead of
+  collapsed to its length. Ctrl-R still toggles it.
+
+### Changed
+
+- Reasoning with text is a loud row in `view.Outline`: it no longer
+  joins a quiet run, whose line counts only calls, so a thought between
+  tool calls stays on the screen instead of vanishing into `ran 2 read`.
+  It splits the run around it and keeps its turn out of a run of turns.
+  Reasoning with no text (a provider that returns only a signature)
+  still folds.
+
 ## v0.0.21 - 2026-11-25
 
 ### Fixed

@@ -166,6 +166,30 @@ func TestReasoningAroundQuietCallsJoinsTheirRun(t *testing.T) {
 	}
 }
 
+// Reasoning with text is the model's thinking: a quiet run's line counts
+// only calls, so folded into one it would leave no trace on the screen.
+// It is a loud row, which splits the run around it and keeps its turn
+// out of a run of turns.
+func TestReasoningWithTextIsLoud(t *testing.T) {
+	said := func(id, text string) *openresponses.ReasoningItem {
+		return &openresponses.ReasoningItem{ID: id, Summary: openresponses.Contents{&openresponses.SummaryText{Text: text}}}
+	}
+	l := newRecordsLog(t)
+	l.call("r1", "c1", "bash", str(""))
+	l.append(itemEntry(said("rs1", "the test fails on the second case"), "r1"))
+	l.call("r1", "c2", "bash", str(""))
+	l.append(itemEntry(&openresponses.ReasoningItem{ID: "rs2", Content: openresponses.Contents{&openresponses.ReasoningText{Text: "read the file"}}}, "r2"))
+	l.call("r2", "c3", "bash", str(""))
+	l.append(itemEntry(said("rs3", " \n"), "r3"))
+	l.call("r3", "c4", "bash", str(""))
+	l.call("r4", "c5", "bash", str(""))
+	// 0 c1, 1 out, 2 rs1, 3 c2, 4 out | 5 rs2, 6 c3, 7 out | 8 rs3 (only
+	// space, so quiet), 9 c4, 10 out | 11 c5, 12 out
+	if got, want := shape(Outline(l.v.Model())), "T1(q0.1 r2 q3.4) T2(r5 q6.7) R3-4(T3(q8.9.10) T4(q11.12))"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
 func TestACallThatSaysSomethingIsLoud(t *testing.T) {
 	l := newRecordsLog(t)
 	l.call("r1", "c1", "bash", str(""))
