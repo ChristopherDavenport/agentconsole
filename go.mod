@@ -15,6 +15,7 @@ require (
 	github.com/ChristopherDavenport/agentturn v0.0.41
 	github.com/ChristopherDavenport/agentturn/session v0.0.41
 	github.com/ChristopherDavenport/openresponses v0.0.21
+	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8
@@ -27,7 +28,6 @@ require (
 	github.com/ChristopherDavenport/agentskill v0.0.12 // indirect
 	github.com/ChristopherDavenport/agentsmd v0.0.6 // indirect
 	github.com/ChristopherDavenport/agenttool/mcpclient v0.0.30 // indirect
-	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect

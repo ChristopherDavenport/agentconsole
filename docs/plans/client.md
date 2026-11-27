@@ -2113,6 +2113,34 @@ that worked was folded, its diff two expansions away.
   `ResponseID` (its first turn's) and `Calls` and `Tools` (every call,
   not the quiet ones), and `Block.Rows()` of a run reads its `Items`.
 
+## Decided in implementation, code in a tool's lines
+
+The user, once diffs and short reads were on the screen: color the code
+in them as an editor would.
+
+- **A span says it is code; the client colors it.** `toolview.Span`
+  gains `Syntax`: a file's name (`main.go`, `Makefile`) or a language's
+  (`go`). A renderer still returns roles and no styles, and knows no
+  theme; it only says what the text is, which it has from the call's
+  path. `toolview.Code(role, syntax, text)` makes one. A client that
+  does not highlight, and a syntax a client does not know, draw the
+  span by its role, as before.
+- **The role stays.** An added or removed line of code is still a band
+  with the language's colors over it; context is the code in its colors
+  on the terminal's background. With 16 colors or none, where a change
+  has no band, a changed line stays green or red and is not highlighted:
+  the color is then what says it changed.
+- **A line is lexed alone**, with chroma, which glamour already brings.
+  A collapsed diff or the start of a read is seldom a whole file, so a
+  string or a comment that runs over lines is colored as code past its
+  first line. The theme is chroma's `github-dark` or `github` by the
+  terminal's background, its foregrounds only.
+- **Kept while drawn.** The conversation is laid out on every frame of
+  the spinner, so a drawn line is kept by its text until a layout does
+  not ask for it again, as rendered Markdown is. A lexer that panics or
+  fails has not colored the line.
+- **Exported names added:** `toolview.Span.Syntax`, `toolview.Code`.
+
 ## Decided in implementation, reasoning collapsed or shown
 
 The user, comparing dax on Claude with pi, missed the thinking in dax:

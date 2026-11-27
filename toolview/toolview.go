@@ -132,6 +132,13 @@ const (
 type Span struct {
 	Text string
 	Role Role
+	// Syntax says the text is code, and in what: a file's name (`main.go`,
+	// `Makefile`) or a language's (`go`). A client that highlights code
+	// draws the text in that language's colors when it knows it, keeping
+	// what the role says of the line (a change's added or removed line
+	// stays one); any other client, and any syntax a client does not
+	// know, draws the text by its role. Empty for text that is not code.
+	Syntax string
 }
 
 // Line is one line of spans.
@@ -139,6 +146,10 @@ type Line []Span
 
 // S is a span of text with role r.
 func S(r Role, text string) Span { return Span{Text: text, Role: r} }
+
+// Code is a span of text with role r that is code in syntax (see
+// [Span.Syntax]).
+func Code(r Role, syntax, text string) Span { return Span{Text: text, Role: r, Syntax: syntax} }
 
 // Text is s as lines, each one span of role r, with a trailing newline
 // dropped: what a renderer returns for a block of output.
