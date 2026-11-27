@@ -28,7 +28,8 @@ versions may break the API.
   stop are gone.
 - A collapsed call's count is on its own line: `○ read a.go  · 118
   lines`, not a second line under it. This holds for a renderer's body
-  of one dim line and for the client's own `· N lines (ctrl+o)`.
+  of one dim line and for the client's own `· N lines (ctrl+o)`; a
+  count that does not fit the width stays under its call.
 - Two one-line calls, or quiet runs' lines, under one header have no
   blank line between them; a call with a body under it still stands
   apart.

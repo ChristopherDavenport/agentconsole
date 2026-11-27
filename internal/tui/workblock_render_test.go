@@ -132,3 +132,19 @@ func TestOneLineCallsAreAListAndATallerOneStandsApart(t *testing.T) {
 		}
 	}
 }
+
+// A count that would push its call's line past the width stays under the
+// call, whole: a long command does not wrap through it.
+func TestACountThatDoesNotFitStaysUnderItsCall(t *testing.T) {
+	long := callRow("e_l", view.Call{CallID: "l", Name: "bash", Args: `{"command":"` + strings.Repeat("go test ./... && ", 3) + `true"}`, State: view.CallEnded, Committed: true, Output: strings.Repeat("x\n", 8)})
+	long.ResponseID = "r1"
+	m := view.Model{Rows: []view.Row{long}}
+	wide, _ := renderRows(m, opts{}, nil, nil, 200, "", "", newMarkdown(), asks{}, outlineState{})
+	if got := plain(wide); !strings.Contains(got, `true"  · 8 lines (ctrl+o)`) {
+		t.Errorf("wide: the count is not on the call's line:\n%s", got)
+	}
+	narrow, _ := renderRows(m, opts{}, nil, nil, 60, "", "", newMarkdown(), asks{}, outlineState{})
+	if got := plain(narrow); !strings.Contains(got, "\n  · 8 lines (ctrl+o)") {
+		t.Errorf("narrow: the count is not whole on a line under the call:\n%s", got)
+	}
+}

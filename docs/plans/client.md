@@ -2082,7 +2082,9 @@ that worked was folded, its diff two expansions away.
   in one dim line (a renderer's `· 118 lines`, the client's own
   `· 43 lines (ctrl+o)`) follows the call on its line after two spaces.
   A body of more than one line, or one that is not dim (a diff's one
-  added line, an error), stays under the call.
+  added line, an error), stays under the call, and so does a count that
+  would push the line past the width: a long command does not wrap
+  through it.
 - **Lines of work are a list.** Under one header, two one-line lines of
   work (a call's row, a quiet run's line) have no blank line between
   them; a call with a body under it, a message or reasoning stands apart

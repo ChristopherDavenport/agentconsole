@@ -444,7 +444,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		return dimStyle.Render("▾ reasoning"+tail) + tag + "\n" + dimStyle.Render(text)
 	case *openresponses.FunctionCall:
 		if row.Call != nil {
-			return renderCall(*row.Call, o, tools, tag, 0, spin, ask)
+			return renderCall(*row.Call, o, tools, tag, 0, spin, ask, width)
 		}
 		return toolStyle.Render("○ "+view.CleanLine(it.Name)) + tag + " " + view.Clean(it.Arguments)
 	case *openresponses.FunctionCallOutput:
@@ -552,7 +552,7 @@ func anyMoving(m view.Model) bool {
 // has a renderer in tools shows the renderer's head after its name and
 // its body under the line, each where the renderer gives one; the dot,
 // the name, the state and the client's notes are the client's always.
-func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, ask asks) string {
+func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, ask asks, width int) string {
 	pad := strings.Repeat("  ", depth)
 	// The renderer reads the call as recorded; what the client draws of
 	// it is cleaned (view.Clean), and the renderer's spans in drawLine.
@@ -582,15 +582,17 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	body, hasBody := toolBody(r, raw, o.output)
 	// Collapsed, what an ended call says in one dim line (a count, a
 	// note) goes on the call's own line, so a call that only reports how
-	// much it produced is one line.
+	// much it produced is one line. A line it would push past the width
+	// keeps it under the call, whole, so a long command does not wrap
+	// through its count.
 	trail := ""
 	if !o.output && c.State == view.CallEnded {
 		switch {
 		case hasBody && len(body) == 1 && allDim(body[0]):
-			trail, body = "  "+drawLine(body[0]), nil
+			trail, body = drawLine(body[0]), nil
 		case !hasBody && c.Output != "":
 			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
-			trail = "  " + dimStyle.Render(countHint(n))
+			trail = dimStyle.Render(countHint(n))
 		}
 	}
 	var b strings.Builder
@@ -630,7 +632,15 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		if c.State == view.CallEnded && !c.Committed {
 			line += dimStyle.Render(" (live)")
 		}
-		b.WriteString(pad + line + tag + trail)
+		line = pad + line + tag
+		switch {
+		case trail == "":
+		case lipgloss.Width(line)+2+lipgloss.Width(trail) <= width:
+			line += "  " + trail
+		default:
+			line += "\n" + pad + "  " + trail
+		}
+		b.WriteString(line)
 	}
 	for _, l := range body {
 		b.WriteString("\n" + pad + "  " + drawLine(l))
@@ -700,7 +710,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
 	}
 	for _, ch := range c.Children {
-		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask))
+		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask, width))
 	}
 	return b.String()
 }
