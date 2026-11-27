@@ -71,16 +71,15 @@ func TestARendererDrawsItsToolsCalls(t *testing.T) {
 	out, _ := renderRows(m, opts{}, nil, tools, 80, "", "", newMarkdown(), asks{}, outlineState{})
 	got := plain(out)
 	for _, want := range []string{
-		"○ read a.go\n  read it",    // the head for the arguments, the body for the output
-		"read {\"pa",                // arguments still streaming: declined, the raw arguments
-		`○ bad k="v"`,               // a panic is a decline
-		"1 line (ctrl+o)",           // and the client's body with it
-		"◆ read b.go [deferred]",    // the client's state after the head
-		"  - old + new\n  ? may I?", // the renderer's body, then the client's question
-		`○ grep pattern="p"`,        // declined both: as before
-		"  ● read c.go [running]",   // a child call by its tool's renderer
-		"    ...\n      going",      // whose body declined: the progress tail
-		"○ read d.go (live)",        // an output not on the record yet
+		"○ read a.go  read it\n",                  // the head for the arguments, and the body's one dim line for the output on the call's line
+		"read {\"pa",                              // arguments still streaming: declined, the raw arguments
+		"○ bad k=\"v\"  · 1 line (ctrl+o)\n",      // a panic is a decline, and the client's count is on the line too
+		"◆ read b.go [deferred]",                  // the client's state after the head
+		"  - old + new\n  ? may I?",               // a body that is not dim is under the line, then the client's question
+		"○ grep pattern=\"p\"  · 1 line (ctrl+o)", // declined both: as before
+		"  ● read c.go [running]",                 // a child call by its tool's renderer
+		"    ...\n      going",                    // whose body declined: the progress tail
+		"○ read d.go (live)  read it",             // an output not on the record yet
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -143,14 +142,14 @@ func TestABareRendererStandsInForTheName(t *testing.T) {
 		return s
 	}())
 	for _, want := range []string{
-		"○ $ ls -l\n",            // the head alone after the dot
-		"bash {\"co",             // arguments still streaming: declined, the name and the arguments
-		"○ read a.go",            // a renderer that is not bare keeps its name
-		`○ broken command="pwd"`, // a panicking head declines: name and key=value
-		"○ flag $ id",            // a panicking Bare is not bare
-		"◆ $ make [deferred]",    // the dot and the state stay the client's
-		"● $ top [running]",      // a spinner in the dot
-		"  ● $ ps [running]",     // a child call is drawn by its renderer too
+		"○ $ ls -l  · 2 lines (ctrl+o)\n", // the head alone after the dot, then the count
+		"bash {\"co",                      // arguments still streaming: declined, the name and the arguments
+		"○ read a.go",                     // a renderer that is not bare keeps its name
+		`○ broken command="pwd"`,          // a panicking head declines: name and key=value
+		"○ flag $ id",                     // a panicking Bare is not bare
+		"◆ $ make [deferred]",             // the dot and the state stay the client's
+		"● $ top [running]",               // a spinner in the dot
+		"  ● $ ps [running]",              // a child call is drawn by its renderer too
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)

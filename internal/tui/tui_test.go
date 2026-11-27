@@ -284,7 +284,7 @@ func twoCallsApp(t *testing.T, opts ...tui.Option) *app {
 
 func TestCtrlOOnASelectedRowExpandsThatRowAlone(t *testing.T) {
 	a := twoCallsApp(t)
-	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p") // the answer and its header, the second call and its header, the first call
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p") // the answer and its header, the second call, the first call
 	a.key("ctrl+o")
 	a.waitFor("the first call expanded", all(has("p4", "p5"), lacks("q4")))
 	a.key("ctrl+o")

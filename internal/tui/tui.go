@@ -88,11 +88,11 @@ type Model struct {
 	// ctrl+r and ctrl+o toggled with the row selected. Toggling a switch
 	// for every row drops the rows' own flips of it.
 	flips map[string]opts
-	// quietOpen, runsOpen and turnsFolded hold what the person expanded
+	// quietOpen and turnsFolded hold what the person expanded
 	// or folded in the outline (see outlineState).
 	// The sets only grow: their keys are entry and response IDs, which a
 	// session does not reuse, so there is nothing to prune.
-	quietOpen, runsOpen, turnsFolded map[string]bool
+	quietOpen, turnsFolded map[string]bool
 	// spans are where the rows sit in the viewport's content, from the
 	// last layout, for a click to find the row under it.
 	spans []rowSpan
@@ -316,7 +316,6 @@ func New(ctx context.Context, rec client.Record, src client.Source, act client.C
 		md:          newMarkdown(),
 		flips:       map[string]opts{},
 		quietOpen:   map[string]bool{},
-		runsOpen:    map[string]bool{},
 		turnsFolded: map[string]bool{},
 		decided:     map[string]client.CallAnswer{},
 		offers:      map[string]client.GrantOffer{},
@@ -586,6 +585,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.in.Focus()
 		m.relayout()
 		return m, m.wantPane()
+	case tea.ColorProfileMsg:
+		m.md.profile = msg.Profile
+		m.relayout()
+		return m, nil
 	case tea.BackgroundColorMsg:
 		m.in.SetStyles(inputStyles(msg.IsDark()))
 		m.md.setDark(msg.IsDark())

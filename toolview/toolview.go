@@ -69,13 +69,23 @@ type Bare interface {
 	Bare() bool
 }
 
+// Loud is an optional interface of a [Renderer]: when Loud reports true,
+// the tool's calls are never folded into a quiet run (see
+// [view.Outline]), however short their output. It is for a tool whose
+// row shows what the call did and whose output says nothing: an edit
+// answers "edited x.go", and its row draws the diff. A renderer whose
+// Loud panics is not.
+type Loud interface {
+	Loud() bool
+}
+
 // Renderers are the renderers a client uses, by tool name as the model
 // calls it, an MCP tool's prefix included. A call to a tool with no
 // renderer is shown as the client shows any tool's.
 type Renderers map[string]Renderer
 
 // Summarizer says what a run of calls of one tool did, in one line: the
-// line a collapsed quiet run, or run of quiet turns, shows (see [view.Outline]). It
+// line a collapsed quiet run shows (see [view.Outline]). It
 // reads the calls as [view.Call] values, the name and arguments
 // the record holds and never the tool, and is quick and pure, as a
 // [Renderer] is: it runs whenever the conversation is laid out. A

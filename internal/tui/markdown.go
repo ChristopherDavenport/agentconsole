@@ -7,6 +7,7 @@ import (
 	"charm.land/glamour/v2"
 	gansi "charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rivo/uniseg"
 )
@@ -23,7 +24,10 @@ const tabWidth = 4
 // conversation again, and a message streaming in leaves only its last
 // state behind. A glamour renderer is built once per width.
 type markdown struct {
-	dark      bool
+	dark bool
+	// profile is the colors the terminal draws, as far as the program
+	// was told: all of them until it is.
+	profile   colorprofile.Profile
 	renderers map[int]*glamour.TermRenderer
 	// cache is what the last layout rendered; used what this one has so
 	// far, which replaces it at the layout's end.
@@ -38,10 +42,27 @@ type mdKey struct {
 func newMarkdown() *markdown {
 	return &markdown{
 		dark:      true,
+		profile:   colorprofile.TrueColor,
 		renderers: map[int]*glamour.TermRenderer{},
 		cache:     map[mdKey]string{},
 		used:      map[mdKey]string{},
 	}
+}
+
+// tone is how the terminal draws color: on a dark background or a light
+// one, and with how many colors.
+type tone struct {
+	dark    bool
+	profile colorprofile.Profile
+}
+
+// tone is the terminal's, as far as the program was told; a nil renderer
+// takes it as dark with every color.
+func (r *markdown) tone() tone {
+	if r == nil {
+		return tone{dark: true, profile: colorprofile.TrueColor}
+	}
+	return tone{dark: r.dark, profile: r.profile}
 }
 
 // setDark says whether the terminal's background is dark, which picks

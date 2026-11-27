@@ -1901,6 +1901,10 @@ No RFC holds it; it is this plan's.
 
 ## Decided in implementation, the outline
 
+The run of turns, what makes a call quiet and where a count is drawn
+were changed later: see "the work block" below, which wins where the two
+differ.
+
 A coding session is long chains of calls whose outputs are empty: a
 `mkdir`, a `cd`, a `git add`. Each takes a row and says nothing. The
 user's decisions: summarize them by what ran, keep every call
@@ -2033,6 +2037,81 @@ is loud and shown in full. The cutoff is 5 lines and 400 characters.
   (an interface with `Summarize(calls []view.Call) (Line, bool)`, as
   `Renderer` is), `toolview.Summarizers` and
   `console.WithToolSummarizers`.
+
+## Decided in implementation, the work block
+
+The user, reading a real dax session: the outline was still a column of
+`turn N` headers with a command under each and nothing else, and an
+edit's diff, which dax's renderer draws, was never on the screen. Two
+causes. A turn joined a run of turns only when every call in it was
+quiet, and a read or a command of more than five lines is not, so most
+turns kept their own header over a one-line count. And quiet was by the
+size of the output alone: an edit answers `edited x.go`, so every edit
+that worked was folded, its diff two expansions away.
+
+- **A run of turns is turns of work, not quiet turns.** `BlockRun` is
+  two or more consecutive turns that each hold a call and no message of
+  the assistant's: nothing in them is said to the person. A turn with a
+  message is never in one, as before, so the turn where the agent speaks
+  keeps its own header. A turn that only reasons is not work, and a live
+  turn is, once it has a call.
+- **A run is one header and its rows.** `turns 1–8 · 10 calls` (and
+  `· 2 failed`), then the run's items in order, with no header inside
+  it. The run's `Items` are cut over all its turns' rows, so a quiet run
+  may cross from one turn into the next; `Turns` keeps the turns apart
+  for a client that wants them. This is the first design's grouping
+  across turns with what was wrong with it put right: the header names
+  the range, so no turn number goes missing and no header sits inside a
+  block of calls. One level of expansion is gone with it: a quiet run's
+  line opens onto its calls.
+- **The header folds the run.** Its stop is `turn:<first response ID>`,
+  the same as a turn's, so a turn that becomes a run when the next
+  arrives keeps the person's fold, and `run:` is no stop any more.
+  Ctrl-O or a second click folds the run to `▸ turns 1–8 · 10 calls`; a
+  run with something live or waiting is never folded, as a turn is not.
+  A cursor on the header of a turn that joined a run moves to the
+  run's.
+- **A renderer may keep its tool loud** (`toolview.Loud`, an optional
+  interface with `Loud() bool`, as `Bare` is). Its calls are never in a
+  quiet run, however short their output: the row shows what the call
+  did. `view.Outline` takes it as an option, `view.WithLoud(func(Call)
+  bool)`, since the view knows no renderer; the TUI builds it from the
+  renderers it was handed. Quiet stays by size for every other tool, and
+  the constants stay fixed. A renderer whose `Loud` panics is not loud.
+- **A count is on the call's line.** Collapsed, what an ended call says
+  in one dim line (a renderer's `· 118 lines`, the client's own
+  `· 43 lines (ctrl+o)`) follows the call on its line after two spaces.
+  A body of more than one line, or one that is not dim (a diff's one
+  added line, an error), stays under the call, and so does a count that
+  would push the line past the width: a long command does not wrap
+  through it.
+- **Lines of work are a list.** Under one header, two one-line lines of
+  work (a call's row, a quiet run's line) have no blank line between
+  them; a call with a body under it, a message or reasoning stands apart
+  with a blank line as every block did.
+- **A change is drawn as bands.** A body line that is wholly added or
+  wholly removed has a tinted background that runs to the width, green
+  or red, darker on a dark terminal and paler on a light one (the
+  program is told which, as the Markdown style is), and a long line
+  wraps inside its band. The tints go by the colors the terminal draws
+  (`tea.ColorProfileMsg`): with every color they are muted, a little of
+  the green or red in the background's own shade, which the user asked
+  for after seeing the first ones; with 256 the palette has no such
+  shade and the nearest is a grey, so its plain dark and pale greens and
+  reds are named; with 16 or none there is no band and a change is green
+  or red text, as it was. The text keeps the terminal's own color so it
+  reads on either; with no color the `+` and `-` carry the meaning, as
+  before. A span of those roles inside another line (an edit's `+3 −1`
+  on its call's line) keeps its green or red text and has no band.
+  Copy drops the band's padding, as it drops any trailing spaces.
+- **Not done: one line for neighbours of one tool.** Three reads in a
+  row are three lines. A summarizer could take them, but dax's reads now
+  draw an excerpt under each, and nothing else asked.
+- **Exported names added:** `toolview.Loud`, `view.OutlineOption`,
+  `view.WithLoud`; `view.Outline` takes options. **Changed:**
+  `view.BlockRun`'s meaning, a run block's `Items` (now set),
+  `ResponseID` (its first turn's) and `Calls` and `Tools` (every call,
+  not the quiet ones), and `Block.Rows()` of a run reads its `Items`.
 
 ## Decided in implementation, reasoning collapsed or shown
 

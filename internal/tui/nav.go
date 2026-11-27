@@ -74,8 +74,8 @@ func (m *Model) shown() view.Model {
 
 // selectable are the entries of the shown rows a cursor can rest on, in
 // order: the committed rows that render, the turns' headers and the
-// quiet runs' and runs of turns' lines. A collapsed quiet run is one stop,
-// `quiet:<entry>`, and a folded turn is its header.
+// quiet runs' lines. A collapsed quiet run is one stop,
+// `quiet:<entry>`, and a folded turn or run of turns is its header.
 func selectable(m view.Model, gp outlineState) []string {
 	var out []string
 	for _, it := range layout(m, gp) {
@@ -86,8 +86,8 @@ func selectable(m view.Model, gp outlineState) []string {
 	return out
 }
 
-// stopItem is the drawn line a stop stands for: a turn's header, a quiet
-// run's line or a run of turns' line, and whether the stop is one.
+// stopItem is the drawn line a stop stands for: a header or a quiet
+// run's line, and whether the stop is one.
 func (m *Model) stopItem(stop string) (item, bool) {
 	for _, it := range layout(m.shown(), m.outlineState()) {
 		if it.stop == stop && it.kind != itemRow {
@@ -110,8 +110,6 @@ func (m *Model) toggleLine(stop string) bool {
 		return true
 	case itemQuiet:
 		m.toggleQuiet(it)
-	case itemRun:
-		flip(m.runsOpen, runKey(it.block))
 	}
 	m.reveal = true
 	m.relayout()
@@ -163,9 +161,6 @@ func (m *Model) toggleTurn(resp string) {
 // for a turn's header the turn's first committed row.
 func (m *Model) cursorEntry() string {
 	resp, ok := strings.CutPrefix(m.curEntry, turnStop)
-	if r, isRun := strings.CutPrefix(m.curEntry, runStop); isRun {
-		resp, ok = r, true
-	}
 	if e, isQuiet := strings.CutPrefix(m.curEntry, quietStop); isQuiet {
 		return e
 	}
@@ -183,7 +178,7 @@ func (m *Model) cursorEntry() string {
 // outlineState is how the conversation draws the outline now: what the
 // person expanded and folded, and the embedder's summarizers.
 func (m *Model) outlineState() outlineState {
-	return outlineState{quiet: m.quietOpen, runs: m.runsOpen, folded: m.turnsFolded, sums: m.sums}
+	return outlineState{quiet: m.quietOpen, folded: m.turnsFolded, sums: m.sums, loud: loudOf(m.tools)}
 }
 
 // moveCursor moves the row cursor by delta, starting from the last row
@@ -334,7 +329,7 @@ func (m *Model) keepCursor() {
 	if slices.Contains(stops, m.curEntry) {
 		return
 	}
-	for _, c := range coverers(sh)[m.curEntry] {
+	for _, c := range coverers(sh, loudOf(m.tools))[m.curEntry] {
 		if slices.Contains(stops, c) {
 			m.curEntry = c
 			return
@@ -347,19 +342,20 @@ func (m *Model) keepCursor() {
 }
 
 // coverers are the stops that stand for a row or a line when it is not
-// drawn, by its entry or its stop, the nearest first: a row's quiet run, the
-// run of turns it is in, its turn; a quiet run's line stands in the run of
-// turns, then its turn; a turn's header in its run of turns.
-func coverers(m view.Model) map[string][]string {
+// drawn, by its entry or its stop, the nearest first: a row's quiet run,
+// then its header; a quiet run's line stands in its header; the header of
+// a turn that joined a run of turns in the run's.
+func coverers(m view.Model, loud func(view.Call) bool) map[string][]string {
 	out := map[string][]string{}
-	turn := func(b view.Block, run string) {
+	for _, b := range view.Outline(m, view.WithLoud(loud)) {
 		var parents []string
-		if run != "" {
-			parents = append(parents, run)
-		}
-		if b.Turn > 0 {
+		if first, _ := turnsOf(b); first > 0 {
 			parents = append(parents, turnStop+b.ResponseID)
-			out[turnStop+b.ResponseID] = parents[:len(parents)-1]
+		}
+		for _, t := range b.Turns {
+			if t.ResponseID != b.ResponseID {
+				out[turnStop+t.ResponseID] = parents
+			}
 		}
 		for _, it := range b.Items {
 			var cs []string
@@ -374,15 +370,6 @@ func coverers(m view.Model) map[string][]string {
 					out[id] = cs
 				}
 			}
-		}
-	}
-	for _, b := range view.Outline(m) {
-		if b.Kind != view.BlockRun {
-			turn(b, "")
-			continue
-		}
-		for _, t := range b.Turns {
-			turn(t, runStop+runKey(b))
 		}
 	}
 	return out

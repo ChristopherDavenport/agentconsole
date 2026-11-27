@@ -16,8 +16,10 @@ const (
 	// quiet runs. A row that has no response (a user message) is a turn
 	// block of its own, numbered 0.
 	BlockTurn BlockKind = iota
-	// BlockRun is two or more consecutive turns that are quiet through
-	// and through, which a client may show as one line.
+	// BlockRun is two or more consecutive turns of work: each holds a
+	// call and no message of the assistant's, so nothing in them is said
+	// to the person. A client shows them under one header that names the
+	// range, its rows and quiet runs in order as one turn's are.
 	BlockRun
 )
 
@@ -27,9 +29,10 @@ type ToolCount struct {
 	N    int
 }
 
-// QuietRun is a maximal stretch of a turn's rows made of quiet calls,
+// QuietRun is a maximal stretch of a block's rows made of quiet calls,
 // their outputs and the reasoning around them, with at least one call.
-// A client shows it as one line, and its rows when expanded.
+// In a run of turns it may cross from one turn into the next. A client
+// shows it as one line, and its rows when expanded.
 type QuietRun struct {
 	// Rows are the indices into [Model.Rows] of the stretch, in order.
 	Rows []int
@@ -58,22 +61,24 @@ func (it Item) Rows() []int {
 }
 
 // Block is a part of the outline: the model's rows cut into turns, and
-// runs of quiet turns, every row in exactly one block, in order.
+// runs of turns of work, every row in exactly one block, in order.
 type Block struct {
 	Kind BlockKind
 	// Turn is the position in the line of a turn block's response,
 	// counted from 1 in the order the responses first appear in the rows,
 	// 0 for a block with no response (a run block has none either: it is
-	// FirstTurn to LastTurn). ResponseID is that response.
+	// FirstTurn to LastTurn). ResponseID is that response, and a run's
+	// first turn's.
 	Turn       int
 	ResponseID string
-	// Items are what a turn block holds, in order.
+	// Items are what the block holds, in order: a turn's rows, or the
+	// rows of all a run's turns, cut as one stretch.
 	Items []Item
-	// Turns are the turn blocks a run block stands for, each quiet
-	// through and through: every item is a quiet run.
+	// Turns are the turn blocks a run block stands for, each with its own
+	// Items, for a client that wants the turns apart.
 	Turns []Block
 	// FirstTurn and LastTurn are the turns a run covers; Calls and Tools
-	// are the calls of all its turns, as a QuietRun's are.
+	// are the calls of all its turns, quiet or not, as a QuietRun's are.
 	FirstTurn, LastTurn int
 	Calls               []int
 	Tools               []ToolCount
@@ -85,26 +90,41 @@ func (b Block) Rows() []int {
 	for _, it := range b.Items {
 		rows = append(rows, it.Rows()...)
 	}
-	for _, t := range b.Turns {
-		rows = append(rows, t.Rows()...)
-	}
 	return rows
 }
 
-// quietThrough reports whether a turn block holds only quiet runs.
-func (b Block) quietThrough() bool {
-	if b.Kind != BlockTurn || b.Turn == 0 || len(b.Items) == 0 {
+// work reports whether a turn's rows are work alone: a call, and no
+// message of the assistant's.
+func work(m Model, turn int, rows []int) bool {
+	if turn == 0 {
 		return false
 	}
-	for _, it := range b.Items {
-		if it.Quiet == nil {
+	calls := false
+	for _, i := range rows {
+		row := m.Rows[i]
+		if msg, ok := row.Item.(*openresponses.Message); ok && msg.Role == openresponses.RoleAssistant {
 			return false
 		}
+		calls = calls || row.Call != nil
 	}
-	return true
+	return calls
 }
 
-// Outline cuts a model's rows into turns, and runs of quiet turns. It is
+// OutlineOption changes how [Outline] cuts a model.
+type OutlineOption func(*outlineConfig)
+
+type outlineConfig struct {
+	loud func(Call) bool
+}
+
+// WithLoud keeps the calls fn reports out of every quiet run, whatever
+// their output: a call whose row shows what it did (an edit's diff)
+// says something though its output is one line. A nil fn keeps none.
+func WithLoud(fn func(Call) bool) OutlineOption {
+	return func(c *outlineConfig) { c.loud = fn }
+}
+
+// Outline cuts a model's rows into turns, and runs of turns of work. It is
 // a pure projection: it reads the model and keeps nothing, and
 // Model.Rows is as it was.
 //
@@ -113,12 +133,18 @@ func (b Block) quietThrough() bool {
 // maximal stretch of quiet calls, their outputs and the reasoning around
 // them is a quiet run, even for one call; every other row is a loud row,
 // and the order is kept. A call is quiet when it has ended, its output is
-// on the record, it did not fail, its output is short (at most 5 lines and 400 runes after trimming), and
+// on the record, it did not fail, its output is short (at most 5 lines and 400 runes after trimming),
 // nothing about it needs the person (no question, hold, withdrawal,
-// cut-off or verdict but proceed, whatever reason that verdict carries). A live row is never quiet, so a running
-// call is never in a run. Two or more consecutive turns whose every item
-// is a quiet run are a run of turns.
-func Outline(m Model) []Block {
+// cut-off or verdict but proceed, whatever reason that verdict carries)
+// and no [WithLoud] keeps it out. A live row is never quiet, so a running
+// call is never in a quiet run. Two or more consecutive turns that each
+// hold a call and no message of the assistant's are a run of turns: its
+// items are cut over all its rows, so a quiet run may cross its turns.
+func Outline(m Model, opts ...OutlineOption) []Block {
+	var cfg outlineConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	turns := map[string]int{}
 	turnOf := func(resp string) int {
 		if resp == "" {
@@ -158,7 +184,7 @@ func Outline(m Model) []Block {
 	}
 	quietAt := make([]bool, len(m.Rows))
 	for i, row := range m.Rows {
-		quietAt[i] = row.Call != nil && row.Call.CallID != "" && quiet(row, asked)
+		quietAt[i] = row.Call != nil && row.Call.CallID != "" && quiet(row, asked) && (cfg.loud == nil || !cfg.loud(*row.Call))
 	}
 
 	// The turns: contiguous rows of one response, an output with the
@@ -185,7 +211,7 @@ func Outline(m Model) []Block {
 	var out []Block
 	for k := 0; k < len(blocks); {
 		end := k
-		for end < len(blocks) && blocks[end].quietThrough() {
+		for end < len(blocks) && work(m, blocks[end].Turn, rows[end]) {
 			end++
 		}
 		if end-k < 2 {
@@ -193,10 +219,15 @@ func Outline(m Model) []Block {
 			k++
 			continue
 		}
-		run := Block{Kind: BlockRun, Turns: blocks[k:end], FirstTurn: blocks[k].Turn, LastTurn: blocks[end-1].Turn}
-		for _, t := range run.Turns {
-			for _, it := range t.Items {
-				run.Calls = append(run.Calls, it.Quiet.Calls...)
+		run := Block{Kind: BlockRun, ResponseID: blocks[k].ResponseID, Turns: blocks[k:end], FirstTurn: blocks[k].Turn, LastTurn: blocks[end-1].Turn}
+		var all []int
+		for _, rs := range rows[k:end] {
+			all = append(all, rs...)
+		}
+		run.Items = items(m, all, quietAt, callOf)
+		for _, i := range all {
+			if m.Rows[i].Call != nil {
+				run.Calls = append(run.Calls, i)
 			}
 		}
 		run.Tools = tools(m, run.Calls)
@@ -206,7 +237,7 @@ func Outline(m Model) []Block {
 	return out
 }
 
-// items cuts one turn's rows into loud rows and quiet runs.
+// items cuts a block's rows into loud rows and quiet runs.
 func items(m Model, rows []int, quietAt []bool, callOf []int) []Item {
 	var out []Item
 	var stretch, calls []int

@@ -35,7 +35,8 @@ func lines(n int) string {
 }
 
 // shape is the outline as a test reads it: a turn is T<n>(items), a loud
-// row r<i>, a quiet run q<rows>, a run of turns R<first>-<last>(turns).
+// row r<i>, a quiet run q<rows>, a run of turns R<first>-<last>(items),
+// its items cut over all its turns.
 func shape(bs []Block) string {
 	var parts []string
 	for _, b := range bs {
@@ -45,13 +46,6 @@ func shape(bs []Block) string {
 }
 
 func shapeOf(b Block) string {
-	if b.Kind == BlockRun {
-		var ts []string
-		for _, t := range b.Turns {
-			ts = append(ts, shapeOf(t))
-		}
-		return fmt.Sprintf("R%d-%d(%s)", b.FirstTurn, b.LastTurn, strings.Join(ts, " "))
-	}
 	var its []string
 	for _, it := range b.Items {
 		if it.Quiet != nil {
@@ -64,10 +58,13 @@ func shapeOf(b Block) string {
 			its = append(its, fmt.Sprintf("r%d", it.Row))
 		}
 	}
+	if b.Kind == BlockRun {
+		return fmt.Sprintf("R%d-%d(%s)", b.FirstTurn, b.LastTurn, strings.Join(its, " "))
+	}
 	return fmt.Sprintf("T%d(%s)", b.Turn, strings.Join(its, " "))
 }
 
-func TestAChainOfFullyQuietTurnsIsOneRun(t *testing.T) {
+func TestAChainOfTurnsOfWorkIsOneRun(t *testing.T) {
 	l := newRecordsLog(t)
 	l.append(itemEntry(openresponses.UserText("go"), ""))
 	l.call("r1", "c1", "bash", str(""))
@@ -77,7 +74,7 @@ func TestAChainOfFullyQuietTurnsIsOneRun(t *testing.T) {
 	m := l.v.Model()
 	bs := Outline(m)
 	// rows: 0 user, then each call followed by its output: calls 1, 3, 5, 7
-	if got, want := shape(bs), "T0(r0) R1-3(T1(q1.2) T2(q3.4) T3(q5.6.7.8))"; got != want {
+	if got, want := shape(bs), "T0(r0) R1-3(q1.2.3.4.5.6.7.8)"; got != want {
 		t.Fatalf("outline = %s, want %s", got, want)
 	}
 	run := bs[1]
@@ -86,6 +83,14 @@ func TestAChainOfFullyQuietTurnsIsOneRun(t *testing.T) {
 	}
 	if !reflect.DeepEqual(run.Calls, []int{1, 3, 5, 7}) || run.FirstTurn != 1 || run.LastTurn != 3 {
 		t.Errorf("run = %+v", run)
+	}
+	// The turns it stands for are kept, each with its own items.
+	var turns []string
+	for _, tb := range run.Turns {
+		turns = append(turns, shapeOf(tb))
+	}
+	if got, want := strings.Join(turns, " "), "T1(q1.2) T2(q3.4) T3(q5.6.7.8)"; got != want || run.ResponseID != "r1" {
+		t.Errorf("turns = %s of %q, want %s of r1", got, run.ResponseID, want)
 	}
 	if again := Outline(m); !reflect.DeepEqual(bs, again) {
 		t.Errorf("Outline is not the same twice")
@@ -118,12 +123,45 @@ func TestOutlineLeavesTheRowsAloneAndPartitionsThem(t *testing.T) {
 	}
 }
 
-func TestALoneQuietTurnIsATurnWithOneQuietRun(t *testing.T) {
+// A run of turns is by what its turns hold, calls and no message, not by
+// how much the calls say: a loud call is a row in it.
+func TestALoudCallIsARowInItsRun(t *testing.T) {
 	l := newRecordsLog(t)
 	l.call("r1", "c1", "bash", str(""))
 	l.call("r2", "c2", "bash", str(lines(6)))
-	if got, want := shape(Outline(l.v.Model())), "T1(q0.1) T2(r2 r3)"; got != want {
+	if got, want := shape(Outline(l.v.Model())), "R1-2(q0.1 r2 r3)"; got != want {
 		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
+// One turn of work alone is a turn, not a run.
+func TestALoneTurnOfWorkIsATurn(t *testing.T) {
+	l := newRecordsLog(t)
+	l.append(itemEntry(openresponses.UserText("go"), ""))
+	l.call("r1", "c1", "bash", str(""))
+	l.append(itemEntry(msg("m1", "assistant", "done"), "r2"))
+	if got, want := shape(Outline(l.v.Model())), "T0(r0) T1(q1.2) T2(r3)"; got != want {
+		t.Errorf("outline = %s, want %s", got, want)
+	}
+}
+
+// WithLoud keeps a call out of the quiet runs whatever its output, and
+// its turn stays in the run of turns.
+func TestWithLoudKeepsACallOutOfAQuietRun(t *testing.T) {
+	l := newRecordsLog(t)
+	l.call("r1", "c1", "bash", str(""))
+	l.call("r2", "c2", "edit", str("edited a.go"))
+	l.call("r3", "c3", "bash", str(""))
+	m := l.v.Model()
+	if got, want := shape(Outline(m)), "R1-3(q0.1.2.3.4.5)"; got != want {
+		t.Fatalf("outline = %s, want %s", got, want)
+	}
+	loud := WithLoud(func(c Call) bool { return c.Name == "edit" })
+	if got, want := shape(Outline(m, loud)), "R1-3(q0.1 r2 r3 q4.5)"; got != want {
+		t.Errorf("with loud: outline = %s, want %s", got, want)
+	}
+	if got, want := shape(Outline(m, WithLoud(nil))), "R1-3(q0.1.2.3.4.5)"; got != want {
+		t.Errorf("with a nil loud: outline = %s, want %s", got, want)
 	}
 }
 
@@ -146,7 +184,7 @@ func TestATurnWithAMessageIsNeverInARun(t *testing.T) {
 	l.call("r2", "c2", "bash", str(""))
 	l.call("r3", "c3", "bash", str(""))
 	// 0 message, 1 c1, 2 out, 3 c2, 4 out, 5 c3, 6 out
-	if got, want := shape(Outline(l.v.Model())), "T1(r0 q1.2) R2-3(T2(q3.4) T3(q5.6))"; got != want {
+	if got, want := shape(Outline(l.v.Model())), "T1(r0 q1.2) R2-3(q3.4.5.6)"; got != want {
 		t.Errorf("outline = %s, want %s", got, want)
 	}
 }
@@ -187,20 +225,19 @@ func TestACallThatSaysSomethingIsLoud(t *testing.T) {
 	}
 }
 
-func TestARunningCallIsNeverQuietNorInARun(t *testing.T) {
+func TestARunningCallIsNeverQuiet(t *testing.T) {
 	l := newRecordsLog(t)
 	l.call("r1", "c1", "bash", str(""))
 	l.call("r2", "c2", "bash", str(""))
 	l.v.Live(&agentturn.RunStart{RunID: "run1"})
 	l.stream("run1", "r3", &openresponses.FunctionCall{ID: "fc_3", CallID: "c3", Name: "bash", Arguments: `{}`}, true)
 	l.v.Live(&agentturn.ToolStart{RunID: "run1", CallID: "c3", Name: "bash"})
-	if got, want := shape(Outline(l.v.Model())), "R1-2(T1(q0.1) T2(q2.3)) T3(r4)"; got != want {
+	if got, want := shape(Outline(l.v.Model())), "R1-3(q0.1.2.3 r4)"; got != want {
 		t.Fatalf("outline = %s, want %s", got, want)
 	}
-	// It ends, but its output is not on the record yet: still a loud row,
-	// and its turn is not in the run.
+	// It ends, but its output is not on the record yet: still a loud row.
 	l.v.Live(&agentturn.ToolEnd{RunID: "run1", CallID: "c3", Name: "bash", Result: agenttool.Text("")})
-	if got, want := shape(Outline(l.v.Model())), "R1-2(T1(q0.1) T2(q2.3)) T3(r4)"; got != want {
+	if got, want := shape(Outline(l.v.Model())), "R1-3(q0.1.2.3 r4)"; got != want {
 		t.Errorf("ended, uncommitted: outline = %s, want %s", got, want)
 	}
 }
@@ -275,13 +312,13 @@ func TestTwoCallsWithOneIDAreEachTheirOwn(t *testing.T) {
 	out := Row{Item: openresponses.NewFunctionCallOutput("c", "ok")}
 	bs := Outline(Model{Rows: []Row{done, out, running}})
 	// 0 call, 1 its output, 2 the live call with the same ID
-	if got, want := shape(bs), "T1(q0.1) T2(r2)"; got != want {
+	if got, want := shape(bs), "R1-2(q0.1 r2)"; got != want {
 		t.Errorf("outline = %s, want %s", got, want)
 	}
 	// A failed twin behind a quiet one.
 	failed := Row{ResponseID: "r2", Item: &openresponses.FunctionCall{CallID: "c", Name: "bash"},
 		Call: &Call{CallID: "c", Name: "bash", State: CallEnded, Committed: true, Failed: true}}
-	if got, want := shape(Outline(Model{Rows: []Row{done, out, failed}})), "T1(q0.1) T2(r2)"; got != want {
+	if got, want := shape(Outline(Model{Rows: []Row{done, out, failed}})), "R1-2(q0.1 r2)"; got != want {
 		t.Errorf("failed twin: outline = %s, want %s", got, want)
 	}
 	// Outputs pair with the nearest call before them: the second output is
@@ -289,7 +326,7 @@ func TestTwoCallsWithOneIDAreEachTheirOwn(t *testing.T) {
 	second := done
 	second.ResponseID = "r2"
 	out2 := Row{Item: openresponses.NewFunctionCallOutput("c", "ok")}
-	if got, want := shape(Outline(Model{Rows: []Row{done, out, second, out2}})), "R1-2(T1(q0.1) T2(q2.3))"; got != want {
+	if got, want := shape(Outline(Model{Rows: []Row{done, out, second, out2}})), "R1-2(q0.1.2.3)"; got != want {
 		t.Errorf("reused id: outline = %s, want %s", got, want)
 	}
 }
