@@ -2134,7 +2134,9 @@ in them as an editor would.
   A collapsed diff or the start of a read is seldom a whole file, so a
   string or a comment that runs over lines is colored as code past its
   first line. The theme is chroma's `github-dark` or `github` by the
-  terminal's background, its foregrounds only.
+  terminal's background, its foregrounds only, and not its color for
+  plain text: what the language does not mark keeps the terminal's own
+  color, as the text around it does.
 - **Kept while drawn.** The conversation is laid out on every frame of
   the spinner, so a drawn line is kept by its text until a layout does
   not ask for it again, as rendered Markdown is. A lexer that panics or

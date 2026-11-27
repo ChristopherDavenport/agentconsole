@@ -39,6 +39,11 @@ func TestCodeIsDrawnInItsLanguagesColors(t *testing.T) {
 			t.Errorf("%s: %d colors in a line with a keyword, a string and a comment:\n%q", syntax, n, got)
 		}
 	}
+	// Plain text in the code keeps the terminal's own color: only what
+	// the language marks is colored.
+	if got, _ := h.draw("a.go", "x = y", true, nil); colors(got) != 0 && strings.Contains(got, "38;2;230;237;243") {
+		t.Errorf("plain names are in the theme's text color: %q", got)
+	}
 	dark, _ := h.draw("a.go", src, true, nil)
 	light, _ := h.draw("a.go", src, false, nil)
 	if dark == light {

@@ -111,6 +111,7 @@ func (h *highlighter) draw(syntax, text string, dark bool, bg color.Color) (out 
 	if !dark {
 		theme = styles.Get("github")
 	}
+	base := theme.Get(chroma.Text).Colour
 	var b strings.Builder
 	for _, tok := range it.Tokens() {
 		v := strings.ReplaceAll(tok.Value, "\n", "")
@@ -121,9 +122,10 @@ func (h *highlighter) draw(syntax, text string, dark bool, bg color.Color) (out 
 		if bg != nil {
 			st = st.Background(bg)
 		}
-		// The theme's colors and weight, never its background: the line
-		// sits on the terminal's own or on a change's band.
-		if e := theme.Get(tok.Type); e.Colour.IsSet() {
+		// The theme's colors, never its background: the line sits on the
+		// terminal's own or on a change's band. Nor its color for plain
+		// text, which stays the terminal's, as the text around it is.
+		if e := theme.Get(tok.Type); e.Colour.IsSet() && e.Colour != base {
 			st = st.Foreground(lipgloss.Color(e.Colour.String()))
 		}
 		b.WriteString(st.Render(v))
