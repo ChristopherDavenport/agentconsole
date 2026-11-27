@@ -44,6 +44,10 @@ func newMarkdown() *markdown {
 	}
 }
 
+// isDark reports whether the terminal's background is dark, as far as
+// the program was told; a nil renderer takes it as dark.
+func (r *markdown) isDark() bool { return r == nil || r.dark }
+
 // setDark says whether the terminal's background is dark, which picks
 // glamour's dark or light style.
 func (r *markdown) setDark(dark bool) {

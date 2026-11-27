@@ -30,6 +30,10 @@ versions may break the API.
   lines`, not a second line under it. This holds for a renderer's body
   of one dim line and for the client's own `· N lines (ctrl+o)`; a
   count that does not fit the width stays under its call.
+- A line a change adds or removes is a band: a tinted background, green
+  or red, that runs to the width, fitted to a dark or a light terminal,
+  where it was green or red text. An edit's `+3 −1` on its call's line
+  is text as before.
 - Two one-line calls, or quiet runs' lines, under one header have no
   blank line between them; a call with a body under it still stands
   apart.

@@ -444,7 +444,7 @@ func renderRow(row view.Row, o opts, tools toolview.Renderers, spin string, widt
 		return dimStyle.Render("▾ reasoning"+tail) + tag + "\n" + dimStyle.Render(text)
 	case *openresponses.FunctionCall:
 		if row.Call != nil {
-			return renderCall(*row.Call, o, tools, tag, 0, spin, ask, width)
+			return renderCall(*row.Call, o, tools, tag, 0, spin, ask, width, md.isDark())
 		}
 		return toolStyle.Render("○ "+view.CleanLine(it.Name)) + tag + " " + view.Clean(it.Arguments)
 	case *openresponses.FunctionCallOutput:
@@ -552,7 +552,7 @@ func anyMoving(m view.Model) bool {
 // has a renderer in tools shows the renderer's head after its name and
 // its body under the line, each where the renderer gives one; the dot,
 // the name, the state and the client's notes are the client's always.
-func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, ask asks, width int) string {
+func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth int, spin string, ask asks, width int, dark bool) string {
 	pad := strings.Repeat("  ", depth)
 	// The renderer reads the call as recorded; what the client draws of
 	// it is cleaned (view.Clean), and the renderer's spans in drawLine.
@@ -643,6 +643,10 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString(line)
 	}
 	for _, l := range body {
+		if band, ok := bandLine(l, width-lipgloss.Width(pad)-2, dark); ok {
+			b.WriteString("\n" + pad + "  " + indent(band, pad+"  "))
+			continue
+		}
 		b.WriteString("\n" + pad + "  " + drawLine(l))
 	}
 	switch c.State {
@@ -710,7 +714,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + pad + "  " + dimStyle.Render("policy: "+c.Verdict))
 	}
 	for _, ch := range c.Children {
-		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask, width))
+		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask, width, dark))
 	}
 	return b.String()
 }
@@ -801,6 +805,49 @@ func drawLine(l toolview.Line) string {
 		b.WriteString(t)
 	}
 	return b.String()
+}
+
+// The bands of a change: the background of a line a change adds or
+// removes, for a dark terminal and for a light one. The text keeps the
+// terminal's own color, so it reads on either, and with no color the
+// line's + or - carries the meaning.
+var (
+	addedDark    = lipgloss.NewStyle().Background(lipgloss.Color("22"))
+	removedDark  = lipgloss.NewStyle().Background(lipgloss.Color("52"))
+	addedLight   = lipgloss.NewStyle().Background(lipgloss.Color("194"))
+	removedLight = lipgloss.NewStyle().Background(lipgloss.Color("224"))
+)
+
+// bandLine draws a body line that is wholly added or wholly removed as a
+// band: its text on a tinted background that runs to width, wrapped
+// inside it when it is longer, as a diff reads elsewhere. ok is false
+// for any other line (context, a count, a line of mixed roles), which is
+// drawn span by span.
+func bandLine(l toolview.Line, width int, dark bool) (string, bool) {
+	role, any := toolview.Plain, false
+	for _, s := range l {
+		if s.Text == "" {
+			continue
+		}
+		if any && s.Role != role {
+			return "", false
+		}
+		role, any = s.Role, true
+	}
+	if !any || (role != toolview.Added && role != toolview.Removed) {
+		return "", false
+	}
+	style := addedDark
+	switch {
+	case role == toolview.Added && !dark:
+		style = addedLight
+	case role == toolview.Removed && dark:
+		style = removedDark
+	case role == toolview.Removed:
+		style = removedLight
+	}
+	text := view.Clean(strings.ReplaceAll(l.String(), "\n", " "))
+	return style.Width(max(width, 8)).Render(text), true
 }
 
 // countHint is the collapsed hint of an output's size.

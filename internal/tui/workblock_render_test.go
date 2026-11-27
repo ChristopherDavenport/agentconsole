@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/ChristopherDavenport/agentconsole/toolview"
 	"github.com/ChristopherDavenport/agentconsole/view"
 )
@@ -146,5 +148,58 @@ func TestACountThatDoesNotFitStaysUnderItsCall(t *testing.T) {
 	narrow, _ := renderRows(m, opts{}, nil, nil, 60, "", "", newMarkdown(), asks{}, outlineState{})
 	if got := plain(narrow); !strings.Contains(got, "\n  · 8 lines (ctrl+o)") {
 		t.Errorf("narrow: the count is not whole on a line under the call:\n%s", got)
+	}
+}
+
+// A line a change adds or removes is a band: a tinted background that
+// runs to the width, in the tint of the terminal's background, and a
+// long line wraps inside it. Context and a line of mixed roles are not.
+func TestAddedAndRemovedLinesAreBands(t *testing.T) {
+	add := toolview.Line{toolview.S(toolview.Added, "+ new")}
+	for _, dark := range []bool{true, false} {
+		band, ok := bandLine(add, 20, dark)
+		if !ok || ansi.StringWidth(band) != 20 || ansi.Strip(band) != "+ new"+strings.Repeat(" ", 15) {
+			t.Errorf("dark %v: band = %q, ok %v", dark, band, ok)
+		}
+		gone, _ := bandLine(toolview.Line{toolview.S(toolview.Removed, "- old")}, 20, dark)
+		if gone == band || ansi.Strip(gone) != "- old"+strings.Repeat(" ", 15) {
+			t.Errorf("dark %v: a removed line is drawn as an added one: %q", dark, gone)
+		}
+	}
+	dark, _ := bandLine(add, 20, true)
+	light, _ := bandLine(add, 20, false)
+	if dark == light {
+		t.Error("the band is the same on a dark and a light terminal")
+	}
+	long, _ := bandLine(toolview.Line{toolview.S(toolview.Added, "+ "+strings.Repeat("word ", 10))}, 20, true)
+	for _, l := range strings.Split(long, "\n") {
+		if ansi.StringWidth(l) != 20 {
+			t.Errorf("a wrapped band's line is %d wide, want 20: %q", ansi.StringWidth(l), l)
+		}
+	}
+	if strings.Count(long, "\n") == 0 {
+		t.Error("a long line did not wrap inside its band")
+	}
+	for _, l := range []toolview.Line{
+		{toolview.S(toolview.Dim, "  context")},
+		{toolview.S(toolview.Added, "+1"), toolview.S(toolview.Removed, "−1")},
+		{},
+	} {
+		if _, ok := bandLine(l, 20, true); ok {
+			t.Errorf("%q is drawn as a band", l.String())
+		}
+	}
+	// In a call's row the band keeps the body's indent and stays inside
+	// the width.
+	tools := toolview.Renderers{"edit": change{}}
+	m := view.Model{Rows: []view.Row{editRow("c1", "r1")}}
+	out, _ := renderRows(m, opts{}, nil, tools, 40, "", "", newMarkdown(), asks{}, outlineState{loud: loudOf(tools)})
+	for _, l := range strings.Split(out, "\n") {
+		if ansi.StringWidth(l) > 40 {
+			t.Errorf("a line is wider than the screen: %q", l)
+		}
+	}
+	if !strings.Contains(ansi.Strip(out), "\n  - old"+strings.Repeat(" ", 33)+"\n  + new") {
+		t.Errorf("the bands are not indented under the call and run to the width:\n%q", ansi.Strip(out))
 	}
 }

@@ -2089,6 +2089,15 @@ that worked was folded, its diff two expansions away.
   work (a call's row, a quiet run's line) have no blank line between
   them; a call with a body under it, a message or reasoning stands apart
   with a blank line as every block did.
+- **A change is drawn as bands.** A body line that is wholly added or
+  wholly removed has a tinted background that runs to the width, green
+  or red, darker on a dark terminal and paler on a light one (the
+  program is told which, as the Markdown style is), and a long line
+  wraps inside its band. The text keeps the terminal's own color so it
+  reads on either; with no color the `+` and `-` carry the meaning, as
+  before. A span of those roles inside another line (an edit's `+3 −1`
+  on its call's line) keeps its green or red text and has no band.
+  Copy drops the band's padding, as it drops any trailing spaces.
 - **Not done: one line for neighbours of one tool.** Three reads in a
   row are three lines. A summarizer could take them, but dax's reads now
   draw an excerpt under each, and nothing else asked.
