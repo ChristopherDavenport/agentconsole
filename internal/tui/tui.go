@@ -585,6 +585,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.in.Focus()
 		m.relayout()
 		return m, m.wantPane()
+	case tea.ColorProfileMsg:
+		m.md.profile = msg.Profile
+		m.relayout()
+		return m, nil
 	case tea.BackgroundColorMsg:
 		m.in.SetStyles(inputStyles(msg.IsDark()))
 		m.md.setDark(msg.IsDark())

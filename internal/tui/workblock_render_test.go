@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ChristopherDavenport/agentconsole/toolview"
@@ -156,22 +157,36 @@ func TestACountThatDoesNotFitStaysUnderItsCall(t *testing.T) {
 // long line wraps inside it. Context and a line of mixed roles are not.
 func TestAddedAndRemovedLinesAreBands(t *testing.T) {
 	add := toolview.Line{toolview.S(toolview.Added, "+ new")}
-	for _, dark := range []bool{true, false} {
-		band, ok := bandLine(add, 20, dark)
-		if !ok || ansi.StringWidth(band) != 20 || ansi.Strip(band) != "+ new"+strings.Repeat(" ", 15) {
-			t.Errorf("dark %v: band = %q, ok %v", dark, band, ok)
-		}
-		gone, _ := bandLine(toolview.Line{toolview.S(toolview.Removed, "- old")}, 20, dark)
-		if gone == band || ansi.Strip(gone) != "- old"+strings.Repeat(" ", 15) {
-			t.Errorf("dark %v: a removed line is drawn as an added one: %q", dark, gone)
+	full, some := colorprofile.TrueColor, colorprofile.ANSI256
+	for _, p := range []colorprofile.Profile{full, some} {
+		for _, dark := range []bool{true, false} {
+			band, ok := bandLine(add, 20, tone{dark: dark, profile: p})
+			if !ok || ansi.StringWidth(band) != 20 || ansi.Strip(band) != "+ new"+strings.Repeat(" ", 15) {
+				t.Errorf("dark %v: band = %q, ok %v", dark, band, ok)
+			}
+			gone, _ := bandLine(toolview.Line{toolview.S(toolview.Removed, "- old")}, 20, tone{dark: dark, profile: p})
+			if gone == band || ansi.Strip(gone) != "- old"+strings.Repeat(" ", 15) {
+				t.Errorf("dark %v: a removed line is drawn as an added one: %q", dark, gone)
+			}
 		}
 	}
-	dark, _ := bandLine(add, 20, true)
-	light, _ := bandLine(add, 20, false)
+	dark, _ := bandLine(add, 20, tone{dark: true, profile: full})
+	light, _ := bandLine(add, 20, tone{profile: full})
 	if dark == light {
 		t.Error("the band is the same on a dark and a light terminal")
 	}
-	long, _ := bandLine(toolview.Line{toolview.S(toolview.Added, "+ "+strings.Repeat("word ", 10))}, 20, true)
+	// With 256 colors the tints are the palette's own, not the nearest to
+	// the muted ones; with 16 or none there is no band, and the line is
+	// green or red text as it was.
+	if few, _ := bandLine(add, 20, tone{dark: true, profile: some}); few == dark || !strings.Contains(few, "48;5;22m") {
+		t.Errorf("256 colors: band = %q", few)
+	}
+	for _, p := range []colorprofile.Profile{colorprofile.ANSI, colorprofile.Ascii, colorprofile.NoTTY} {
+		if _, ok := bandLine(add, 20, tone{dark: true, profile: p}); ok {
+			t.Errorf("profile %v draws a band", p)
+		}
+	}
+	long, _ := bandLine(toolview.Line{toolview.S(toolview.Added, "+ "+strings.Repeat("word ", 10))}, 20, tone{dark: true, profile: full})
 	for _, l := range strings.Split(long, "\n") {
 		if ansi.StringWidth(l) != 20 {
 			t.Errorf("a wrapped band's line is %d wide, want 20: %q", ansi.StringWidth(l), l)
@@ -185,7 +200,7 @@ func TestAddedAndRemovedLinesAreBands(t *testing.T) {
 		{toolview.S(toolview.Added, "+1"), toolview.S(toolview.Removed, "−1")},
 		{},
 	} {
-		if _, ok := bandLine(l, 20, true); ok {
+		if _, ok := bandLine(l, 20, tone{dark: true, profile: full}); ok {
 			t.Errorf("%q is drawn as a band", l.String())
 		}
 	}

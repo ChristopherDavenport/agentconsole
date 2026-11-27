@@ -2093,7 +2093,13 @@ that worked was folded, its diff two expansions away.
   wholly removed has a tinted background that runs to the width, green
   or red, darker on a dark terminal and paler on a light one (the
   program is told which, as the Markdown style is), and a long line
-  wraps inside its band. The text keeps the terminal's own color so it
+  wraps inside its band. The tints go by the colors the terminal draws
+  (`tea.ColorProfileMsg`): with every color they are muted, a little of
+  the green or red in the background's own shade, which the user asked
+  for after seeing the first ones; with 256 the palette has no such
+  shade and the nearest is a grey, so its plain dark and pale greens and
+  reds are named; with 16 or none there is no band and a change is green
+  or red text, as it was. The text keeps the terminal's own color so it
   reads on either; with no color the `+` and `-` carry the meaning, as
   before. A span of those roles inside another line (an edit's `+3 −1`
   on its call's line) keeps its green or red text and has no band.

@@ -32,7 +32,9 @@ versions may break the API.
   count that does not fit the width stays under its call.
 - A line a change adds or removes is a band: a tinted background, green
   or red, that runs to the width, fitted to a dark or a light terminal,
-  where it was green or red text. An edit's `+3 −1` on its call's line
+  where it was green or red text. The tints are muted where the terminal
+  draws every color and the palette's own where it draws 256; with 16
+  colors or none a change is green or red text as before. An edit's `+3 −1` on its call's line
   is text as before.
 - Two one-line calls, or quiet runs' lines, under one header have no
   blank line between them; a call with a body under it still stands
