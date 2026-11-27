@@ -810,12 +810,14 @@ func drawLine(l toolview.Line) string {
 // The bands of a change: the background of a line a change adds or
 // removes, for a dark terminal and for a light one. The text keeps the
 // terminal's own color, so it reads on either, and with no color the
-// line's + or - carries the meaning.
+// line's + or - carries the meaning. The tints are muted, a little of
+// the green or red in the background's own shade, so a screen of diffs
+// is not a screen of color; a terminal of fewer colors takes its nearest.
 var (
-	addedDark    = lipgloss.NewStyle().Background(lipgloss.Color("22"))
-	removedDark  = lipgloss.NewStyle().Background(lipgloss.Color("52"))
-	addedLight   = lipgloss.NewStyle().Background(lipgloss.Color("194"))
-	removedLight = lipgloss.NewStyle().Background(lipgloss.Color("224"))
+	addedDark    = lipgloss.NewStyle().Background(lipgloss.Color("#1f3a29"))
+	removedDark  = lipgloss.NewStyle().Background(lipgloss.Color("#432326"))
+	addedLight   = lipgloss.NewStyle().Background(lipgloss.Color("#e3f1e5"))
+	removedLight = lipgloss.NewStyle().Background(lipgloss.Color("#f6e1e1"))
 )
 
 // bandLine draws a body line that is wholly added or wholly removed as a
