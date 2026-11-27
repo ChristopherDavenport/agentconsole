@@ -5,6 +5,38 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Added
+
+- `toolview.Loud`: an optional interface of a renderer. When `Loud()` is
+  true the tool's calls are never folded into a quiet run, however short
+  their output, so a call whose row shows what it did (an edit's diff)
+  is always drawn. `view.WithLoud` is the same for `view.Outline`, which
+  now takes options.
+
+### Changed
+
+- Consecutive turns of work are one block. Two or more turns in a row
+  that each hold a call and no message of the assistant's are drawn
+  under one header, `turns 1–8 · 10 calls`, with their calls in order
+  and no header between them; before, only turns whose every call was
+  quiet joined, so a session was a column of `turn N` headers over one
+  call each. A quiet run may now cross the turns of a block, and its
+  line opens straight onto its calls. Ctrl-O or a second click on the
+  header folds the block. The `turns 2–3 · ran …` line and the `run:`
+  stop are gone.
+- A collapsed call's count is on its own line: `○ read a.go  · 118
+  lines`, not a second line under it. This holds for a renderer's body
+  of one dim line and for the client's own `· N lines (ctrl+o)`.
+- Two one-line calls, or quiet runs' lines, under one header have no
+  blank line between them; a call with a body under it still stands
+  apart.
+- `view.BlockRun` is a run of turns of work, not of quiet turns. A run
+  block's `Items` are set, cut over all its turns' rows; its
+  `ResponseID` is its first turn's; and its `Calls` and `Tools` count
+  every call in it, not the quiet ones.
+
 ## v0.0.22 - 2026-11-26
 
 ### Added

@@ -16,17 +16,17 @@ import (
 // bare is a model with the person's outline state empty, to play steps of
 // the feed by hand.
 func bare() *Model {
-	return &Model{flips: map[string]opts{}, quietOpen: map[string]bool{}, runsOpen: map[string]bool{}, turnsFolded: map[string]bool{}}
+	return &Model{flips: map[string]opts{}, quietOpen: map[string]bool{}, turnsFolded: map[string]bool{}}
 }
 
 func isStop(m *Model, stop string) bool {
 	return stop != "" && slices.Contains(selectable(m.shown(), m.outlineState()), stop)
 }
 
-// A cursor on a line (a turn's header, a quiet run's line) whose line goes
-// into another one when the model grows moves to the one that stands for
-// it, and is not dropped.
-func TestACursorOnALineFollowsItIntoARun(t *testing.T) {
+// A cursor on a line (a turn's header, a quiet run's line) is not dropped
+// when the model grows and the turn becomes the first of a block: the
+// header is the block's, the quiet run the block's, by the same keys.
+func TestACursorOnALineFollowsItIntoABlock(t *testing.T) {
 	for _, stop := range []string{turnStop + "r2", quietStop + "e_c2"} {
 		m := bare()
 		m.view = view.Model{Rows: []view.Row{assistantRow("m1", "r1", "hi"), quietRow("c2", "bash", "r2")}}
@@ -34,13 +34,36 @@ func TestACursorOnALineFollowsItIntoARun(t *testing.T) {
 		if !isStop(m, stop) {
 			t.Fatalf("%s is not a stop to begin with: %v", stop, selectable(m.shown(), m.outlineState()))
 		}
-		// Turn 3 settles quiet: turns 2 and 3 are a run, and neither the
-		// header nor the line is drawn.
+		// Turn 3 settles quiet: turns 2 and 3 are a block, with one header
+		// and one quiet line.
 		m.view.Rows = append(m.view.Rows, quietRow("c3", "bash", "r3"))
 		m.keepCursor()
 		if !isStop(m, m.curEntry) {
-			t.Errorf("a cursor on %s is %q after the run formed, not a stop of %v", stop, m.curEntry, selectable(m.shown(), m.outlineState()))
+			t.Errorf("a cursor on %s is %q after the block formed, not a stop of %v", stop, m.curEntry, selectable(m.shown(), m.outlineState()))
 		}
+	}
+}
+
+// The header of a turn inside a block is not drawn: a cursor kept on it
+// (a stop from before) goes to the block's header, and there is no stop
+// of a run's own.
+func TestATurnInsideABlockIsCoveredByTheBlocksHeader(t *testing.T) {
+	m := bare()
+	m.view = view.Model{Rows: []view.Row{assistantRow("m1", "r1", "hi"), quietRow("c2", "bash", "r2"), quietRow("c3", "bash", "r3")}}
+	stops := selectable(m.shown(), m.outlineState())
+	if want := []string{turnStop + "r1", "m1", turnStop + "r2", quietStop + "e_c2"}; !slices.Equal(stops, want) {
+		t.Fatalf("stops = %v, want %v", stops, want)
+	}
+	m.curEntry = turnStop + "r3"
+	m.keepCursor()
+	if m.curEntry != turnStop+"r2" {
+		t.Errorf("a cursor on turn 3's header is %q, want the block's header", m.curEntry)
+	}
+	// A row the quiet run stands for goes to the run's line.
+	m.curEntry = "e_c3"
+	m.keepCursor()
+	if m.curEntry != quietStop+"e_c2" {
+		t.Errorf("a cursor on a folded call is %q, want its quiet run's line", m.curEntry)
 	}
 }
 
@@ -164,13 +187,14 @@ func (longSum) Summarize([]view.Call) (toolview.Line, bool) {
 
 func TestASummarizersLongLineIsCutToTheWidth(t *testing.T) {
 	m := view.Model{Rows: []view.Row{quietRow("c1", "bash", "r1"), quietRow("c2", "bash", "r2")}}
-	// Collapsed, the run's line; expanded, it and the two turns' lines.
-	for open, want := range map[bool]int{false: 1, true: 3} {
-		runs := map[string]bool{}
+	// Collapsed or expanded, the quiet run's line is the one line that
+	// says it.
+	for open, want := range map[bool]int{false: 1, true: 1} {
+		quiet := map[string]bool{}
 		if open {
-			runs["r1"] = true
+			quiet["e_c1"] = true
 		}
-		out, _ := renderRows(m, opts{}, nil, nil, 50, "", "", newMarkdown(), asks{}, outlineState{runs: runs, sums: toolview.Summarizers{"bash": longSum{}}})
+		out, _ := renderRows(m, opts{}, nil, nil, 50, "", "", newMarkdown(), asks{}, outlineState{quiet: quiet, sums: toolview.Summarizers{"bash": longSum{}}})
 		n := 0
 		for _, l := range strings.Split(plain(out), "\n") {
 			if strings.Contains(l, "word") {

@@ -45,7 +45,8 @@ func settled(a *app, what string) string {
 }
 
 // quietApp is an app whose model makes three calls in three responses,
-// all quiet, then answers: turns 1 to 3 are quiet through and through.
+// all quiet, then answers: turns 1 to 3 are work, one block with one
+// quiet run across them.
 func quietApp(t *testing.T, opts ...tui.Option) *app { return quietAppOf(t, "touch", opts...) }
 
 // quietAppOf is quietApp with the third call to tool third.
@@ -65,81 +66,96 @@ func quietAppOf(t *testing.T, third string, opts ...tui.Option) *app {
 	return a
 }
 
-func TestFullyQuietTurnsAreOneLine(t *testing.T) {
+// Consecutive turns of work are one block: one header that names the
+// range and counts the calls, no header of a turn inside it, and the
+// quiet calls of all of them one line.
+func TestTurnsOfWorkShareOneHeader(t *testing.T) {
 	a := quietApp(t)
 	s := a.screen()
-	if !strings.Contains(s, "turns 1–3 · ran 2 mkdir, 1 touch") || !strings.Contains(s, "turn 4 · answer") {
-		t.Fatalf("no run line:\n%s", s)
+	for _, want := range []string{"turns 1–3 · 3 calls", "○ ran 2 mkdir, 1 touch (ctrl+o to expand)", "turn 4 · answer"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q:\n%s", want, s)
+		}
 	}
-	if strings.Contains(s, "text=") || strings.Contains(s, "turn 1 ·") || strings.Contains(s, "turn 2 ·") {
-		t.Errorf("a collapsed run draws what it covers:\n%s", s)
+	if strings.Contains(s, "text=") || strings.Contains(s, "turn 1 ·") || strings.Contains(s, "turn 2 ·") || strings.Contains(s, "turns 1–3 · ran") {
+		t.Errorf("a block draws its turns' headers, its calls or the old run line:\n%s", s)
 	}
 }
 
-func TestExpandingARunShowsTurnsAsTurnsAreDrawn(t *testing.T) {
+// A quiet run that crosses turns expands to its calls' rows, with no
+// header between them, and the block folds from its header.
+func TestExpandingAQuietRunShowsItsCalls(t *testing.T) {
 	a := quietApp(t)
-	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the run: one stop
-	if l := lineWith(a.screen(), "turns 1–3"); !strings.Contains(l, "▶") {
-		t.Fatalf("the cursor is not on the run:\n%s", a.screen())
+	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the quiet run
+	if l := lineWith(a.screen(), "ran 2 mkdir"); !strings.Contains(l, "▶") {
+		t.Fatalf("the cursor is not on the quiet run:\n%s", a.screen())
 	}
 	a.key("ctrl+o")
 	s := a.screen()
-	for _, want := range []string{"turn 1 · 1 call → 1 output", "turn 2 · 1 call → 1 output", "turn 3 · 1 call → 1 output", "ran 1 mkdir", "ran 1 touch", "▾ turns 1–3", "ctrl+o to collapse"} {
+	for _, want := range []string{`mkdir text="a"`, `mkdir text="b"`, `touch text="c"`, "▾ ran 2 mkdir, 1 touch", "ctrl+o to collapse", "turns 1–3 · 3 calls"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("expanded: missing %q:\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "text=") {
-		t.Errorf("an expanded run draws calls, not summaries:\n%s", s)
-	}
-	// Each turn's summary expands to its call.
-	a.press("ctrl+n", "ctrl+n") // turn 1's header, its summary
-	a.key("ctrl+o")
-	if s := a.screen(); !strings.Contains(s, `mkdir text="a"`) || strings.Contains(s, `mkdir text="b"`) {
-		t.Errorf("turn 1's summary did not expand alone:\n%s", s)
+	if strings.Contains(s, "turn 1 ·") || strings.Contains(s, "turn 2 ·") || strings.Contains(s, "turn 3 ·") {
+		t.Errorf("an expanded quiet run draws a turn's header:\n%s", s)
 	}
 	a.key("ctrl+o")
 	if s := a.screen(); strings.Contains(s, "text=") {
 		t.Errorf("not collapsed again:\n%s", s)
 	}
-	// And the run collapses from its own line.
-	a.press("ctrl+p", "ctrl+p")
+	// The block folds from its header, and unfolds.
+	a.key("ctrl+p")
+	if l := lineWith(a.screen(), "turns 1–3"); !strings.Contains(l, "▶") {
+		t.Fatalf("the cursor is not on the block's header:\n%s", a.screen())
+	}
 	a.key("ctrl+o")
-	if s := a.screen(); strings.Contains(s, "turn 1 ·") || !strings.Contains(s, "ctrl+o to expand") {
-		t.Errorf("the run did not collapse:\n%s", s)
+	if s := a.screen(); !strings.Contains(s, "▸ turns 1–3 · 3 calls (ctrl+o to expand)") || strings.Contains(s, "ran 2 mkdir") {
+		t.Errorf("the block did not fold to its header:\n%s", s)
+	}
+	a.key("ctrl+o")
+	if s := a.screen(); strings.Contains(s, "▸") || !strings.Contains(s, "ran 2 mkdir") {
+		t.Errorf("the block did not unfold:\n%s", s)
 	}
 }
 
-func TestClickingARunExpandsIt(t *testing.T) {
+// A second click on a quiet run's line expands it, and on a block's
+// header folds the block.
+func TestClickingALineTogglesIt(t *testing.T) {
 	a := quietApp(t)
+	a.clickOn("ran 2 mkdir")
+	a.clickOn("ran 2 mkdir")
+	if s := a.screen(); !strings.Contains(s, `mkdir text="b"`) {
+		t.Fatalf("a second click did not expand the quiet run:\n%s", s)
+	}
 	a.clickOn("turns 1–3")
 	a.clickOn("turns 1–3")
-	if s := a.screen(); !strings.Contains(s, "turn 2 · 1 call") {
-		t.Fatalf("a second click did not expand the run:\n%s", s)
+	if s := a.screen(); !strings.Contains(s, "▸ turns 1–3 · 3 calls") || strings.Contains(s, "text=") {
+		t.Fatalf("a second click did not fold the block:\n%s", s)
 	}
 }
 
-func TestOneStopForACollapsedRun(t *testing.T) {
+func TestACollapsedQuietRunIsOneStop(t *testing.T) {
 	a := quietApp(t)
-	// answer, its header, the run, the user's prompt: four stops, none
-	// of the turns between.
-	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
+	// answer, its header, the quiet run, the block's header, the user's
+	// prompt: five stops, none for the calls or the turns between.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
 	if l := lineWith(a.screen(), "user (unclaimed)"); !strings.Contains(l, "▶") {
-		t.Errorf("the fourth stop up is not the prompt:\n%s", a.screen())
+		t.Errorf("the fifth stop up is not the prompt:\n%s", a.screen())
 	}
 }
 
-func TestCopyingACollapsedRunCopiesItsLine(t *testing.T) {
+func TestCopyingACollapsedQuietRunCopiesItsLine(t *testing.T) {
 	a := quietApp(t)
-	a.drag("turns 1–3", 0, 60)
+	a.drag("ran 2 mkdir", 0, 60)
 	a.key("ctrl+c")
 	got := a.copied()
-	if len(got) != 1 || !strings.Contains(got[0], "turns 1–3 · ran 2 mkdir, 1 touch") || strings.Contains(got[0], "text=") {
+	if len(got) != 1 || !strings.Contains(got[0], "ran 2 mkdir, 1 touch") || strings.Contains(got[0], "text=") {
 		t.Errorf("copied %q", got)
 	}
 }
 
-func TestAOneCallTurnIsAHeaderAndASummary(t *testing.T) {
+func TestATurnWithAMessageKeepsItsOwnHeader(t *testing.T) {
 	cfg := cfgWith(
 		twice(say(nil, nil, "starting"), callTool("call_1", "mkdir", `{"text":"a"}`)),
 		callTool("call_2", "touch", `{"text":"b"}`),
@@ -151,15 +167,15 @@ func TestAOneCallTurnIsAHeaderAndASummary(t *testing.T) {
 	a.resize(110, 50)
 	a.submit("go")
 	s := settled(a, "all done")
-	// The turn with a message is not in a run, even with one quiet call;
-	// the two quiet turns after it are.
-	for _, want := range []string{"turn 1 · 1 call → 1 output", "starting", "○ ran 1 mkdir ", "turns 2–3 · ran 1 touch, 1 mkdir"} {
+	// The turn with a message is not in a block, even with one quiet call;
+	// the two turns of work after it are.
+	for _, want := range []string{"turn 1 · 1 call → 1 output", "starting", "○ ran 1 mkdir ", "turns 2–3 · 2 calls", "○ ran 1 touch, 1 mkdir "} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q:\n%s", want, s)
 		}
 	}
 	if strings.Contains(s, "turn 2 ·") {
-		t.Errorf("turn 2 has a header inside the run:\n%s", s)
+		t.Errorf("turn 2 has a header inside the block:\n%s", s)
 	}
 }
 
@@ -195,7 +211,7 @@ func TestARunningQuietCallIsNeverHidden(t *testing.T) {
 }
 
 // outputApp is an app whose model calls upper twice, in two responses,
-// and answers: three turns with outputs, so no run.
+// and answers: two turns of work, each call a loud row, and an answer.
 func outputApp(t *testing.T, g *gates) *app {
 	t.Helper()
 	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), callTool("call_2", "upper", `{"text":"def"}`), say(nil, nil, "all done"))
@@ -206,16 +222,44 @@ func outputApp(t *testing.T, g *gates) *app {
 	return a
 }
 
-func TestEveryResponseHasAHeader(t *testing.T) {
+// Every response is under a header: its own, or its block's, whose rows
+// are a list with no blank line between two calls of one line each.
+func TestEveryResponseIsUnderAHeader(t *testing.T) {
 	a := outputApp(t, nil)
 	s := settled(a, "all done")
-	for _, want := range []string{"turn 1 · 1 call → 1 output", "turn 2 · 1 call → 1 output", "turn 3 · answer"} {
+	for _, want := range []string{"turns 1–2 · 2 calls", `upper text="abc"`, `upper text="def"`, "turn 3 · answer"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q:\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "turn 0") {
-		t.Errorf("the prompt has a header:\n%s", s)
+	if strings.Contains(s, "turn 0") || strings.Contains(s, "turn 1 ·") || strings.Contains(s, "turn 2 ·") {
+		t.Errorf("the prompt has a header, or a turn inside the block has:\n%s", s)
+	}
+	ls := strings.Split(s, "\n")
+	for i, l := range ls {
+		if strings.Contains(l, `upper text="abc"`) {
+			if !strings.Contains(ls[i-1], "turns 1–2") || !strings.Contains(ls[i+1], `upper text="def"`) {
+				t.Errorf("the block is not its header and its calls, one under another:\n%s", s)
+			}
+		}
+	}
+}
+
+// A lone turn of work keeps its own header, with its outputs counted,
+// and folds to it.
+func TestALoneTurnOfWorkKeepsItsHeaderAndFolds(t *testing.T) {
+	cfg := cfgWith(callTool("call_1", "upper", `{"text":"abc"}`), say(nil, nil, "all done"))
+	cfg.Tools = []agenttool.Tool{upperTool(nil)}
+	a := newApp(t, cfg)
+	a.resize(110, 50)
+	a.submit("go")
+	if s := settled(a, "all done"); !strings.Contains(s, "turn 1 · 1 call → 1 output") {
+		t.Fatalf("no header of the turn's own:\n%s", s)
+	}
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the call, its header
+	a.key("ctrl+o")
+	if s := a.screen(); !strings.Contains(s, "▸ turn 1 · 1 call → 1 output (ctrl+o to expand)") || strings.Contains(s, `upper text="abc"`) {
+		t.Errorf("turn 1 is not folded to its header:\n%s", s)
 	}
 }
 
@@ -233,26 +277,27 @@ func TestAFailedCallIsCountedInItsHeader(t *testing.T) {
 	}
 }
 
-func TestFoldingATurnToItsHeader(t *testing.T) {
+func TestFoldingABlockToItsHeader(t *testing.T) {
 	a := outputApp(t, nil)
 	settled(a, "all done")
-	// Stops from the end: answer, its header, call 2, its header.
-	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
-	if l := lineWith(a.screen(), "turn 2 ·"); !strings.Contains(l, "▶") {
-		t.Fatalf("the cursor is not on turn 2's header:\n%s", a.screen())
+	// Stops from the end: answer, its header, call 2, call 1, the block's
+	// header.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p")
+	if l := lineWith(a.screen(), "turns 1–2"); !strings.Contains(l, "▶") {
+		t.Fatalf("the cursor is not on the block's header:\n%s", a.screen())
 	}
 	a.key("ctrl+o")
 	s := a.screen()
-	if !strings.Contains(s, "▸ turn 2 · 1 call → 1 output (ctrl+o to expand)") || strings.Contains(s, `upper text="def"`) {
-		t.Fatalf("turn 2 is not folded to its header:\n%s", s)
+	if !strings.Contains(s, "▸ turns 1–2 · 2 calls (ctrl+o to expand)") || strings.Contains(s, `upper text="abc"`) || strings.Contains(s, `upper text="def"`) {
+		t.Fatalf("the block is not folded to its header:\n%s", s)
 	}
-	if !strings.Contains(s, `upper text="abc"`) || !strings.Contains(s, "all done") {
-		t.Errorf("the other turns are folded too:\n%s", s)
+	if !strings.Contains(s, "all done") {
+		t.Errorf("the answer's turn is folded too:\n%s", s)
 	}
-	// Folded, the turn is one stop: up goes past it to the call before.
+	// Folded, the block is one stop: up goes past it to the prompt.
 	a.key("ctrl+p")
-	if l := lineWith(a.screen(), `upper text="abc"`); !strings.Contains(l, "▶") {
-		t.Errorf("the cursor did not step over the folded turn:\n%s", a.screen())
+	if l := lineWith(a.screen(), "user (unclaimed)"); !strings.Contains(l, "▶") {
+		t.Errorf("the cursor did not step over the folded block:\n%s", a.screen())
 	}
 	a.key("ctrl+n")
 	a.key("ctrl+o")
@@ -260,19 +305,19 @@ func TestFoldingATurnToItsHeader(t *testing.T) {
 		t.Errorf("not unfolded:\n%s", s)
 	}
 	// The header is selected, so a click on it folds it too.
-	a.clickOn("turn 2 ·")
-	if s := a.screen(); !strings.Contains(s, "▸ turn 2") {
+	a.clickOn("turns 1–2")
+	if s := a.screen(); !strings.Contains(s, "▸ turns 1–2") {
 		t.Errorf("a click did not fold:\n%s", s)
 	}
 }
 
-func TestACopiedFoldedTurnIsItsHeader(t *testing.T) {
+func TestACopiedFoldedBlockIsItsHeader(t *testing.T) {
 	a := outputApp(t, nil)
 	settled(a, "all done")
-	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+o")
-	a.drag("▸ turn 2", 0, 60)
+	a.press("ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+p", "ctrl+o")
+	a.drag("▸ turns 1–2", 0, 60)
 	a.key("ctrl+c")
-	if got := a.copied(); len(got) != 1 || !strings.Contains(got[0], "turn 2 · 1 call → 1 output") || strings.Contains(got[0], "def") {
+	if got := a.copied(); len(got) != 1 || !strings.Contains(got[0], "turns 1–2 · 2 calls") || strings.Contains(got[0], "def") {
 		t.Errorf("copied %q", got)
 	}
 }
@@ -297,7 +342,7 @@ func TestATurnWithARunningCallIsNeverFolded(t *testing.T) {
 }
 
 // covered is the turn numbers a screen accounts for: a header names one,
-// a run's line names a range.
+// a block's header names a range.
 func covered(screen string) map[int]bool {
 	got := map[int]bool{}
 	for _, m := range regexp.MustCompile(`turn (\d+) ·`).FindAllStringSubmatch(screen, -1) {
@@ -314,9 +359,10 @@ func covered(screen string) map[int]bool {
 	return got
 }
 
-// A quiet chain across turns, a turn of two quiet calls, a call with
-// output, a failed call and an answer: no turn number goes unexplained
-// however the lines are folded and expanded.
+// A quiet chain across turns, a call with output, a turn of two quiet
+// calls, a failed call and an answer: the six turns of work are one
+// block, and no turn number goes unexplained however the lines are
+// folded and expanded.
 func TestNoTurnNumberIsMissingFromTheScreen(t *testing.T) {
 	cfg := cfgWith(
 		callTool("c1", "mkdir", `{"text":"a"}`),
@@ -344,23 +390,26 @@ func TestNoTurnNumberIsMissingFromTheScreen(t *testing.T) {
 		}
 	}
 	check("collapsed")
-	if s := a.screen(); !strings.Contains(s, "turns 1–3 · ran 2 mkdir, 1 touch") || !strings.Contains(s, "turn 5 · 2 calls → 2 outputs") || !strings.Contains(s, "ran 1 mkdir, 1 touch") {
-		t.Errorf("the lines are not as expected:\n%s", s)
+	s := a.screen()
+	for _, want := range []string{"turns 1–6 · 7 calls · 1 failed", "ran 2 mkdir, 1 touch", `upper text="abc"`, "ran 1 mkdir, 1 touch", `boom text="f"`, "turn 7 · answer"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q:\n%s", want, s)
+		}
 	}
-	// Fold turn 4, then expand the run, then the summaries.
-	a.clickOn("turn 4 ·")
-	a.clickOn("turn 4 ·")
-	check("turn 4 folded")
-	a.clickOn("turns 1–3")
-	a.clickOn("turns 1–3")
-	check("run expanded")
-	for _, g := range []string{"ran 1 mkdir, 1 touch", "ran 1 touch"} {
+	// Expand the summaries, then fold the block.
+	for _, g := range []string{"ran 2 mkdir, 1 touch", "ran 1 mkdir, 1 touch"} {
 		a.clickOn(g)
 		a.clickOn(g)
 	}
 	check("summaries expanded")
 	if s := a.screen(); !strings.Contains(s, `touch text="c"`) || !strings.Contains(s, `touch text="e"`) {
 		t.Errorf("the summaries did not expand:\n%s", s)
+	}
+	a.clickOn("turns 1–6")
+	a.clickOn("turns 1–6")
+	check("block folded")
+	if s := a.screen(); !strings.Contains(s, "▸ turns 1–6 · 7 calls · 1 failed") || strings.Contains(s, "text=") {
+		t.Errorf("the block did not fold:\n%s", s)
 	}
 }
 
@@ -392,7 +441,7 @@ func (panics) Summarize([]view.Call) (toolview.Line, bool) { panic("summarize") 
 func TestARunOfOneToolTakesItsSummarizer(t *testing.T) {
 	a := quietAppOf(t, "mkdir", tui.WithToolSummarizers(toolview.Summarizers{"mkdir": dirs{}}))
 	s := a.screen()
-	if !strings.Contains(s, "turns 1–3 · made a b c") || strings.Contains(s, "ran 3 mkdir") {
+	if !strings.Contains(s, "turns 1–3 · 3 calls") || !strings.Contains(s, "○ made a b c") || strings.Contains(s, "ran 3 mkdir") {
 		t.Errorf("no summarizer line:\n%s", s)
 	}
 }
@@ -407,7 +456,7 @@ func TestAMixedRunHasTheClientsLine(t *testing.T) {
 func TestADecliningOrPanickingSummarizerFallsBack(t *testing.T) {
 	for name, sum := range map[string]toolview.Summarizer{"declines": declines{}, "panics": panics{}} {
 		a := quietAppOf(t, "mkdir", tui.WithToolSummarizers(toolview.Summarizers{"mkdir": sum}))
-		if s := a.screen(); !strings.Contains(s, "turns 1–3 · ran 3 mkdir") || strings.Contains(s, "not drawn") {
+		if s := a.screen(); !strings.Contains(s, "○ ran 3 mkdir") || strings.Contains(s, "not drawn") {
 			t.Errorf("%s: no fallback line:\n%s", name, s)
 		}
 	}
@@ -430,21 +479,16 @@ func TestASummaryCountsTheLinesItFolded(t *testing.T) {
 	a.resize(110, 50)
 	a.submit("go")
 	s := settled(a, "all done")
-	if !strings.Contains(s, "turns 1–2 · ran 1 ls, 1 status · 3 lines out") || strings.Contains(s, "a.txt") {
-		t.Fatalf("no run line with the folded lines:\n%s", s)
+	if !strings.Contains(s, "turns 1–2 · 2 calls") || !strings.Contains(s, "○ ran 1 ls, 1 status · 3 lines out") || strings.Contains(s, "a.txt") {
+		t.Fatalf("no summary with the folded lines:\n%s", s)
 	}
-	// Expanded, a turn's summary says its own, and expanding that shows
-	// the call as a row, its output behind the row's own hint.
-	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the run
-	a.key("ctrl+o")
-	a.press("ctrl+n", "ctrl+n") // turn 1's header, its summary
-	if s := a.screen(); !strings.Contains(s, "ran 1 ls · 2 lines out") {
-		t.Fatalf("no summary under turn 1:\n%s", s)
-	}
+	// Expanded, the summary shows each call as a row, its output behind
+	// the row's own hint, on the row's line.
+	a.press("ctrl+p", "ctrl+p", "ctrl+p") // the answer, its header, the summary
 	a.key("ctrl+o")
 	s = a.screen()
-	if !strings.Contains(s, `ls text="a"`) || !strings.Contains(s, "2 lines (ctrl+o)") {
-		t.Errorf("the call is not a row with its output hint:\n%s", s)
+	if !strings.Contains(s, `ls text="a"  · 2 lines (ctrl+o)`) || !strings.Contains(s, `status text="b"  · 1 line (ctrl+o)`) {
+		t.Errorf("the calls are not rows with their output hints:\n%s", s)
 	}
 	a.key("ctrl+n") // the call's row; its output is behind ctrl+o as ever
 	a.key("ctrl+o")

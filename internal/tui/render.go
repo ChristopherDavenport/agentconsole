@@ -108,17 +108,22 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 	}
 	var out strings.Builder
 	at := 0
-	// gap is what goes before the next block: a blank line between
-	// blocks, but none between a turn's header and what is under it.
-	gap := ""
+	// What was drawn last: nothing yet, a header, or a block, with its
+	// height, the header it is under and whether it is a line of work (a
+	// call's row or a quiet run's line).
+	var prev struct {
+		any, header, work bool
+		height, group     int
+	}
 	// add lays one drawn block out: wrapped, with the gutter's marker
 	// when it is the selected one, and a span for entry if it has one.
-	add := func(b, entry string, headerOf bool) {
-		if headerOf && gap == "\n" {
-			// A header with nothing under it (a folded turn) is followed by
-			// a header: a blank line between them, as between any blocks.
-			gap, at = "\n\n", at+1
-		}
+	// A blank line goes between blocks, but none between a header and
+	// what is under it, nor between two one-line lines of work under one
+	// header: a call that draws a body (a diff, an excerpt) stands apart,
+	// and a list of calls that only say what ran reads as a list.
+	add := func(b, entry string, it item) {
+		header := it.kind == itemTurn
+		work := it.kind == itemQuiet || (it.kind == itemRow && m.Rows[it.row].Call != nil)
 		b = wrap(b, w)
 		if sel != "" {
 			mark := "  "
@@ -136,28 +141,35 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 			b = strings.Join(ls, "\n")
 		}
 		h := lipgloss.Height(b)
+		gap := "\n\n"
+		switch {
+		case !prev.any:
+			gap = ""
+		case prev.header && !header:
+			gap = "\n"
+		case work && prev.work && h == 1 && prev.height == 1 && it.group != 0 && it.group == prev.group:
+			gap = "\n"
+		}
+		if gap == "\n\n" {
+			at++
+		}
 		if entry != "" {
 			spans = append(spans, rowSpan{entry: entry, start: at, height: h})
 		}
 		out.WriteString(gap + b)
-		if headerOf {
-			gap, at = "\n", at+h
-		} else {
-			gap, at = "\n\n", at+h+1
-		}
+		at += h
+		prev.any, prev.header, prev.work, prev.height, prev.group = true, header, work, h, it.group
 	}
 	for _, it := range layout(m, gp) {
 		switch it.kind {
 		case itemTurn:
-			add(turnLine(it.turn, it.ti, w), it.stop, true)
+			add(turnLine(it.turn, it.last, it.ti, w), it.stop, it)
 		case itemQuiet:
-			add(quietLine(m, it.quiet, it.open, gp.sums, w), it.stop, false)
-		case itemRun:
-			add(turnsLine(m, it.block, it.open, gp.sums, w), it.stop, false)
+			add(quietLine(m, it.quiet, it.open, gp.sums, w), it.stop, it)
 		default:
 			r := m.Rows[it.row]
 			if b := renderRow(r, o.flipped(flips[r.EntryID]), tools, spin, w, md, ask); b != "" {
-				add(b, it.stop, false)
+				add(b, it.stop, it)
 			}
 		}
 	}
@@ -166,7 +178,10 @@ func renderRows(m view.Model, o opts, flips map[string]opts, tools toolview.Rend
 		if sel != "" {
 			b = "  " + strings.ReplaceAll(b, "\n", "\n  ")
 		}
-		out.WriteString(gap + b)
+		if prev.any {
+			out.WriteString("\n\n")
+		}
+		out.WriteString(b)
 	}
 	md.sweep()
 	return out.String(), spans
@@ -178,11 +193,12 @@ type outlineState struct {
 	// quiet holds the quiet runs the person expanded, by their first
 	// call's entry.
 	quiet map[string]bool
-	// runs holds the runs of turns the person expanded, by their first
-	// turn's response ID.
-	runs map[string]bool
-	// folded are the responses whose turns the person folded, by ID.
+	// folded are the responses whose turns the person folded, by ID: a
+	// run of turns by its first turn's.
 	folded map[string]bool
+	// loud reports the calls that are never in a quiet run: those of the
+	// renderers that are [toolview.Loud].
+	loud func(view.Call) bool
 	// all expands every line and folds none, for asking which entries
 	// are in the line.
 	all bool
@@ -196,14 +212,38 @@ func quietLine(m view.Model, q *view.QuietRun, open bool, sums toolview.Summariz
 	return foldLine(summaryOf(m, q.Calls, q.Tools, sums), open, width)
 }
 
-// turnsLine is a run of turns' line: the turns it covers and what ran in
-// them.
-func turnsLine(m view.Model, b view.Block, open bool, sums toolview.Summarizers, width int) string {
-	return foldLine(fmt.Sprintf("turns %d–%d · ", b.FirstTurn, b.LastTurn)+summaryOf(m, b.Calls, b.Tools, sums), open, width)
+// loudOf reports the calls whose tool's renderer is [toolview.Loud], or
+// nil when no renderer is.
+func loudOf(tools toolview.Renderers) func(view.Call) bool {
+	names := map[string]bool{}
+	for name, r := range tools {
+		if isLoud(r) {
+			names[name] = true
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return func(c view.Call) bool { return names[c.Name] }
 }
 
-// foldLine is the line of a quiet run or a run of turns: one line, cut
-// to width, so a long summary never wraps.
+// isLoud reports whether r keeps its tool's calls out of quiet runs. A
+// renderer whose Loud panics does not.
+func isLoud(r toolview.Renderer) (loud bool) {
+	l, ok := r.(toolview.Loud)
+	if !ok {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			loud = false
+		}
+	}()
+	return l.Loud()
+}
+
+// foldLine is a quiet run's line: one line, cut to width, so a long
+// summary never wraps.
 func foldLine(text string, open bool, width int) string {
 	text = strings.ReplaceAll(text, "\n", " ")
 	hint, mark := " (ctrl+o to expand)", toolStyle.Render("○ ")
@@ -540,6 +580,19 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		name = style.Render(dotCh)
 	}
 	body, hasBody := toolBody(r, raw, o.output)
+	// Collapsed, what an ended call says in one dim line (a count, a
+	// note) goes on the call's own line, so a call that only reports how
+	// much it produced is one line.
+	trail := ""
+	if !o.output && c.State == view.CallEnded {
+		switch {
+		case hasBody && len(body) == 1 && allDim(body[0]):
+			trail, body = "  "+drawLine(body[0]), nil
+		case !hasBody && c.Output != "":
+			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
+			trail = "  " + dimStyle.Render(countHint(n))
+		}
+	}
 	var b strings.Builder
 	if o.output {
 		// Expanded: the raw arguments on their own line, and the whole
@@ -577,7 +630,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		if c.State == view.CallEnded && !c.Committed {
 			line += dimStyle.Render(" (live)")
 		}
-		b.WriteString(pad + line + tag)
+		b.WriteString(pad + line + tag + trail)
 	}
 	for _, l := range body {
 		b.WriteString("\n" + pad + "  " + drawLine(l))
@@ -628,9 +681,6 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 				out += dimStyle.Render(" (live)")
 			}
 			b.WriteString("\n" + pad + "  ↳ " + indent(clip(out, o.output), pad+"    "))
-		case c.Output != "":
-			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
-			b.WriteString("\n" + pad + "  " + dimStyle.Render(countHint(n)))
 		}
 	}
 	if o.output {
@@ -653,6 +703,21 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 		b.WriteString("\n" + renderCall(ch, o, tools, "", depth+1, spin, ask))
 	}
 	return b.String()
+}
+
+// allDim reports whether every span of a line that has text is dim.
+func allDim(l toolview.Line) bool {
+	any := false
+	for _, s := range l {
+		if strings.TrimSpace(s.Text) == "" {
+			continue
+		}
+		if s.Role != toolview.Dim {
+			return false
+		}
+		any = true
+	}
+	return any
 }
 
 // isBare reports whether r's head stands in for its tool's name. A
