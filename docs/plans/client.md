@@ -1739,6 +1739,19 @@ agentconsole#45. Implementation, no RFC rule.
   not reopen the list on itself; typing on (after a directory) asks.
   No list while a refusal's reason or a note is typed, on a read-only
   view or another screen. With no list open, Tab cycles the pane.
+- **The empty word after a space is asked about.** A host with
+  commands that take subcommands lists them before any is typed
+  (`/mcp ` shows `add` and `remove`), so a command that is nothing
+  without one does not leave the user at a blank. `Word` is then empty
+  and `Before` ends in the space or tab. An empty input and the start
+  of a line are not asked about: nothing there says what would follow.
+  A completion whose `Text` ends in a space has started that next word,
+  so Tab asks about it at once rather than leaving the list closed as
+  it does after any other completion. What was last asked about is
+  kept as `Before`, not the word: the empty word is the same text
+  wherever it is. Until v0.0.24 a host was never asked about an empty
+  word; one that completes only words it knows (a slash, an @) returns
+  nothing for it as before.
 - **`@path` is text.** The line is sent as typed. What an @path sends
   (the path, or the file's content) is the host's, in its submit
   function; the client reads no file.

@@ -827,8 +827,10 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case screenKeys:
 		return m.keysKey(msg)
 	}
-	if m.frozen == nil && m.completionKey(msg) {
-		return m, nil
+	if m.frozen == nil {
+		if cmd, ok := m.completionKey(msg); ok {
+			return m, cmd
+		}
 	}
 	switch msg.String() {
 	case "tab":
