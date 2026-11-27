@@ -124,8 +124,71 @@ func TestTheInputCompletesFromTheHost(t *testing.T) {
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	for _, c := range host.asked {
-		if c.Word == "" {
-			t.Errorf("the host was asked about no word: %+v", c)
+		if c.Word == "" && !strings.HasSuffix(c.Before, " ") {
+			t.Errorf("the host was asked about no word, not after a space: %+v", c)
+		}
+	}
+}
+
+// TestASpaceAsksAboutWhatFollows: the word after a space is asked about
+// while it is still empty, so the host lists a command's subcommands
+// before any is typed: after a completion that ends in a space, and
+// after a space typed. The empty input is not asked about.
+func TestASpaceAsksAboutWhatFollows(t *testing.T) {
+	src := &handSource{}
+	ctl := &intents{}
+	var mu sync.Mutex
+	var asked []tui.Completing
+	host := func(_ context.Context, c tui.Completing) []tui.Completion {
+		mu.Lock()
+		asked = append(asked, c)
+		mu.Unlock()
+		var out []tui.Completion
+		switch {
+		case c.Before == c.Word && strings.HasPrefix("/mcp", c.Word) && c.Word != "":
+			out = append(out, tui.Completion{Text: "/mcp ", Help: "the servers"})
+		case strings.TrimSuffix(c.Before, c.Word) == "/mcp ":
+			for _, sub := range []tui.Completion{{Text: "add ", Help: "start a server"}, {Text: "remove ", Help: "stop a server"}} {
+				if strings.HasPrefix(sub.Text, c.Word) {
+					out = append(out, sub)
+				}
+			}
+		}
+		return out
+	}
+	a := newViewApp(t, src, ctl.act, tui.WithCompletion(host))
+
+	a.typeText("/m")
+	a.waitFor("the command", has("/mcp", "the servers"))
+	a.key("tab")
+	// The completion ended in a space: what follows is listed at once.
+	a.waitFor("the subcommands", both(has("start a server", "stop a server"), lacks("the servers")))
+	a.key("down")
+	a.key("tab")
+	s := a.waitFor("the subcommand completed", lacks("stop a server"))
+	if in := lineWith(s, "> "); !strings.Contains(in, "/mcp remove") {
+		t.Fatalf("the input is %q, want /mcp remove", in)
+	}
+
+	// A space typed asks too, and a letter narrows the list.
+	for range len("/mcp remove ") {
+		a.key("backspace")
+	}
+	a.typeText("/mcp ")
+	a.waitFor("the subcommands again", has("start a server", "stop a server"))
+	a.typeText("a")
+	a.waitFor("the list narrowed", both(has("start a server"), lacks("stop a server")))
+	// Esc closes the list for an empty word as for any other.
+	a.key("backspace")
+	a.waitFor("the subcommands once more", has("stop a server"))
+	a.key("esc")
+	a.waitFor("the list closed", lacks("start a server"))
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, c := range asked {
+		if c.Before == "" {
+			t.Errorf("the host was asked about an empty input: %+v", c)
 		}
 	}
 }
@@ -152,4 +215,9 @@ func TestCompletionHelpLinesUpByWidth(t *testing.T) {
 	if w, n := col("wide help"), col("narrow help"); w != n {
 		t.Errorf("the help starts at column %d beside /日本 and %d beside /abc:\n%s", w, n, s)
 	}
+}
+
+// both is a and b of the screen.
+func both(a, b func(string) bool) func(string) bool {
+	return func(s string) bool { return a(s) && b(s) }
 }

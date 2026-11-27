@@ -5,6 +5,19 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Changed
+
+- `console.WithCompletion`: the host is asked about the empty word
+  after a space or a tab that follows a word, so it can list what may
+  follow (a command's subcommands) before any of it is typed.
+  `Completing.Word` is then empty and `Before` ends in the space. A
+  completion whose `Text` ends in a space asks about the next word at
+  once. An empty input and the start of a line are still not asked
+  about. A host that returns nothing for a word it does not know needs
+  no change.
+
 ## v0.0.24 - 2026-11-27
 
 ### Added

@@ -158,7 +158,9 @@ func WithGrantOffer(fn func(ctx context.Context, p view.Permission) client.Grant
 // Completing is the input as the host is asked to complete it: Before,
 // what the input holds up to the cursor, Word its end back to the last
 // space or line break, which a completion replaces, and Running, whether
-// a run goes.
+// a run goes. Word is empty just after a space that follows a word:
+// the host may list what can follow (a command's subcommands) before
+// any of it is typed.
 type Completing struct {
 	Before  string
 	Word    string
@@ -178,7 +180,9 @@ type Completion struct {
 // word that ends at the cursor changes, fn is asked for it, off the
 // program's goroutine, under a context that ends after a second; an
 // answer for a word since changed is dropped. fn is called on every
-// keystroke that changes the word, prose included, with no debounce, so
+// keystroke that changes the word, prose included, and for the empty
+// word a space starts after another (never for an empty input or the
+// start of a line), with no debounce, so
 // several calls may be in flight at once: it must be safe for
 // concurrent use, and should return at once for a word it does not
 // complete. fn decides what a word is
@@ -186,7 +190,8 @@ type Completion struct {
 // one it does not complete. A list with anything in it opens over the
 // input: Up and Down choose, Tab puts the chosen Text in place of the
 // word, Esc closes it until the word changes; with no list open Tab
-// cycles the pane. What is completed is text in the input: an @path is
+// cycles the pane. A Text that ends in a space starts the next word,
+// and fn is asked about that one at once. What is completed is text in the input: an @path is
 // sent as typed, for the host's submit function to read as it chooses,
 // and the client reads no file.
 func WithCompletion(fn func(ctx context.Context, c Completing) []Completion) Option {

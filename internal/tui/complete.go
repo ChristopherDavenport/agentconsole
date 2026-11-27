@@ -7,9 +7,12 @@ package tui
 // no meaning of its own. As the word that ends at the input's cursor
 // changes, the host is asked for that word, off the program's goroutine
 // and under a short timeout; an answer to an older word is dropped. A
-// list with anything in it opens over the input: Up and Down choose,
-// Tab puts the chosen completion in place of the word, Esc closes the
-// list until the word changes. With no list open, Tab cycles the pane as
+// space after a word starts an empty word, and the host is asked about
+// that too, so it can list what may follow (a command's subcommands)
+// before any of it is typed; an empty input, or the start of a line, is
+// not asked about. A list with anything in it opens over the input: Up
+// and Down choose, Tab puts the chosen completion in place of the word,
+// Esc closes the list until the word changes. With no list open, Tab cycles the pane as
 // before. What is put in the input is text: the client sends what is
 // typed, an @path included, and reads no file.
 
@@ -29,6 +32,7 @@ import (
 type Completing struct {
 	// Before is the input up to the cursor, and Word its end: the text
 	// back to the last space or line break, which a completion replaces.
+	// Word is empty just after a space that follows a word.
 	Before string
 	Word   string
 	// Running is whether a run goes.
@@ -48,14 +52,16 @@ const completeTimeout = time.Second
 // completeRows is the most completions shown at once.
 const completeRows = 8
 
-// completer is the completion state: the host's function, the word last
-// asked about and the request's number, and the list open for it.
+// completer is the completion state: the host's function, the input up
+// to the cursor when it was last asked (which says the word and where it
+// is, so the same word elsewhere is another) and the request's number,
+// and the list open for it.
 type completer struct {
-	fn    func(context.Context, Completing) []Completion
-	word  string
-	seq   int
-	items []Completion
-	at    int
+	fn     func(context.Context, Completing) []Completion
+	before string
+	seq    int
+	items  []Completion
+	at     int
 }
 
 // completedMsg is the host's answer for request seq.
@@ -68,7 +74,8 @@ type completedMsg struct {
 // cursor. fn runs off the program's goroutine, under a context that ends
 // after completeTimeout, and returns nothing for a word it does not
 // complete. It is called each time the word changes, on every keystroke
-// that changes it, prose included, with no debounce, so calls may be in
+// that changes it, prose included, the empty word after a space too,
+// with no debounce, so calls may be in
 // flight at once: fn must be safe for concurrent use, and should return
 // promptly for a word it does not complete.
 func WithCompletion(fn func(context.Context, Completing) []Completion) Option {
@@ -94,21 +101,39 @@ func (m *Model) completing() (Completing, bool) {
 	return Completing{Before: before, Word: string(line[start:col]), Running: m.running()}, true
 }
 
+// asksHost reports whether the host is asked about c's word: any word, and
+// the empty one just after a space or a tab that follows a word on the
+// cursor's line.
+func asksHost(c Completing) bool {
+	if c.Word != "" {
+		return true
+	}
+	return strings.HasSuffix(c.Before, " ") || strings.HasSuffix(c.Before, "\t")
+}
+
 // askCompletion asks the host about the word at the cursor when it is not
 // the one last asked about, and closes the list when there is none.
 func (m *Model) askCompletion() tea.Cmd {
 	c, ok := m.completing()
-	if !ok || c.Word == "" {
-		m.closeCompletion(c.Word)
+	if !ok || !asksHost(c) {
+		m.closeCompletion(c.Before)
 		return nil
 	}
-	if c.Word == m.comp.word {
+	if c.Before == m.comp.before {
 		return nil
 	}
-	// The list was for another word: it goes until the host answers for
-	// this one.
-	m.comp.word, m.comp.items, m.comp.at = c.Word, nil, 0
+	return m.request(c)
+}
+
+// request asks the host about c. The list was for another word: it goes
+// until the host answers for this one.
+func (m *Model) request(c Completing) tea.Cmd {
+	open := len(m.comp.items) > 0
+	m.comp.before, m.comp.items, m.comp.at = c.Before, nil, 0
 	m.comp.seq++
+	if open {
+		m.relayout()
+	}
 	seq, fn, ctx := m.comp.seq, m.comp.fn, m.ctx
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, completeTimeout)
@@ -127,11 +152,11 @@ func (m *Model) completed(msg completedMsg) {
 	m.relayout()
 }
 
-// closeCompletion closes the list and makes word the one last asked
+// closeCompletion closes the list and makes before the input last asked
 // about, so the list stays closed until the word changes.
-func (m *Model) closeCompletion(word string) {
+func (m *Model) closeCompletion(before string) {
 	open := len(m.comp.items) > 0
-	m.comp.word, m.comp.items, m.comp.at = word, nil, 0
+	m.comp.before, m.comp.items, m.comp.at = before, nil, 0
 	m.comp.seq++
 	if open {
 		m.relayout()
@@ -146,43 +171,51 @@ func (m *Model) listOpen() bool {
 		return false
 	}
 	c, ok := m.completing()
-	return ok && c.Word == m.comp.word
+	return ok && c.Before == m.comp.before
 }
 
 // completionKey handles a key while the list is open: Tab takes the
 // chosen completion, Up and Down choose, Esc closes the list. It reports
-// whether it took the key.
-func (m *Model) completionKey(msg tea.KeyPressMsg) bool {
+// whether it took the key, with what the key started: the host asked
+// about what follows a completion.
+func (m *Model) completionKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !m.listOpen() {
-		return false
+		return nil, false
 	}
+	var cmd tea.Cmd
 	switch msg.String() {
 	case "tab":
-		m.accept(m.comp.items[m.comp.at])
+		cmd = m.accept(m.comp.items[m.comp.at])
 	case "up":
 		m.comp.at = (m.comp.at + len(m.comp.items) - 1) % len(m.comp.items)
 	case "down":
 		m.comp.at = (m.comp.at + 1) % len(m.comp.items)
 	case "esc":
-		m.closeCompletion(m.comp.word)
+		m.closeCompletion(m.comp.before)
 	default:
-		return false
+		return nil, false
 	}
 	m.relayout()
-	return true
+	return cmd, true
 }
 
 // accept puts c in place of the word at the cursor. The list closes and
 // stays closed for the completed word, so a word completed in full is
-// not offered again; typing on (after a directory, say) asks again.
-func (m *Model) accept(c Completion) {
+// not offered again; typing on (after a directory, say) asks again. A
+// completion that ends in a space has started the next word, and the
+// host is asked about that one: a command's subcommands follow it.
+func (m *Model) accept(c Completion) tea.Cmd {
 	cur, _ := m.completing()
 	for range []rune(cur.Word) {
 		m.in, _ = m.in.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	}
 	m.in.InsertString(noBidi(c.Text))
-	now, _ := m.completing()
-	m.closeCompletion(now.Word)
+	now, ok := m.completing()
+	if ok && now.Word == "" && asksHost(now) {
+		return m.request(now)
+	}
+	m.closeCompletion(now.Before)
+	return nil
 }
 
 // completionLines is the open list, over the input: at most completeRows
