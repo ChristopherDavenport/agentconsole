@@ -5,6 +5,17 @@ All user-visible changes to this library and binary. The format follows
 uses [Semantic Versioning](https://semver.org/); before v1.0.0 minor
 versions may break the API.
 
+## Unreleased
+
+### Added
+
+- `toolview.Span.Syntax` and `toolview.Code`: a renderer says a span is
+  code, by a file's name (`main.go`) or a language's (`go`), and the
+  conversation draws it in that language's colors, on a change's band
+  for an added or removed line. A span with no syntax, or one no lexer
+  knows, is drawn by its role as before; with 16 colors or none a
+  changed line stays green or red and is not highlighted.
+
 ## v0.0.23 - 2026-11-27
 
 ### Added

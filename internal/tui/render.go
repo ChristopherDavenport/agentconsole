@@ -591,7 +591,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 	if !o.output && c.State == view.CallEnded {
 		switch {
 		case hasBody && len(body) == 1 && allDim(body[0]):
-			trail, body = drawLine(body[0]), nil
+			trail, body = drawLineIn(body[0], tn), nil
 		case !hasBody && c.Output != "":
 			n := len(strings.Split(strings.TrimRight(c.Output, "\n"), "\n"))
 			trail = dimStyle.Render(countHint(n))
@@ -649,7 +649,7 @@ func renderCall(c view.Call, o opts, tools toolview.Renderers, tag string, depth
 			b.WriteString("\n" + pad + "  " + indent(band, pad+"  "))
 			continue
 		}
-		b.WriteString("\n" + pad + "  " + drawLine(l))
+		b.WriteString("\n" + pad + "  " + drawLineIn(l, tn))
 	}
 	switch c.State {
 	case view.CallDeferred:
@@ -788,10 +788,22 @@ func toolBody(r toolview.Renderer, c view.Call, expanded bool) (ls []toolview.Li
 // a span as a space. A span's text is cleaned (view.Clean): a renderer
 // draws the call's arguments and output, which the model and the tool
 // wrote.
-func drawLine(l toolview.Line) string {
+func drawLine(l toolview.Line) string { return drawLineIn(l, tone{}) }
+
+// drawLineIn is drawLine with the spans that are code (Span.Syntax) in
+// their language's colors, when tn highlights and knows the language. A
+// span a change adds or removes keeps its green or red here: this draws
+// it only where it has no band, and the color is then what says so.
+func drawLineIn(l toolview.Line, tn tone) string {
 	var b strings.Builder
 	for _, s := range l {
 		t := view.Clean(strings.ReplaceAll(s.Text, "\n", " "))
+		if s.Syntax != "" && s.Role != toolview.Added && s.Role != toolview.Removed {
+			if code, ok := tn.code.draw(view.CleanLine(s.Syntax), t, tn.dark, nil); ok {
+				b.WriteString(code)
+				continue
+			}
+		}
 		switch s.Role {
 		case toolview.Dim:
 			t = dimStyle.Render(t)
@@ -861,8 +873,19 @@ func bandLine(l toolview.Line, width int, tn tone) (string, bool) {
 	case role == toolview.Removed:
 		bg = removedLight
 	}
-	text := view.Clean(strings.ReplaceAll(l.String(), "\n", " "))
-	return lipgloss.NewStyle().Background(bg[at]).Width(max(width, 8)).Render(text), true
+	// The band is the background of every span and of the room after
+	// them; a span that is code has its language's colors over it.
+	on := lipgloss.NewStyle().Background(bg[at])
+	var b strings.Builder
+	for _, s := range l {
+		t := view.Clean(strings.ReplaceAll(s.Text, "\n", " "))
+		if code, ok := tn.code.draw(view.CleanLine(s.Syntax), t, tn.dark, bg[at]); ok {
+			b.WriteString(code)
+			continue
+		}
+		b.WriteString(on.Render(t))
+	}
+	return on.Width(max(width, 8)).Render(b.String()), true
 }
 
 // countHint is the collapsed hint of an output's size.

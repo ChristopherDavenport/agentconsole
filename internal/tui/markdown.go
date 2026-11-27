@@ -27,7 +27,9 @@ type markdown struct {
 	dark bool
 	// profile is the colors the terminal draws, as far as the program
 	// was told: all of them until it is.
-	profile   colorprofile.Profile
+	profile colorprofile.Profile
+	// code draws the code in a tool's lines (see highlighter).
+	code      *highlighter
 	renderers map[int]*glamour.TermRenderer
 	// cache is what the last layout rendered; used what this one has so
 	// far, which replaces it at the layout's end.
@@ -43,6 +45,7 @@ func newMarkdown() *markdown {
 	return &markdown{
 		dark:      true,
 		profile:   colorprofile.TrueColor,
+		code:      newHighlighter(),
 		renderers: map[int]*glamour.TermRenderer{},
 		cache:     map[mdKey]string{},
 		used:      map[mdKey]string{},
@@ -54,6 +57,8 @@ func newMarkdown() *markdown {
 type tone struct {
 	dark    bool
 	profile colorprofile.Profile
+	// code draws the spans that are code, nil to draw them by their role.
+	code *highlighter
 }
 
 // tone is the terminal's, as far as the program was told; a nil renderer
@@ -62,7 +67,7 @@ func (r *markdown) tone() tone {
 	if r == nil {
 		return tone{dark: true, profile: colorprofile.TrueColor}
 	}
-	return tone{dark: r.dark, profile: r.profile}
+	return tone{dark: r.dark, profile: r.profile, code: r.code}
 }
 
 // setDark says whether the terminal's background is dark, which picks
@@ -99,6 +104,7 @@ func (r *markdown) render(src string, width int) string {
 // sweep ends a layout: what it did not render is dropped.
 func (r *markdown) sweep() {
 	r.cache, r.used = r.used, map[mdKey]string{}
+	r.code.sweep()
 }
 
 // renderer is glamour's renderer for width. A resize asks for another
